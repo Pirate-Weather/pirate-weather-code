@@ -1072,13 +1072,13 @@ def build_hourly_objects(
         tmExtra: Extra time machine parameters.
         extraVars: Extra variables.
         version: API version.
-        display_hours: Hours (indices) whose response objects, text and icon are
-            built; None builds every hour. The SI objects are always built.
+        display_hours: Hours (indices) whose response objects, SI objects, text
+            and icon are built; None builds every hour.
 
     Returns:
-        Tuple containing hour lists and icon/text lists. hourList holds None for
-        hours outside ``display_hours``; the icon/text lists hold only the hours
-        that were built.
+        Tuple containing hour lists and icon/text lists. hourList and hourList_si
+        hold None for hours outside ``display_hours``; the icon/text lists hold
+        only the hours that were built.
     """
     hourList = []
     hourList_si = []
@@ -1102,6 +1102,14 @@ def build_hourly_objects(
         }
 
     for idx in range(len(hour_times)):
+        # The response objects, their text and icon are only built for the
+        # hours that are returned. The daily text reads the hourly matrix
+        # through HourColumns, so the SI object is only needed for those too.
+        if display_hours is not None and idx not in display_hours:
+            hourList.append(None)
+            hourList_si.append(None)
+            continue
+
         hour_time = hour_times[idx]
         si = si_rows[idx]
         disp = display_rows[idx]
@@ -1139,12 +1147,6 @@ def build_hourly_objects(
             "kIndex": si[DATA_HOURLY["k_index"]],
         }
         hourList_si.append(hourItem_si)
-
-        # The daily text needs every SI hour, but the response objects, their
-        # text and icon only for the hours that are returned.
-        if display_hours is not None and idx not in display_hours:
-            hourList.append(None)
-            continue
 
         if summaryText:
             hourText, hourIcon = calculate_text(hourItem_si, isDay, "hour", icon)

@@ -87,13 +87,26 @@ def _aggregate_stats(
     res_argmin = []
     res_precip = np.zeros(daily_days)
 
-    masks = [index_array == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
+    for mIDX in range(daily_days):
+        day_rows = np.flatnonzero(index_array == mIDX)
+        n_rows = day_rows.size
+        if n_rows > 0 and day_rows[-1] - day_rows[0] + 1 == n_rows:
+            # The hours of a day are a contiguous run, so a slice (a view)
+            # replaces the boolean-mask copy.
+            filtered_data = InterPhour[day_rows[0] : day_rows[-1] + 1]
+        else:
+            # Empty or non-contiguous selection: keep the original mask path
+            # (an empty day raises/warns exactly as before).
+            filtered_data = InterPhour[index_array == mIDX]
 
-        if calc_mean:
+        if calc_mean and calc_sum:
+            # np.mean is add.reduce / n, so reuse the sum instead of reducing twice.
+            day_sum = np.sum(filtered_data, axis=0)
+            res_sum.append(day_sum)
+            res_mean.append(np.true_divide(day_sum, filtered_data.shape[0]))
+        elif calc_mean:
             res_mean.append(np.mean(filtered_data, axis=0))
-        if calc_sum:
+        elif calc_sum:
             res_sum.append(np.sum(filtered_data, axis=0))
         if calc_max:
             res_max.append(np.max(filtered_data, axis=0))
@@ -465,6 +478,15 @@ def _build_display_data(
     )
 
 
+def _round_columns_by_decimals(arr, rounding_map):
+    """Round columns in place, one np.round call per distinct decimal count."""
+    cols_by_dec = {}
+    for idx_field, decimals in rounding_map.items():
+        cols_by_dec.setdefault(decimals, []).append(idx_field)
+    for decimals, cols in cols_by_dec.items():
+        arr[:, cols] = np.round(arr[:, cols], decimals)
+
+
 def _apply_rounding(
     daily_display_mean,
     daily_display_high,
@@ -519,42 +541,19 @@ def _apply_rounding(
         DATA_DAY["moon_phase"]: ROUNDING_RULES.get("moonPhase", 2),
     }
 
-    for idx_field, decimals in daily_mean_rounding_map.items():
-        if decimals == 0:
-            daily_display_mean[:, idx_field] = np.round(
-                daily_display_mean[:, idx_field]
-            )
-        else:
-            daily_display_mean[:, idx_field] = np.round(
-                daily_display_mean[:, idx_field], decimals
-            )
+    _round_columns_by_decimals(daily_display_mean, daily_mean_rounding_map)
 
     temp_dec = ROUNDING_RULES.get("temperature", 2)
     app_dec = ROUNDING_RULES.get("apparentTemperature", 2)
-    daily_display_high[:, DATA_DAY["temp"]] = np.round(
-        daily_display_high[:, DATA_DAY["temp"]], temp_dec
-    )
-    daily_display_low[:, DATA_DAY["temp"]] = np.round(
-        daily_display_low[:, DATA_DAY["temp"]], temp_dec
-    )
-    daily_display_min[:, DATA_DAY["temp"]] = np.round(
-        daily_display_min[:, DATA_DAY["temp"]], temp_dec
-    )
-    daily_display_max[:, DATA_DAY["temp"]] = np.round(
-        daily_display_max[:, DATA_DAY["temp"]], temp_dec
-    )
-    daily_display_high[:, DATA_DAY["apparent"]] = np.round(
-        daily_display_high[:, DATA_DAY["apparent"]], app_dec
-    )
-    daily_display_low[:, DATA_DAY["apparent"]] = np.round(
-        daily_display_low[:, DATA_DAY["apparent"]], app_dec
-    )
-    daily_display_min[:, DATA_DAY["apparent"]] = np.round(
-        daily_display_min[:, DATA_DAY["apparent"]], app_dec
-    )
-    daily_display_max[:, DATA_DAY["apparent"]] = np.round(
-        daily_display_max[:, DATA_DAY["apparent"]], app_dec
-    )
+    for temp_arr in (
+        daily_display_high,
+        daily_display_low,
+        daily_display_min,
+        daily_display_max,
+    ):
+        _round_columns_by_decimals(
+            temp_arr, {DATA_DAY["temp"]: temp_dec, DATA_DAY["apparent"]: app_dec}
+        )
     daily_display_max[:, DATA_DAY["k_index"]] = np.round(
         daily_display_max[:, DATA_DAY["k_index"]], 0
     )
@@ -568,6 +567,7 @@ def _apply_rounding(
         daily_display_min[:, DATA_DAY["vertical_velocity"]], 2
     )
 
+    max_cols_by_dec = {}
     for idx_field in (
         DATA_DAY["intensity"],
         DATA_DAY["rain_intensity"],
@@ -585,15 +585,15 @@ def _apply_rounding(
                 daily_display_max[:, idx_field]
             ).astype(int)
         else:
-            daily_display_max[:, idx_field] = np.round(
-                daily_display_max[:, idx_field], dec
-            )
+            max_cols_by_dec.setdefault(dec, []).append(idx_field)
+    for dec, cols in max_cols_by_dec.items():
+        daily_display_max[:, cols] = np.round(daily_display_max[:, cols], dec)
 
     accum_dec = ROUNDING_RULES.get("precipAccumulation", 2)
-    for idx_field in (DATA_DAY["rain"], DATA_DAY["snow"], DATA_DAY["ice"]):
-        daily_display_sum[:, idx_field] = np.round(
-            daily_display_sum[:, idx_field], accum_dec
-        )
+    daily_accum_cols = [DATA_DAY["rain"], DATA_DAY["snow"], DATA_DAY["ice"]]
+    daily_display_sum[:, daily_accum_cols] = np.round(
+        daily_display_sum[:, daily_accum_cols], accum_dec
+    )
 
     half_rounding_map = {
         DATA_HOURLY["dew"]: ROUNDING_RULES.get("dewPoint", 2),
@@ -624,36 +624,16 @@ def _apply_rounding(
         DATA_HOURLY["k_index"]: ROUNDING_RULES.get("kIndex", 0),
     }
 
-    def _apply_rounding_to(arr, rounding_map):
-        for idx_field, decimals in rounding_map.items():
-            if decimals == 0:
-                arr[:, idx_field] = np.round(arr[:, idx_field])
-            else:
-                arr[:, idx_field] = np.round(arr[:, idx_field], decimals)
+    _round_columns_by_decimals(half_day_display_mean, half_rounding_map)
+    _round_columns_by_decimals(half_day_display_max, half_rounding_map)
+    _round_columns_by_decimals(half_night_display_mean, half_rounding_map)
+    _round_columns_by_decimals(half_night_display_max, half_rounding_map)
 
-    _apply_rounding_to(half_day_display_mean, half_rounding_map)
-    _apply_rounding_to(half_day_display_max, half_rounding_map)
-    _apply_rounding_to(half_night_display_mean, half_rounding_map)
-    _apply_rounding_to(half_night_display_max, half_rounding_map)
-
-    half_day_display_sum[:, DATA_HOURLY["rain"]] = np.round(
-        half_day_display_sum[:, DATA_HOURLY["rain"]], accum_dec
-    )
-    half_day_display_sum[:, DATA_HOURLY["snow"]] = np.round(
-        half_day_display_sum[:, DATA_HOURLY["snow"]], accum_dec
-    )
-    half_day_display_sum[:, DATA_HOURLY["ice"]] = np.round(
-        half_day_display_sum[:, DATA_HOURLY["ice"]], accum_dec
-    )
-    half_night_display_sum[:, DATA_HOURLY["rain"]] = np.round(
-        half_night_display_sum[:, DATA_HOURLY["rain"]], accum_dec
-    )
-    half_night_display_sum[:, DATA_HOURLY["snow"]] = np.round(
-        half_night_display_sum[:, DATA_HOURLY["snow"]], accum_dec
-    )
-    half_night_display_sum[:, DATA_HOURLY["ice"]] = np.round(
-        half_night_display_sum[:, DATA_HOURLY["ice"]], accum_dec
-    )
+    half_accum_cols = [DATA_HOURLY["rain"], DATA_HOURLY["snow"], DATA_HOURLY["ice"]]
+    for half_sum_arr in (half_day_display_sum, half_night_display_sum):
+        half_sum_arr[:, half_accum_cols] = np.round(
+            half_sum_arr[:, half_accum_cols], accum_dec
+        )
 
 
 def _build_half_day_item(
