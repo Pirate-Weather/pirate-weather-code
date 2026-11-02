@@ -103,6 +103,11 @@ what the per-hour source priority is for. Decide whether to keep NaN for all mod
 (more consistent; changes API output wherever holes exist, e.g. HRRR smoke) or just
 for the MSC models, whose stores now only carry real gaps.
 
+Found 2026-11-02: the GDPS warning on almost every request came from CAPE and CIN,
+which MSC publishes with a GRIB bitmap (undefined where no parcel is buoyant, ~45%
+of the globe); the 3-hourly blend turned each masked lead into a 3-12 hour hole. The
+GDPS ingest now stores 0 there (`GDPS_BITMAP_ZERO_VARS`), matching HRDPS's -1 -> 0.
+
 Before deciding, check how often genuine NaN values show up in each model's source
 data and published stores: count NaN per variable over each store's real grid
 (the store's `shape` minus the padding to `FINAL_CHUNK_SIZES`), and
