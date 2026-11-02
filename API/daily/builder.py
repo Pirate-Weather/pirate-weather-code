@@ -23,7 +23,7 @@ from API.legacy.daily import (
     pick_day_icon_and_summary,
     select_hour_window,
 )
-from API.PirateDailyText import calculate_day_text
+from API.PirateDailyText import HourColumns, calculate_day_text
 
 
 @dataclass
@@ -787,6 +787,7 @@ def build_daily_section(
     aq_inputs=None,
     inc_airqualitydetails: int = 0,
     include_day_night: bool = True,
+    hour_columns: HourColumns | None = None,
 ) -> DailySection:
     """
     Build all daily- and half-day-level objects.
@@ -832,6 +833,9 @@ def build_daily_section(
         log_timing: Optional timing logger.
         include_day_night: Build the day/night (half-day) items; when False
             ``day_night_list`` is empty.
+        hour_columns: The forecast's HourColumns (the same hours as
+            ``hourList_si``), built once per request; built here from
+            ``hourList_si`` when not given.
 
     Returns:
         DailySection object containing the daily forecast.
@@ -1048,8 +1052,17 @@ def build_daily_section(
         half_night_display_sum,
     )
 
-    # The hourly SI times are sorted, so each text window is found by bisection
-    hour_times_si = [hour["time"] for hour in hourList_si]
+    # The summary windows are slices of the forecast's hour columns. Without
+    # summary text no window is summarised, so the columns aren't built and
+    # the windows are list slices found by bisection on the sorted times.
+    if hour_columns is None and summaryText:
+        hour_columns = HourColumns.from_hours(hourList_si)
+    if hour_columns is not None:
+        window_source = hour_columns
+        hour_times_si = None
+    else:
+        window_source = hourList_si
+        hour_times_si = [hour["time"] for hour in hourList_si]
 
     for idx in range(daily_days):
         # The half-day text costs as much as the daily text; skip it when the
@@ -1089,7 +1102,7 @@ def build_daily_section(
                     summary_text=summaryText,
                     translation=translation,
                     hour_list_slice=select_hour_window(
-                        hourList_si,
+                        window_source,
                         start_time=int(day_array_6am_grib[idx]),
                         end_time=int(day_array_6pm_grib[idx]),
                         hour_times=hour_times_si,
@@ -1144,7 +1157,7 @@ def build_daily_section(
                     summary_text=summaryText,
                     translation=translation,
                     hour_list_slice=select_hour_window(
-                        hourList_si,
+                        window_source,
                         start_time=night_start_time,
                         end_time=_get_night_window_end(
                             day_array_6am_grib, idx, night_start_time
@@ -1360,7 +1373,7 @@ def build_daily_section(
                 # The daily summary describes 6am to 6am the next day
                 dayIcon, dayText = calculate_day_text(
                     select_hour_window(
-                        hourList_si,
+                        window_source,
                         start_time=int(day_array_6am_grib[idx]),
                         end_time=int(day_array_6am_grib[idx + 1]),
                         hour_times=hour_times_si,
