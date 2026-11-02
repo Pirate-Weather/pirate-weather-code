@@ -120,19 +120,23 @@ def calculate_text(
     visText, visIcon = calculate_vis_text(
         vis, temp, dewPoint, wind, smoke, icon, "both"
     )
-    thuText, thuIcon = calculate_thunderstorm_text(
-        cape,
-        mode="both",
-        pop=pop,
-        icon=icon,
-        is_day=isDayTime,
-        lifted_index=liftedIndex,
-        cin=cin,
-        vertical_velocity=verticalVelocity,
-        k_index=kIndex,
-        dewpoint=dewPoint,
-        temperature=temp,
-    )
+    # Thunderstorms only ever replace precipitation text or its icon, so a dry
+    # hour (most of them) skips the stability scoring
+    thuText = thuIcon = None
+    if precipText is not None or precipIcon is not None:
+        thuText, thuIcon = calculate_thunderstorm_text(
+            cape,
+            mode="both",
+            pop=pop,
+            icon=icon,
+            is_day=isDayTime,
+            lifted_index=liftedIndex,
+            cin=cin,
+            vertical_velocity=verticalVelocity,
+            k_index=kIndex,
+            dewpoint=dewPoint,
+            temperature=temp,
+        )
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
 
     # If there is precipitation text use that and join with wind texts if they exist
