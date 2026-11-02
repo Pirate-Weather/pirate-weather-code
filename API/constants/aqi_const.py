@@ -52,7 +52,7 @@ NOWCAST_HOURS = 12
 
 
 def nowcast_pm(conc: np.ndarray) -> np.ndarray:
-    """Apply EPA NowCast algorithm to an hourly PM2.5 or PM10 concentration array.
+    """Apply EPA NowCast algorithm to hourly PM2.5 or PM10 concentrations.
 
     NowCast is a weighted average over up to 12 previous hours.  The weight factor
     is derived from the ratio of minimum to maximum concentration in the window.
@@ -61,37 +61,39 @@ def nowcast_pm(conc: np.ndarray) -> np.ndarray:
     otherwise the output for that hour is NaN.
 
     Args:
-        conc: 1-D array of hourly concentrations (µg/m³), chronological order
-              (index 0 = earliest hour, last index = most-recent hour).
+        conc: 1-D array of hourly concentrations (µg/m³), or a 2-D array of
+              shape (n_series, n_hours) so several pollutants are computed in
+              one pass (the per-call numpy overhead dominates on short arrays).
+              Chronological order (last index = most-recent hour).
               NaN indicates missing/invalid data.
 
     Returns:
-        1-D float64 array of the same length as *conc*.
+        float64 array of the same shape as *conc*.
     """
     conc = np.asarray(conc, dtype=np.float64)
-    n = len(conc)
-    if n == 0:
-        return np.full(0, np.nan, dtype=np.float64)
+    if conc.shape[-1] == 0:
+        return np.full(conc.shape, np.nan, dtype=np.float64)
 
     # One row per hour holding its window of up to 12 hours, newest first.
     # Hours before the start of the array are padded with NaN, which the
     # algorithm treats the same as a missing hour.
-    padded = np.concatenate((np.full(NOWCAST_HOURS - 1, np.nan), conc))
-    windows = sliding_window_view(padded, NOWCAST_HOURS)[:, ::-1]
+    pad_shape = (*conc.shape[:-1], NOWCAST_HOURS - 1)
+    padded = np.concatenate((np.full(pad_shape, np.nan), conc), axis=-1)
+    windows = sliding_window_view(padded, NOWCAST_HOURS, axis=-1)[..., ::-1]
     valid = ~np.isnan(windows)
 
     # Validity check: at least 2 of the 3 most-recent hours must be valid
-    has_recent = valid[:, :3].sum(axis=1) >= 2
+    has_recent = valid[..., :3].sum(axis=-1) >= 2
 
     # Weight factor from the min/max of the valid hours, bounded at [0.5, 1.0]
-    max_c = np.where(valid, windows, -np.inf).max(axis=1)
-    min_c = np.where(valid, windows, np.inf).min(axis=1)
+    max_c = np.where(valid, windows, -np.inf).max(axis=-1)
+    min_c = np.where(valid, windows, np.inf).min(axis=-1)
     with np.errstate(divide="ignore", invalid="ignore"):
         w = np.where(max_c == 0.0, 1.0, np.maximum(min_c / max_c, 0.5))
         # Hour j back gets weight w**j; missing hours get no weight
-        weights = np.where(valid, w[:, np.newaxis] ** np.arange(NOWCAST_HOURS), 0.0)
-        total_weight = weights.sum(axis=1)
-        weighted_sum = (weights * np.where(valid, windows, 0.0)).sum(axis=1)
+        weights = np.where(valid, w[..., np.newaxis] ** np.arange(NOWCAST_HOURS), 0.0)
+        total_weight = weights.sum(axis=-1)
+        weighted_sum = (weights * np.where(valid, windows, 0.0)).sum(axis=-1)
         out = weighted_sum / total_weight
 
     return np.where(has_recent & (total_weight > 0.0), out, np.nan)
@@ -104,24 +106,26 @@ def rolling_mean(conc: np.ndarray, window: int) -> np.ndarray:
     output for that hour is NaN.
 
     Args:
-        conc:   1-D array of hourly concentrations, chronological order.
+        conc:   1-D array of hourly concentrations, chronological order, or a
+                2-D array of shape (n_series, n_hours) of series sharing the
+                same window, computed in one pass.
         window: Number of hours to include (e.g., 8 for O3/CO, 24 for PM10).
 
     Returns:
-        1-D float64 array of the same length as *conc*.
+        float64 array of the same shape as *conc*.
     """
     conc = np.asarray(conc, dtype=np.float64)
-    n = len(conc)
-    if n == 0:
-        return np.full(0, np.nan, dtype=np.float64)
+    if conc.shape[-1] == 0:
+        return np.full(conc.shape, np.nan, dtype=np.float64)
 
     # One row per hour holding its window; hours before the start of the
     # array are padded with NaN and so ignored like any missing hour.
-    padded = np.concatenate((np.full(window - 1, np.nan), conc))
-    windows = sliding_window_view(padded, window)
+    pad_shape = (*conc.shape[:-1], window - 1)
+    padded = np.concatenate((np.full(pad_shape, np.nan), conc), axis=-1)
+    windows = sliding_window_view(padded, window, axis=-1)
     valid = ~np.isnan(windows)
-    counts = valid.sum(axis=1)
-    sums = np.where(valid, windows, 0.0).sum(axis=1)
+    counts = valid.sum(axis=-1)
+    sums = np.where(valid, windows, 0.0).sum(axis=-1)
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(counts > 0, sums / counts, np.nan)
 
@@ -1195,51 +1199,47 @@ def compute_aqi_array(
     # Override with system-specific averaging where applicable
     if system == "EPA":
         # Apply EPA-mandated averaging periods before the breakpoint lookup
-        pm25_calc = nowcast_pm(pm25_v)
-        pm10_calc = nowcast_pm(pm10_v)
-        o3_calc = rolling_mean(o3_v, window=8)
-        co_calc = rolling_mean(co_v, window=8)
+        # Series sharing an averaging window are stacked and computed in one pass.
+        pm25_calc, pm10_calc = nowcast_pm(np.stack((pm25_v, pm10_v)))
+        o3_calc, co_calc = rolling_mean(np.stack((o3_v, co_v)), window=8)
         so2_24h_calc = rolling_mean(so2_v, window=24)
         o3_1h_calc = o3_v
     elif system == "AQHI":
         # AQHI uses 3-hour rolling averages for PM2.5, O3, NO2
-        pm25_calc = rolling_mean(pm25_v, window=3)
-        o3_calc = rolling_mean(o3_v, window=3)
-        no2_calc = rolling_mean(no2_v, window=3)
+        pm25_calc, o3_calc, no2_calc = rolling_mean(
+            np.stack((pm25_v, o3_v, no2_v)), window=3
+        )
     elif system == "DAQI" or system == "AQIH":
         # DAQI and AQIH use 24-hour rolling averages for PM2.5 and PM10, 8-hour for O3
-        pm25_calc = rolling_mean(pm25_v, window=24)
-        pm10_calc = rolling_mean(pm10_v, window=24)
+        pm25_calc, pm10_calc = rolling_mean(np.stack((pm25_v, pm10_v)), window=24)
         o3_calc = rolling_mean(o3_v, window=8)
     elif system == "HK_AQHI":
         # Hong Kong AQHI uses 3-hour rolling averages for PM2.5, PM10, O3, NO2, SO2
-        pm25_calc = rolling_mean(pm25_v, window=3)
-        pm10_calc = rolling_mean(pm10_v, window=3)
-        o3_calc = rolling_mean(o3_v, window=3)
-        no2_calc = rolling_mean(no2_v, window=3)
-        so2_calc = rolling_mean(so2_v, window=3)
+        pm25_calc, pm10_calc, o3_calc, no2_calc, so2_calc = rolling_mean(
+            np.stack((pm25_v, pm10_v, o3_v, no2_v, so2_v)), window=3
+        )
     elif system == "IAQI":
         # Israel IAQA uses 24-hour rolling averages for PM2.5 and PM10, 8-hour for O3 and 1-hour for NO2, SO2, CO
-        pm25_calc = rolling_mean(pm25_v, window=24)
-        pm10_calc = rolling_mean(pm10_v, window=24)
+        pm25_calc, pm10_calc = rolling_mean(np.stack((pm25_v, pm10_v)), window=24)
         o3_calc = rolling_mean(o3_v, window=8)
     elif system == "ISPU":
         # Indonesia ISPU uses 24-hour rolling averages
         # PM2.5 is rounded to 1 decimal place, PM10, O3, NO2, SO2, CO are rounded to whole numbers
-        pm25_calc = np.round(rolling_mean(pm25_v, window=24), 1)
-        pm10_calc = np.round(rolling_mean(pm10_v, window=24), 0)
-        o3_calc = np.round(rolling_mean(o3_v, window=24), 0)
-        co_calc = np.round(rolling_mean(co_v, window=24), 0)
-        so2_calc = np.round(rolling_mean(so2_v, window=24), 0)
-        no2_calc = np.round(rolling_mean(no2_v, window=24), 0)
+        pm25_24h, pm10_24h, o3_24h, co_24h, so2_24h, no2_24h = rolling_mean(
+            np.stack((pm25_v, pm10_v, o3_v, co_v, so2_v, no2_v)), window=24
+        )
+        pm25_calc = np.round(pm25_24h, 1)
+        pm10_calc = np.round(pm10_24h, 0)
+        o3_calc = np.round(o3_24h, 0)
+        co_calc = np.round(co_24h, 0)
+        so2_calc = np.round(so2_24h, 0)
+        no2_calc = np.round(no2_24h, 0)
     elif system == "CHINA_AQI":
         # China AQI uses 24-hour rolling averages for PM2.5, PM10, NO2, SO2, CO and 8-hour rolling average for O3
-        pm25_calc = rolling_mean(pm25_v, window=24)
-        pm10_calc = rolling_mean(pm10_v, window=24)
+        pm25_calc, pm10_calc, no2_24_calc, so2_24_calc, co_24_calc = rolling_mean(
+            np.stack((pm25_v, pm10_v, no2_v, so2_v, co_v)), window=24
+        )
         o3_8h_calc = rolling_mean(o3_v, window=8)
-        no2_24_calc = rolling_mean(no2_v, window=24)
-        so2_24_calc = rolling_mean(so2_v, window=24)
-        co_24_calc = rolling_mean(co_v, window=24)
     elif system == "API":
         # Malayia rounds everything to nearest whole number
         pm25_calc = np.round(pm25_v, 0)
@@ -1251,8 +1251,7 @@ def compute_aqi_array(
     elif system == "VN_AQI":
         # Vietnam AQI uses nowcast for PM2.5, PM10, 8-hour for O3, and 1-hour for NO2, SO2, CO
         # For all pollutants, round to whole numbers
-        pm25_calc = np.round(nowcast_pm(pm25_v), 0)
-        pm10_calc = np.round(nowcast_pm(pm10_v), 0)
+        pm25_calc, pm10_calc = np.round(nowcast_pm(np.stack((pm25_v, pm10_v))), 0)
         o3_8h_calc = np.round(rolling_mean(o3_v, window=8), 0)
         o3_calc = np.round(o3_v, 0)
         no2_calc = np.round(no2_v, 0)

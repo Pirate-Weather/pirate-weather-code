@@ -546,6 +546,21 @@ def _cache_stats_delta(
     return {key: after.get(key, 0) - before.get(key, 0) for key in after}
 
 
+# Regular lat/lon grids of the global models and the WMO alert grid, built
+# once: a request only needs the nearest index on each of them.
+GFS_LATS = np.arange(-90, 90, 0.25)
+GFS_LONS = np.arange(0, 360, 0.25)
+ECMWF_LATS = np.arange(90, -90, -0.25)
+ECMWF_LONS = np.arange(-180, 180, 0.25)
+# GDPS: 2400 x 1201 at 0.15 degrees, GEPS: 720 x 361 at 0.5 degrees
+GDPS_LATS = np.linspace(-90.0, 90.0, 1201)
+GDPS_LONS = np.linspace(0, 360.0 - 0.15, 2400)
+GEPS_LATS = np.linspace(-90.0, 90.0, 361)
+GEPS_LONS = np.linspace(0.0, 360.0 - 0.5, 720)
+WMO_ALERT_LATS = np.arange(-60, 85, 0.0625)
+WMO_ALERT_LONS = np.arange(-180, 180, 0.0625)
+
+
 async def calculate_grid_indexing(
     *,
     lat: float,
@@ -787,14 +802,12 @@ async def calculate_grid_indexing(
 
     timer.log("### GFS/GEFS Start ###")
 
-    lats_gfs = np.arange(-90, 90, 0.25)
-    lons_gfs = np.arange(0, 360, 0.25)
-    abslat = np.abs(lats_gfs - lat)
-    abslon = np.abs(lons_gfs - lon)
+    abslat = np.abs(GFS_LATS - lat)
+    abslon = np.abs(GFS_LONS - lon)
     y_p = np.argmin(abslat)
     x_p = np.argmin(abslon)
-    gfs_lat = lats_gfs[y_p]
-    gfs_lon = lons_gfs[x_p]
+    gfs_lat = GFS_LATS[y_p]
+    gfs_lon = GFS_LONS[x_p]
 
     x_hrdps = None
     y_hrdps = None
@@ -830,8 +843,8 @@ async def calculate_grid_indexing(
         dataOut_ecmwf = False
     else:
         readECMWF = True
-        lats_ecmwf = np.arange(90, -90, -0.25)
-        lons_ecmwf = np.arange(-180, 180, 0.25)
+        lats_ecmwf = ECMWF_LATS
+        lons_ecmwf = ECMWF_LONS
         abslat_ecmwf = np.abs(lats_ecmwf - lat)
         abslon_ecmwf = np.abs(lons_ecmwf - az_lon)
         y_p_eur = np.argmin(abslat_ecmwf)
@@ -878,8 +891,8 @@ async def calculate_grid_indexing(
         if ex_gdps != 1 and zarr_sources.gdps is not None:
             try:
                 # Build GDPS lat/lon arrays (-90 -> 90, -180 -> 179.85)
-                lats_gdps = np.linspace(-90.0, 90.0, 1201)
-                lons_gdps = np.linspace(0, 360.0 - 0.15, 2400)
+                lats_gdps = GDPS_LATS
+                lons_gdps = GDPS_LONS
 
                 # Convert input lon to 0..360 for GDPS indexing
                 target_lon_360 = (az_lon + 360.0) % 360.0
@@ -897,8 +910,8 @@ async def calculate_grid_indexing(
         if ex_geps != 1 and zarr_sources.geps is not None:
             try:
                 # GEPS: 720 x 361, 0.5° resolution, lon 0..359.5, lat -90..90
-                lats_geps = np.linspace(-90.0, 90.0, 361)
-                lons_geps = np.linspace(0.0, 360.0 - 0.5, 720)
+                lats_geps = GEPS_LATS
+                lons_geps = GEPS_LONS
                 # Convert input lon to 0..360 for GEPS indexing
                 lon360 = (az_lon + 360.0) % 360.0
                 abslat = np.abs(lats_geps - lat)
@@ -969,8 +982,8 @@ async def calculate_grid_indexing(
     elif ai_models_requested and not is_na:
         if ex_aifs != 1 and zarr_sources.ecmwf_aifs is not None:
             if x_p_eur is None or y_p_eur is None:
-                lats_ecmwf = np.arange(90, -90, -0.25)
-                lons_ecmwf = np.arange(-180, 180, 0.25)
+                lats_ecmwf = ECMWF_LATS
+                lons_ecmwf = ECMWF_LONS
                 abslat_ecmwf = np.abs(lats_ecmwf - lat)
                 abslon_ecmwf = np.abs(lons_ecmwf - az_lon)
                 y_p_eur = np.argmin(abslat_ecmwf)
@@ -1124,10 +1137,8 @@ async def calculate_grid_indexing(
     # The WMO alert store is optional: until its ingest has published (e.g. a
     # fresh deployment), serve the forecast without WMO alerts.
     if read_wmo_alerts and zarr_sources.wmo_alerts is not None:
-        wmo_alerts_lats = np.arange(-60, 85, 0.0625)
-        wmo_alerts_lons = np.arange(-180, 180, 0.0625)
-        wmo_abslat = np.abs(wmo_alerts_lats - lat)
-        wmo_abslon = np.abs(wmo_alerts_lons - az_lon)
+        wmo_abslat = np.abs(WMO_ALERT_LATS - lat)
+        wmo_abslon = np.abs(WMO_ALERT_LONS - az_lon)
         wmo_alerts_y_p = np.argmin(wmo_abslat)
         wmo_alerts_x_p = np.argmin(wmo_abslon)
         WMO_alertDat = zarr_sources.wmo_alerts[wmo_alerts_y_p, wmo_alerts_x_p]
