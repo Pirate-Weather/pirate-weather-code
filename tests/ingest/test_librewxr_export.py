@@ -122,3 +122,45 @@ def test_export_publishes_radar_composite_for_api(tmp_path, monkeypatch):
     assert store[0, 1, y, x] == 0.0
     y, x = _grid_cell(LONDON_LAT, LONDON_LON)
     assert np.isnan(store[0, :, y, x]).all()
+
+
+def test_stale_nowcast_is_not_exported_under_new_radar_frame(tmp_path):
+    """LibreWXR also writes state.json mid-cycle, after a new radar frame lands
+    but before its nowcast exists. Exporting then would publish the previous
+    frame's extrapolation under the new run time and block the real nowcast as
+    already published, so the snapshot reader must refuse it.
+    """
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    t_old, t_new = 1_793_650_200, 1_793_650_800
+    state = {
+        "version": 1,
+        "written_at": t_new,
+        "stores": {
+            "frame_store": {
+                "max_frames": 12,
+                "memmap_dir": str(cache / "radar"),
+                "frames": [
+                    {"timestamp": t_old, "regions": {}},
+                    {"timestamp": t_new, "regions": {}},
+                ],
+                "frame_versions": {},
+            },
+            "nowcast_store": {
+                "memmap_dir": str(cache / "nowcast"),
+                # Steps from the old frame: the first one coincides with t_new
+                "frames": [
+                    {"timestamp": t_old + 600 * k, "blend_weight": 0.5, "regions": {}}
+                    for k in range(1, 4)
+                ],
+                "flows": {},
+                "nwp_flow": None,
+                "flow_version": 1,
+            },
+        },
+    }
+    (cache / "state.json").write_bytes(gzip.compress(json.dumps(state).encode()))
+
+    lib = sidecar.load_librewxr()
+    with pytest.raises(LookupError, match="waiting for this cycle"):
+        sidecar.read_nowcast_snapshot(lib, cache)
