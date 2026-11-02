@@ -159,6 +159,15 @@ zarr_vars = (
     "N4LFTX_500mb",
 )
 
+# MSC publishes CAPE and CIN with a GRIB bitmap: grid points without a
+# buoyant parcel (40-50% of the globe at any lead) are undefined rather than
+# zero, and wgrib2/xarray deliver them as NaN. They mean "no CAPE" (HRDPS
+# encodes the same points as -1, which the API clips to 0), so the ingest
+# stores 0 for both. Left as NaN, a masked 3-hourly lead blends into a
+# 3-12 hour hole when the leads are interpolated to hourly, and the API filled
+# those holes linearly at read time on almost every request.
+GDPS_BITMAP_ZERO_VARS = ("CAPE_surface", "CIN_surface")
+
 # Stored fields published on fewer leads than GDPS_FORECAST_HOURS (see
 # GDPS_EXPECTED_FORECAST_HOURS); each is interpolated to hourly from its own leads.
 GDPS_REDUCED_LEAD_VARS = {
@@ -226,6 +235,14 @@ def grib_lead_hour(path: str) -> int:
     if match is None:
         raise ValueError(f"No forecast lead in GDPS GRIB file name {path}")
     return int(match.group(1))
+
+
+def zero_bitmap_points(dask_var: str, array: da.Array) -> da.Array:
+    """Store 0 where a bitmap-masked field (see GDPS_BITMAP_ZERO_VARS) is NaN;
+    every other field keeps its NaN."""
+    if dask_var not in GDPS_BITMAP_ZERO_VARS:
+        return array
+    return da.where(da.isnan(array), 0.0, array)
 
 
 def interp_lead_groups(
@@ -431,6 +448,7 @@ def main() -> None:
         daskForecastArray = da.from_zarr(
             forecast_process_path + "_.zarr", component=dask_var, inline_array=True
         )
+        daskForecastArray = zero_bitmap_points(dask_var, daskForecastArray)
         daskVarArrayList.append(
             daskForecastArray.rechunk(
                 (len(stacked_timesUnix), process_chunk, process_chunk)
