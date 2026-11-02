@@ -85,6 +85,7 @@ from API.legacy.summary import (
     build_minutely_summary,
 )
 from API.minutely.builder import build_minutely_block
+from API.PirateDailyText import HourColumns
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
 from API.utils.filtering import apply_block_indices as _apply_block_indices
@@ -1000,7 +1001,7 @@ async def PW_Forecast(
             dayZeroSnow,
             dayZeroIce,
             _,
-            _,
+            PTypeHour,
             _,
             InterPhour,
         ) = build_hourly_block(
@@ -1093,6 +1094,15 @@ async def PW_Forecast(
         ]
     )
 
+    # The daily, half-day and next-24-hour summaries each aggregate a window
+    # of the same hours; their values and per-hour flags are gathered once.
+    # The legacy summaries (no summary text) don't aggregate hours.
+    hour_columns = (
+        HourColumns.from_interphour(InterPhour, hour_array_grib, PTypeHour)
+        if summaryText
+        else None
+    )
+
     # 13. Generate the daily forecast section
     # This aggregates hourly data to create daily summaries (high/low temps, total precip, etc.)
     with timing_tracker.track("Daily block"):
@@ -1133,6 +1143,7 @@ async def PW_Forecast(
             aq_inputs=aq_inputs,
             inc_airqualitydetails=incAirQualityDetails,
             include_day_night=inc_day_night == 1 and not timeMachine,
+            hour_columns=hour_columns,
         )
     dayList = daily_section.day_list
     dayList_si = daily_section.day_list_si
@@ -1279,6 +1290,7 @@ async def PW_Forecast(
             base_time_offset_int=base_time_offset_int,
             logger=logger,
             loc_tag=loc_tag,
+            hour_columns=hour_columns,
         )
         if timeMachine:
             output_hourList = hourList[0:ouputHours]

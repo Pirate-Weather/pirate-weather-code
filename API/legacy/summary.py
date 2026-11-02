@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 
-from API.PirateDailyText import calculate_day_text
+from API.PirateDailyText import HourColumns, calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateWeeklyText import calculate_weekly_text
 
@@ -54,8 +54,10 @@ def build_hourly_summary(
     base_time_offset_int: int,
     logger: logging.Logger,
     loc_tag: str,
+    hour_columns: HourColumns | None = None,
 ) -> tuple[str, str]:
-    """Compute hourly summary/icon text."""
+    """Compute hourly summary/icon text. ``hour_columns`` (the forecast's
+    HourColumns, the same hours as ``hour_list_si``) saves building them."""
     if time_machine:
         return (
             max(set(hour_text_list), key=hour_text_list.count),
@@ -64,8 +66,15 @@ def build_hourly_summary(
 
     try:
         if summary_text:
+            next_24_hours = slice(base_time_offset_int, base_time_offset_int + 24)
+            if hour_columns is not None:
+                next_24_hours = hour_columns.window(
+                    next_24_hours.start, min(next_24_hours.stop, len(hour_columns))
+                )
+            else:
+                next_24_hours = hour_list_si[next_24_hours]
             hourIcon, hourText = calculate_day_text(
-                hour_list_si[base_time_offset_int : base_time_offset_int + 24],
+                next_24_hours,
                 not is_all_night,
                 str(tz_name),
                 "hour",

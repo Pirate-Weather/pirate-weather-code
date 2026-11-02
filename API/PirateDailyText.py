@@ -32,20 +32,24 @@ import numpy as np
 from dateutil import tz
 
 from API.constants.api_const import PRECIP_TYPES
-from API.constants.shared_const import MISSING_DATA
+from API.constants.forecast_const import DATA_HOURLY
 from API.constants.text_const import (
     CLOUD_COVER_DAILY_THRESHOLDS,
     CLOUD_COVER_THRESHOLDS,
     DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM,
-    DEFAULT_HUMIDITY,
     DEFAULT_POP,
     DEFAULT_VISIBILITY,
+    FOG_THRESHOLD_METERS,
     HALF_DAY_PRECIP_ACCUM_TEXT_THRESHOLD_MM,
     HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM,
     HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM,
     LESS_THAN_TOLERANCE,
+    MIST_THRESHOLD_METERS,
     PRECIP_INTENSITY_THRESHOLDS,
     PRECIP_PROB_THRESHOLD,
+    SMOKE_CONCENTRATION_THRESHOLD_UGM3,
+    TEMP_DEWPOINT_SPREAD_FOR_FOG,
+    TEMP_DEWPOINT_SPREAD_FOR_MIST,
     WIND_THRESHOLDS,
 )
 from API.PirateTextHelper import (
@@ -141,18 +145,6 @@ CLOUD_LEVEL_TEXT_AND_COVER = (
     ("medium-clouds", CLOUD_COVER_DAILY_THRESHOLDS["mostly_cloudy"]),
     ("heavy-clouds", CLOUD_COVER_DAILY_THRESHOLDS["cloudy"]),
 )
-
-
-def _value_or_default(value, default):
-    """Return ``default`` when ``value`` is None or NaN, otherwise ``value``."""
-    if value is None:
-        return default
-    try:
-        if math.isnan(value):
-            return default
-    except TypeError:
-        pass
-    return value
 
 
 def _period_cloud_cover(cloud_covers):
@@ -472,52 +464,501 @@ def _new_period_data():
     }
 
 
-def _sanitize_hour(hour):
-    """Copy an hour, replacing missing optional values with their defaults.
+def _period_of_each_hour(times, zone, mode):
+    """The period name of every hour (see _get_period_name).
 
-    The copy keeps the defaults from leaking back into the caller's data.
+    Returns (period names in forecast order, period index of each hour).
+    Without a UTC-offset change inside the window the local hour and day come
+    from one offset; a window across a DST change converts every hour.
     """
-    sanitized_hour = dict(hour)
-    sanitized_hour["humidity"] = _value_or_default(
-        hour.get("humidity", DEFAULT_HUMIDITY), DEFAULT_HUMIDITY
-    )
-    sanitized_hour["visibility"] = _value_or_default(
-        hour.get("visibility", DEFAULT_VISIBILITY), DEFAULT_VISIBILITY
-    )
-    sanitized_hour["precipIntensityError"] = _value_or_default(
-        hour.get("precipIntensityError", np.nan), np.nan
-    )
-    sanitized_hour["precipProbability"] = _value_or_default(
-        hour.get("precipProbability", DEFAULT_POP), DEFAULT_POP
-    )
-    sanitized_hour["smoke"] = _value_or_default(hour.get("smoke", 0.0), 0.0)
+    start_local = datetime.datetime.fromtimestamp(times[0], zone)
+    end_local = datetime.datetime.fromtimestamp(times[-1], zone)
+    if start_local.utcoffset() == end_local.utcoffset():
+        offset = start_local.utcoffset().total_seconds()
+        local_hours = [int((time + offset) // 3600) % 24 for time in times]
+        local_days = [int((time + offset) // 86400) for time in times]
+    else:
+        local_times = [datetime.datetime.fromtimestamp(time, zone) for time in times]
+        local_hours = [local.hour for local in local_times]
+        local_days = [local.toordinal() for local in local_times]
 
-    # Without a dew point assume saturation (dew point equal to the temperature)
-    dew_point_default = hour.get("temperature")
-    sanitized_hour["dewPoint"] = _value_or_default(
-        hour.get("dewPoint", dew_point_default), dew_point_default
+    start_hour = start_local.hour
+    start_day = local_days[0]
+    period_names = []
+    period_of_hour = []
+    for hour, day in zip(local_hours, local_days):
+        if hour < MORNING_START:
+            period = "night"
+        elif hour < AFTERNOON_START:
+            period = "morning"
+        elif hour < EVENING_START:
+            period = "afternoon"
+        else:
+            period = "evening"
+        if mode == "hour":
+            is_today = day == start_day or (
+                period == "night" and start_hour >= MORNING_START
+            )
+            period = ("today-" if is_today else "tomorrow-") + period
+        if period not in period_names:
+            period_names.append(period)
+        period_of_hour.append(period_names.index(period))
+    return period_names, period_of_hour
+
+
+def _sequential_sum(values):
+    """Sum in hour order with plain float additions, as the per-hour ``+=``
+    did. Neither np.sum (pairwise) nor sum() (compensated since Python 3.12)
+    adds in that order, and a last-bit difference can move a rounded amount."""
+    total = 0.0
+    for value in values:
+        total += value
+    return total
+
+
+def _vis_icon_hours(vis, temp, dew, wind, smoke):
+    """Hours whose visibility would get an icon (fog, smoke, mist or haze):
+    calculate_vis_text(mode="icon") is not None, over whole arrays."""
+    valid = ~(np.isnan(temp) | np.isnan(dew) | np.isnan(vis))
+    # Missing smoke counts as no smoke
+    smoke = np.where(np.isnan(smoke), 0.0, smoke)
+    # Strong winds mix out fog and mist
+    wind_too_strong = ~np.isnan(wind) & (wind >= WIND_THRESHOLDS["light"])
+    spread = temp - dew
+    fog = (vis < FOG_THRESHOLD_METERS) & (spread <= TEMP_DEWPOINT_SPREAD_FOR_FOG)
+    smoky = (smoke >= SMOKE_CONCENTRATION_THRESHOLD_UGM3) & (
+        vis < MIST_THRESHOLD_METERS
     )
-    return sanitized_hour
+    mist = (vis < MIST_THRESHOLD_METERS) & (spread <= TEMP_DEWPOINT_SPREAD_FOR_MIST)
+    haze = (
+        (smoke < SMOKE_CONCENTRATION_THRESHOLD_UGM3)
+        & (vis < MIST_THRESHOLD_METERS)
+        & (spread > TEMP_DEWPOINT_SPREAD_FOR_MIST)
+    )
+    return valid & ((~wind_too_strong & (fog | mist)) | smoky | haze)
 
 
-def _hour_precip_accum(hour):
-    """Liquid-equivalent precipitation for an hour (mm), snow using a 10:1 ratio."""
+class HourColumns:
+    """The hourly SI values the daily, half-day and next-24-hour summaries
+    aggregate, one list per field for the whole forecast, with the per-hour
+    flags computed once over all hours.
+
+    A request summarises up to 25 overlapping windows of the same hours;
+    reading each hour's dict in every window was most of the summary cost.
+    Built once from the hourly matrix (``from_interphour``) or from a list of
+    hour dicts (``from_hours``, used by tests and the fallbacks). Missing
+    visibility, probability, smoke and dew point take their defaults here.
+    """
+
+    __slots__ = (
+        "_thunder",
+        "cape",
+        "cin",
+        "cloud",
+        "dew",
+        "error",
+        "foggy",
+        "ice",
+        "ice_intensity",
+        "k_index",
+        "lifted_index",
+        "liquid",
+        "pop",
+        "precip_accum",
+        "precip_type",
+        "rain_intensity",
+        "smoke",
+        "snow",
+        "snow_intensity",
+        "spread",
+        "temp",
+        "time",
+        "vertical_velocity",
+        "vis",
+        "wet",
+        "wind",
+    )
+
+    def __init__(
+        self,
+        *,
+        time,
+        cloud,
+        wind,
+        rain_intensity,
+        snow_intensity,
+        ice_intensity,
+        temp,
+        dew,
+        liquid,
+        snow,
+        ice,
+        precip_type,
+        vis,
+        smoke,
+        pop,
+        error,
+        cape,
+        lifted_index,
+        cin,
+        vertical_velocity,
+        k_index,
+    ):
+        as_float = np.asarray
+        wind = as_float(wind, dtype=float)
+        rain_intensity = as_float(rain_intensity, dtype=float)
+        snow_intensity = as_float(snow_intensity, dtype=float)
+        ice_intensity = as_float(ice_intensity, dtype=float)
+        temp = as_float(temp, dtype=float)
+        liquid = as_float(liquid, dtype=float)
+        snow = as_float(snow, dtype=float)
+        ice = as_float(ice, dtype=float)
+        vis = as_float(vis, dtype=float)
+        vis = np.where(np.isnan(vis), DEFAULT_VISIBILITY, vis)
+        smoke = as_float(smoke, dtype=float)
+        smoke = np.where(np.isnan(smoke), 0.0, smoke)
+        pop = as_float(pop, dtype=float)
+        pop = np.where(np.isnan(pop), DEFAULT_POP, pop)
+        # Without a dew point assume saturation (dew point equal to the temperature)
+        dew = as_float(dew, dtype=float)
+        dew = np.where(np.isnan(dew), temp, dew)
+
+        self.time = list(time)
+        self.cloud = as_float(cloud, dtype=float).tolist()
+        self.wind = wind.tolist()
+        self.rain_intensity = rain_intensity.tolist()
+        self.snow_intensity = snow_intensity.tolist()
+        self.ice_intensity = ice_intensity.tolist()
+        self.temp = temp.tolist()
+        self.dew = dew.tolist()
+        self.liquid = liquid.tolist()
+        self.snow = snow.tolist()
+        self.ice = ice.tolist()
+        self.precip_type = list(precip_type)
+        self.vis = vis.tolist()
+        self.smoke = smoke.tolist()
+        self.pop = pop.tolist()
+        # precipIntensityError is an intensity error (mm/h), so over one hour
+        # it is a liquid accumulation error (mm); NaN where missing
+        self.error = as_float(error, dtype=float).tolist()
+        self.cape = as_float(cape, dtype=float).tolist()
+        self.lifted_index = as_float(lifted_index, dtype=float).tolist()
+        self.cin = as_float(cin, dtype=float).tolist()
+        self.vertical_velocity = as_float(vertical_velocity, dtype=float).tolist()
+        self.k_index = as_float(k_index, dtype=float).tolist()
+
+        # Liquid-equivalent precipitation (snow at a 10:1 ratio), and whether
+        # an hour has enough precipitation for an hourly icon (all-day
+        # precipitation against a few showers)
+        self.precip_accum = (liquid + ice + snow / 10).tolist()
+        self.wet = (
+            (liquid + ice >= HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM)
+            | (snow >= HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM)
+        ).tolist()
+        # Fog needs the precipitation to be too light to reduce visibility itself
+        self.foggy = (
+            _vis_icon_hours(vis, temp, dew, wind, smoke)
+            & (rain_intensity <= FOG_MAX_LIQUID_INTENSITY)
+            & (snow_intensity <= FOG_MAX_SNOW_INTENSITY)
+            & (ice_intensity <= FOG_MAX_LIQUID_INTENSITY)
+        ).tolist()
+        # Temperature-dew point spread, for the foggiest hour
+        self.spread = np.abs(temp - dew).tolist()
+        # Thunderstorm presence of an hour, scored on first use (see thunder)
+        self._thunder = [None] * len(self.time)
+
+    @classmethod
+    def from_hours(cls, hours):
+        """From a list of hour dicts (SI units, as hourList_si)."""
+
+        def column(key, default=np.nan):
+            return [hour.get(key, default) for hour in hours]
+
+        return cls(
+            time=[hour["time"] for hour in hours],
+            cloud=[hour["cloudCover"] for hour in hours],
+            wind=[hour["windSpeed"] for hour in hours],
+            rain_intensity=[hour["rainIntensity"] for hour in hours],
+            snow_intensity=[hour["snowIntensity"] for hour in hours],
+            ice_intensity=[hour["iceIntensity"] for hour in hours],
+            temp=[hour["temperature"] for hour in hours],
+            dew=column("dewPoint"),
+            liquid=[hour["liquidAccumulation"] for hour in hours],
+            snow=[hour["snowAccumulation"] for hour in hours],
+            ice=[hour["iceAccumulation"] for hour in hours],
+            precip_type=[hour["precipType"] for hour in hours],
+            vis=column("visibility"),
+            smoke=column("smoke"),
+            pop=column("precipProbability"),
+            error=column("precipIntensityError"),
+            cape=column("cape"),
+            lifted_index=column("liftedIndex"),
+            cin=column("convectiveInhibition"),
+            vertical_velocity=column("verticalVelocity"),
+            k_index=column("kIndex"),
+        )
+
+    @classmethod
+    def from_interphour(cls, InterPhour, hour_array_grib, precip_types):
+        """From the hourly matrix the hourly block built hourList_si from:
+        the same values, without going through the dicts."""
+        column = InterPhour[:, :].T
+
+        def col(key):
+            return column[DATA_HOURLY[key]]
+
+        return cls(
+            time=[int(value) for value in hour_array_grib.tolist()],
+            cloud=col("cloud"),
+            wind=col("wind"),
+            rain_intensity=col("rain_intensity"),
+            snow_intensity=col("snow_intensity"),
+            ice_intensity=col("ice_intensity"),
+            temp=col("temp"),
+            dew=col("dew"),
+            liquid=col("rain"),
+            snow=col("snow"),
+            ice=col("ice"),
+            precip_type=list(precip_types),
+            vis=col("vis"),
+            smoke=col("smoke"),
+            pop=col("prob"),
+            error=col("error"),
+            cape=col("cape"),
+            lifted_index=col("lifted_index"),
+            cin=col("convective_inhibition"),
+            vertical_velocity=col("vertical_velocity"),
+            k_index=col("k_index"),
+        )
+
+    def __len__(self):
+        return len(self.time)
+
+    def window(self, start, end):
+        """The hours [start, end) as one summary window."""
+        return HourWindow(self, start, end)
+
+    def thunder(self, row):
+        """Whether hour ``row`` has thunderstorms by all available stability
+        indices. Each hour lies in two or three summary windows, so the
+        score is kept after the first window asks for it."""
+        present = self._thunder[row]
+        if present is None:
+            present = (
+                calculate_thunderstorm_text(
+                    self.cape[row],
+                    mode="summary",
+                    pop=self.pop[row],
+                    lifted_index=self.lifted_index[row],
+                    cin=self.cin[row],
+                    vertical_velocity=self.vertical_velocity[row],
+                    k_index=self.k_index[row],
+                    dewpoint=self.dew[row],
+                    temperature=self.temp[row],
+                )
+                is not None
+            )
+            self._thunder[row] = present
+        return present
+
+
+class HourWindow:
+    """The hours [start, end) of an HourColumns: what calculate_day_text
+    summarises."""
+
+    __slots__ = ("columns", "end", "start")
+
+    def __init__(self, columns, start, end):
+        self.columns = columns
+        self.start = start
+        self.end = end
+
+    def __len__(self):
+        return max(0, self.end - self.start)
+
+
+def _aggregate_periods(window, zone, mode):
+    """Steps 1 and 2 of calculate_day_text: split the hours of a window into
+    periods and aggregate each one from the forecast's HourColumns.
+
+    A period is a slice of the columns reduced with max(), min() and a sum of
+    flags. The accumulations are still added hour by hour (see
+    _sequential_sum). numpy is avoided here on purpose: on a 24-hour window
+    its per-call overhead made this slower than the loop it replaced.
+
+    Returns (period names, per-period aggregations, hourly cloud cover,
+    hourly liquid-equivalent precipitation, hourly wet flags, period index of
+    each hour, temperature and dew point of the foggiest hour).
+    """
+    cols = window.columns
+    start = window.start
+    end = window.end
+    period_names, period_of_hour = _period_of_each_hour(
+        cols.time[start:end], zone, mode
+    )
+
+    # The temperature and dew point of the foggiest hour, for the fog text
+    min_spread = float("inf")
+    temp_at_min_spread = 0.0
+    dewpoint_at_min_spread = 0.0
+    spread = cols.spread
+    for row in range(start, end):
+        if cols.foggy[row] and spread[row] < min_spread:
+            min_spread = spread[row]
+            temp_at_min_spread = cols.temp[row]
+            dewpoint_at_min_spread = cols.dew[row]
+
+    rows_of_period = [[] for _ in period_names]
+    for row, index in enumerate(period_of_hour, start):
+        rows_of_period[index].append(row)
+
+    liquid = cols.liquid
+    snow = cols.snow
+    ice = cols.ice
+    pop = cols.pop
+    precip_type = cols.precip_type
+    error = cols.error
+    temp = cols.temp
+    dew = cols.dew
+    light_wind = WIND_THRESHOLDS["light"]
+    snow_type = PRECIP_TYPES["snow"]
+    rain_type = PRECIP_TYPES["rain"]
+    sleet_type = PRECIP_TYPES["sleet"]
+    freezing_rain_type = PRECIP_TYPES["ice"]
+
+    period_stats = []
+    for rows in rows_of_period:
+        # Hours are in time order, so a period is normally one slice
+        if rows[-1] - rows[0] + 1 == len(rows):
+            period_slice = slice(rows[0], rows[-1] + 1)
+
+            def pick(values, period_slice=period_slice):
+                return values[period_slice]
+
+        else:
+
+            def pick(values, rows=rows):
+                return [values[row] for row in rows]
+
+        data = _new_period_data()
+        data["period_length"] = len(rows)
+        data["cloud_covers"] = pick(cols.cloud)
+        # max()/min() from the initial value: a NaN hour never replaces the
+        # current value, as in the running max of the per-hour loop
+        data["max_wind_speed"] = max([0.0, *pick(cols.wind)])
+        data["max_rain_intensity"] = max([0.0, *pick(cols.rain_intensity)])
+        data["max_snow_intensity"] = max([0.0, *pick(cols.snow_intensity)])
+        data["max_ice_intensity"] = max([0.0, *pick(cols.ice_intensity)])
+        data["min_visibility"] = min([float("inf"), *pick(cols.vis)])
+        fog_rows = [row for row in rows if cols.foggy[row]]
+        data["num_hours_fog"] = len(fog_rows)
+        data["max_smoke"] = max([0.0, *[cols.smoke[row] for row in fog_rows]])
+        # NaN wind never counts
+        data["num_hours_wind"] = sum(value >= light_wind for value in pick(cols.wind))
+        data["rain_accum"] = _sequential_sum(pick(liquid))
+        data["snow_accum"] = _sequential_sum(pick(snow))
+        data["num_hours_precip"] = sum(pick(cols.wet))
+
+        # Only the error of the hour's own precipitation type counts
+        for row in rows:
+            liquid_error_mm = error[row]
+            if math.isnan(liquid_error_mm):
+                continue
+            hour_type = precip_type[row]
+            if hour_type == snow_type and snow[row] > 0.0:
+                # Convert to snow depth (mm) via estimate_snow_height. If
+                # the temperature is missing, fall back to the error directly.
+                if math.isnan(temp[row]):
+                    data["snow_error"] += liquid_error_mm
+                else:
+                    data["snow_error"] += estimate_snow_height(
+                        liquid_error_mm, temp[row], cols.wind[row]
+                    )
+                data["has_snow_error_data"] = True
+            elif hour_type == rain_type and liquid[row] > 0.0:
+                data["rain_error"] += liquid_error_mm
+                data["has_rain_error_data"] = True
+            elif hour_type in (sleet_type, freezing_rain_type) and ice[row] > 0.0:
+                data["ice_error"] += liquid_error_mm
+                data["has_ice_error_data"] = True
+
+        data["frzrain_accum"] = _sequential_sum(
+            ice[row] for row in rows if precip_type[row] == freezing_rain_type
+        )
+        data["sleet_accum"] = _sequential_sum(
+            ice[row] for row in rows if precip_type[row] == sleet_type
+        )
+
+        accum_rows = [
+            row for row in rows if liquid[row] > 0 or snow[row] > 0 or ice[row] > 0
+        ]
+        data["precip_types_in_period"] = [precip_type[row] for row in accum_rows]
+        data["max_pop"] = max([0.0, *[pop[row] for row in accum_rows]])
+
+        # Stability indices are tracked for hours with likely precipitation.
+        # Missing CAPE never raises the max; the thunderstorm score can still
+        # use the other indices.
+        likely_rows = [row for row in accum_rows if pop[row] >= PRECIP_PROB_THRESHOLD]
+        if likely_rows:
+            data["max_cape_with_precip"] = max(
+                [0.0, *[cols.cape[row] for row in likely_rows]]
+            )
+        for row in likely_rows:
+            hour_temp = temp[row]
+            hour_dew = dew[row]
+            # The hour with the highest dew point depression (the first on a tie)
+            if not math.isnan(hour_temp) and not math.isnan(hour_dew):
+                depression = hour_temp - hour_dew
+                if (
+                    data["max_dewpoint_depression"] is None
+                    or depression > data["max_dewpoint_depression"]
+                ):
+                    data["max_dewpoint_depression"] = depression
+                    data["temp_at_max_depression"] = hour_temp
+                    data["dewpoint_at_max_depression"] = hour_dew
+            # Most-unstable (minimum) Lifted Index, strongest upward (minimum)
+            # vertical velocity, least-inhibiting (maximum) CIN, maximum K Index
+            hour_li = cols.lifted_index[row]
+            if not math.isnan(hour_li) and (
+                data["min_li_with_precip"] is None
+                or hour_li < data["min_li_with_precip"]
+            ):
+                data["min_li_with_precip"] = hour_li
+            hour_vert_vel = cols.vertical_velocity[row]
+            if not math.isnan(hour_vert_vel) and (
+                data["max_vert_vel_with_precip"] is None
+                or hour_vert_vel < data["max_vert_vel_with_precip"]
+            ):
+                data["max_vert_vel_with_precip"] = hour_vert_vel
+            hour_cin = cols.cin[row]
+            if not math.isnan(hour_cin) and (
+                data["max_cin_with_precip"] is None
+                or hour_cin > data["max_cin_with_precip"]
+            ):
+                data["max_cin_with_precip"] = hour_cin
+            hour_ki = cols.k_index[row]
+            if not math.isnan(hour_ki) and (
+                data["max_ki_with_precip"] is None
+                or hour_ki > data["max_ki_with_precip"]
+            ):
+                data["max_ki_with_precip"] = hour_ki
+            if cols.thunder(row):
+                data["num_hours_thunderstorm"] += 1
+
+        data["median_cloud_cover"], data["cloud_cover_missing"] = _period_cloud_cover(
+            data["cloud_covers"]
+        )
+        period_stats.append(data)
+
     return (
-        hour["liquidAccumulation"]
-        + hour["iceAccumulation"]
-        + hour["snowAccumulation"] / 10
-    )
-
-
-def _is_wet_hour(hour):
-    """
-    Whether an hour has at least enough precipitation for an hourly
-    precipitation icon. Used to tell all-day precipitation from a few showers.
-    """
-    return (
-        hour["liquidAccumulation"] + hour["iceAccumulation"]
-        >= HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM
-        or hour["snowAccumulation"] >= HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM
+        period_names,
+        period_stats,
+        cols.cloud[start:end],
+        cols.precip_accum[start:end],
+        cols.wet[start:end],
+        period_of_hour,
+        temp_at_min_spread,
+        dewpoint_at_min_spread,
     )
 
 
@@ -548,217 +989,6 @@ def _is_tapering_off(spell, hourly_precip_accum):
         all(later <= earlier for earlier, later in itertools.pairwise(last_amounts))
         and last_amounts[-1] <= max(amounts) * TAPERING_OFF_END_FRACTION
     )
-
-
-def _add_hour_to_period(period_data, hour, icon_set):
-    """
-    Accumulates one hour of forecast data into its period.
-
-    Parameters:
-    - period_data (dict): The period aggregation from _new_period_data.
-    - hour (dict): A sanitized hourly forecast (SI units).
-    - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather.
-
-    Returns:
-    - float | None: The temperature-dewpoint spread if the hour is foggy, otherwise None.
-    """
-    period_data["period_length"] += 1
-    period_data["cloud_covers"].append(hour["cloudCover"])
-    period_data["max_wind_speed"] = max(
-        period_data["max_wind_speed"], hour["windSpeed"]
-    )
-    period_data["max_rain_intensity"] = max(
-        period_data["max_rain_intensity"], hour["rainIntensity"]
-    )
-    period_data["max_snow_intensity"] = max(
-        period_data["max_snow_intensity"], hour["snowIntensity"]
-    )
-    period_data["max_ice_intensity"] = max(
-        period_data["max_ice_intensity"], hour["iceIntensity"]
-    )
-    period_data["min_visibility"] = min(
-        period_data["min_visibility"], hour["visibility"]
-    )
-
-    fog_spread = None
-    if (
-        calculate_vis_text(
-            hour["visibility"],
-            hour["temperature"],
-            hour["dewPoint"],
-            hour["windSpeed"],
-            hour["smoke"],
-            icon_set,
-            "icon",
-        )
-        is not None
-        and hour["rainIntensity"] <= FOG_MAX_LIQUID_INTENSITY
-        and hour["snowIntensity"] <= FOG_MAX_SNOW_INTENSITY
-        and hour["iceIntensity"] <= FOG_MAX_LIQUID_INTENSITY
-    ):
-        period_data["max_smoke"] = max(period_data["max_smoke"], hour["smoke"])
-        period_data["num_hours_fog"] += 1
-        fog_spread = abs(hour["temperature"] - hour["dewPoint"])
-
-    # Count hours at or above the light wind threshold (NaN wind never counts)
-    if hour["windSpeed"] >= WIND_THRESHOLDS["light"]:
-        period_data["num_hours_wind"] += 1
-
-    period_data["rain_accum"] += hour["liquidAccumulation"]
-    period_data["snow_accum"] += hour["snowAccumulation"]
-
-    if _is_wet_hour(hour):
-        period_data["num_hours_precip"] += 1
-
-    # Only accumulate error if it's not nan (missing data) and the hour has
-    # accumulation of its precipitation type. precipIntensityError is an
-    # intensity error (mm/h), so over one hour it is a liquid accumulation
-    # error (mm).
-    liquid_error_mm = hour["precipIntensityError"] * 1.0
-    has_error = not math.isnan(liquid_error_mm)
-    if (
-        has_error
-        and hour["precipType"] == PRECIP_TYPES["snow"]
-        and hour["snowAccumulation"] > 0.0
-    ):
-        # Convert to snow depth (mm) via estimate_snow_height. If temperature
-        # is missing, fall back to using error directly.
-        temp = hour.get("temperature", MISSING_DATA)
-        if temp is None or (isinstance(temp, float) and math.isnan(temp)):
-            estimated_snow_error_mm = liquid_error_mm
-        else:
-            estimated_snow_error_mm = estimate_snow_height(
-                liquid_error_mm, temp, hour.get("windSpeed", 0.0)
-            )
-        period_data["snow_error"] += estimated_snow_error_mm
-        period_data["has_snow_error_data"] = True
-    elif (
-        has_error
-        and hour["precipType"] == PRECIP_TYPES["rain"]
-        and hour["liquidAccumulation"] > 0.0
-    ):
-        period_data["rain_error"] += liquid_error_mm
-        period_data["has_rain_error_data"] = True
-    elif (
-        has_error
-        and hour["precipType"] in (PRECIP_TYPES["sleet"], PRECIP_TYPES["ice"])
-        and hour["iceAccumulation"] > 0.0
-    ):
-        period_data["ice_error"] += liquid_error_mm
-        period_data["has_ice_error_data"] = True
-
-    if hour["precipType"] == PRECIP_TYPES["ice"]:
-        period_data["frzrain_accum"] += hour["iceAccumulation"]
-    elif hour["precipType"] == PRECIP_TYPES["sleet"]:
-        period_data["sleet_accum"] += hour["iceAccumulation"]
-
-    if not (
-        hour["liquidAccumulation"] > 0
-        or hour["snowAccumulation"] > 0
-        or hour["iceAccumulation"] > 0
-    ):
-        return fog_spread
-
-    period_data["precip_types_in_period"].append(hour["precipType"])
-    period_data["max_pop"] = max(period_data["max_pop"], hour["precipProbability"])
-
-    # Track stability indices for hours with likely precipitation. Missing CAPE
-    # is left in: it never raises the max() and the thunderstorm score can
-    # still use the other indices.
-    hour_pop = hour.get("precipProbability", DEFAULT_POP)
-    if hour_pop < PRECIP_PROB_THRESHOLD:
-        return fog_spread
-
-    hour_cape = hour.get("cape", MISSING_DATA)
-    hour_li = hour.get("liftedIndex", None)
-    hour_cin = hour.get("convectiveInhibition", None)
-    hour_vert_vel = hour.get("verticalVelocity", None)
-    hour_ki = hour.get("kIndex", None)
-    hour_temp = hour.get("temperature", None)
-    hour_dew = hour.get("dewPoint", None)
-
-    period_data["max_cape_with_precip"] = max(
-        period_data["max_cape_with_precip"], hour_cape
-    )
-
-    # Record highest dewpoint depression
-    if (
-        hour_temp is not None
-        and not math.isnan(hour_temp)
-        and hour_dew is not None
-        and not math.isnan(hour_dew)
-    ):
-        hour_dep = hour_temp - hour_dew
-        if (
-            period_data["max_dewpoint_depression"] is None
-            or hour_dep > period_data["max_dewpoint_depression"]
-        ):
-            period_data["max_dewpoint_depression"] = hour_dep
-            period_data["temp_at_max_depression"] = hour_temp
-            period_data["dewpoint_at_max_depression"] = hour_dew
-
-    # Most-unstable (minimum) Lifted Index
-    if (
-        hour_li is not None
-        and not math.isnan(hour_li)
-        and (
-            period_data["min_li_with_precip"] is None
-            or hour_li < period_data["min_li_with_precip"]
-        )
-    ):
-        period_data["min_li_with_precip"] = hour_li
-
-    # Strongest upward (minimum) vertical velocity
-    if (
-        hour_vert_vel is not None
-        and not math.isnan(hour_vert_vel)
-        and (
-            period_data["max_vert_vel_with_precip"] is None
-            or hour_vert_vel < period_data["max_vert_vel_with_precip"]
-        )
-    ):
-        period_data["max_vert_vel_with_precip"] = hour_vert_vel
-
-    # Least-inhibiting (maximum/least-negative) CIN
-    if (
-        hour_cin is not None
-        and not math.isnan(hour_cin)
-        and (
-            period_data["max_cin_with_precip"] is None
-            or hour_cin > period_data["max_cin_with_precip"]
-        )
-    ):
-        period_data["max_cin_with_precip"] = hour_cin
-
-    # Maximum K Index
-    if (
-        hour_ki is not None
-        and not math.isnan(hour_ki)
-        and (
-            period_data["max_ki_with_precip"] is None
-            or hour_ki > period_data["max_ki_with_precip"]
-        )
-    ):
-        period_data["max_ki_with_precip"] = hour_ki
-
-    # Count hours with thunderstorms using all available stability indices
-    if (
-        calculate_thunderstorm_text(
-            hour_cape,
-            mode="summary",
-            pop=hour_pop,
-            lifted_index=hour_li,
-            cin=hour_cin,
-            vertical_velocity=hour_vert_vel,
-            k_index=hour_ki,
-            dewpoint=hour_dew,
-            temperature=hour_temp,
-        )
-        is not None
-    ):
-        period_data["num_hours_thunderstorm"] += 1
-
-    return fog_spread
 
 
 def _accumulation_amount(total_accum, total_error, has_error_data, unit_str):
@@ -1016,7 +1246,8 @@ def calculate_day_text(
     Display values are converted based on unit_system.
 
     Parameters:
-    - hours (list): An array of hourly forecast data (in SI units).
+    - hours (list | HourWindow): The hourly forecast data (in SI units): a
+      list of hour dicts, or a window of the forecast's HourColumns.
     - is_day_time (bool): Whether it's currently daytime.
     - time_zone (str): The timezone for the current location.
     - mode (str, optional): Which mode to run the function in ("daily"/"day" or "hour"). Defaults to "daily".
@@ -1033,6 +1264,10 @@ def calculate_day_text(
     if len(hours) > (MAX_HALF_DAY_HOURS if half_day else MAX_HOURS):
         return "none", ("unavailable" if half_day else ["for-day", "unavailable"])
 
+    # A list of hour dicts (tests, fallbacks) becomes its own window
+    if not isinstance(hours, HourWindow):
+        hours = HourColumns.from_hours(hours).window(0, len(hours))
+
     # Half-day summaries treat light rain/sleet/freezing rain a little more strictly
     precip_text_threshold = (
         HALF_DAY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
@@ -1040,49 +1275,17 @@ def calculate_day_text(
         else DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM
     )
 
-    hours = [_sanitize_hour(hour) for hour in hours]
-
     # --- 1. Split the hours into periods and 2. aggregate each period ---
-    zone = _get_zone(time_zone)
-    start_time = datetime.datetime.fromtimestamp(hours[0]["time"], zone)
-
-    # Periods in forecast order (dicts keep insertion order)
-    periods_data = {}
-    # Hourly cloud cover, precipitation and the period index of each hour, for
-    # cloud transitions and how the precipitation falls
-    hourly_cloud_covers = []
-    hourly_precip_accum = []
-    hourly_wet = []
-    hour_period_idx = []
-    period_indices = {}
-    overall_min_temp_dewpoint_spread = float("inf")
-    overall_temp_at_min_spread = 0.0
-    overall_dewpoint_at_min_spread = 0.0
-
-    for hour in hours:
-        local_time = datetime.datetime.fromtimestamp(hour["time"], zone)
-        period_name = _get_period_name(local_time, start_time, mode)
-        if period_name not in periods_data:
-            periods_data[period_name] = _new_period_data()
-            period_indices[period_name] = len(period_indices)
-        hourly_cloud_covers.append(hour["cloudCover"])
-        hourly_precip_accum.append(_hour_precip_accum(hour))
-        hourly_wet.append(_is_wet_hour(hour))
-        hour_period_idx.append(period_indices[period_name])
-
-        fog_spread = _add_hour_to_period(periods_data[period_name], hour, icon_set)
-        # Keep the temperature and dew point of the foggiest hour for the fog text
-        if fog_spread is not None and fog_spread < overall_min_temp_dewpoint_spread:
-            overall_min_temp_dewpoint_spread = fog_spread
-            overall_temp_at_min_spread = hour["temperature"]
-            overall_dewpoint_at_min_spread = hour["dewPoint"]
-
-    all_period_names = list(periods_data)
-    period_stats = list(periods_data.values())
-    for p_data in period_stats:
-        p_data["median_cloud_cover"], p_data["cloud_cover_missing"] = (
-            _period_cloud_cover(p_data["cloud_covers"])
-        )
+    (
+        all_period_names,
+        period_stats,
+        hourly_cloud_covers,
+        hourly_precip_accum,
+        hourly_wet,
+        hour_period_idx,
+        overall_temp_at_min_spread,
+        overall_dewpoint_at_min_spread,
+    ) = _aggregate_periods(hours, _get_zone(time_zone), mode)
 
     # --- 3. Which periods have each condition, and totals for the whole window ---
     precip_periods = []
