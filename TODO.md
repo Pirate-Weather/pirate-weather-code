@@ -178,6 +178,17 @@ there (forecast/historic split, test refactor, ingest standardization) are not l
 and the API's ECMWF grid lookup; the store grows about 6x, so check chunking against
 the read path.
 
+### ECMWF: store relative humidity at ingest
+Do this in the new 0.1° ingest script. The ECMWF store has temperature and dewpoint
+but no humidity, so the API derives it per request with metpy
+(`_calculate_ecmwf_relative_humidity` in `API/current/metrics.py`). Compute 2 m
+relative humidity from `2t`/`2d` at ingest, in percent like GFS and HRRR (URMA
+stores a fraction), and read it directly; this is per-model work that moves upstream exactly. While
+there, fix an inconsistency: the hourly humidity stack (`prepare_data_inputs` in
+`API/data_inputs.py`) leaves ECMWF out entirely, while the current-conditions block
+uses it. Decide whether ECMWF should feed hourly humidity too; adding it changes
+output for locations where ECMWF is the top humidity source.
+
 ### Validate wind direction in the regional models
 As done for HRRR, which rotates grid-relative winds with
 `earth_relative_wind_components` (`API/ingest_utils.py`). Check whether HRDPS
