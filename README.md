@@ -172,6 +172,14 @@ curl 127.0.0.1:8000/forecast/abc123/45.42,-75.70
 
 After rebuilding `pirateingest:latest`, rerun the `--profile ingest create` command so the ingest containers use the new image.
 
+**Optional: LibreWXR radar for the minutely forecast.** The `librewxr` service runs a [LibreWXR](https://github.com/JoshuaKimsey/LibreWXR) data pipeline whose nowcast hook publishes `LibreWXR.zarr` every ~10 minutes; the API then uses the radar nowcast for the minutely block wherever there is radar coverage. It needs ~14 GB of memory and ~5 GB for its cache (`PW_LIBREWXR_CACHE_ROOT`). Its image is built on the Pirate-Weather LibreWXR fork (branch `network-split`), which adds the hooks:
+```
+git clone -b network-split https://github.com/Pirate-Weather/LibreWXR.git ../LibreWXR
+docker build -t librewxr-base:local ../LibreWXR
+docker build -f Docker/pirate-librewxr-dockerfile --build-arg LIBREWXR_IMAGE=librewxr-base:local -t pirate-librewxr:latest .
+docker compose -f pirate-compose_oph.local.yml --profile librewxr up -d librewxr
+```
+
 **Filesystem note (Ubuntu/Linux):** prefer `ext4` for all three roots. Large ingest runs are significantly faster and more reliable on `ext4` than `NTFS` mounts.
 
 ## Development
