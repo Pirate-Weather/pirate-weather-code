@@ -12,6 +12,11 @@ concurrency:
 
 env:
   IMAGE_VERSION: ${{ github.event_name == 'release' && 'release' || 'dev' }}
+  # LibreWXR source the Pirate Weather LibreWXR image is built on: the fork
+  # branch carrying the hooks and snapshot sync until they are upstream, then
+  # JoshuaKimsey/LibreWXR at a release tag.
+  LIBREWXR_REPO: Pirate-Weather/LibreWXR
+  LIBREWXR_REF: network-split
   RELEASE_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
 
 #################################################################
@@ -227,6 +232,141 @@ jobs:
             $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
             $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
             
+          if [ -n "$RELEASE_VERSION" ]; then
+            docker buildx imagetools create -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
+          fi
+
+#################################################################
+# LIBREWXR IMAGE BUILD (LibreWXR pipeline + the nowcast export hook)
+#################################################################
+# Built on LibreWXR from LIBREWXR_REPO@LIBREWXR_REF (see env above) plus this
+# repository's code, for the LibreWXR pipeline service to run the nowcast
+# hook (Docker/pirate-librewxr-dockerfile). Not part of the API deployment
+# below: the pipeline runs on the OVH host, which pulls the new tag itself.
+
+  librewxr_arm:
+    name: Build LibreWXR Image (ARM)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Checkout LibreWXR (${{ env.LIBREWXR_REPO }}@${{ env.LIBREWXR_REF }})
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ${{ env.LIBREWXR_REPO }}
+          ref: ${{ env.LIBREWXR_REF }}
+          path: librewxr-src
+
+      - name: Build the LibreWXR base image
+        run: docker build -t librewxr-base:ci librewxr-src
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public (arm64)
+        id: login-librewxr-arm
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Build and push LibreWXR arm64 image
+        env:
+          REGISTRY: ${{ steps.login-librewxr-arm.outputs.registry }}
+          REGISTRY_ALIAS: j9v4j3c7
+          REPOSITORY: pirate-librewxr
+          IMAGE_TAG: ${{ env.IMAGE_VERSION }}-arm64
+        run: |
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+            -f Docker/pirate-librewxr-dockerfile --build-arg LIBREWXR_IMAGE=librewxr-base:ci .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          if [ -n "$RELEASE_VERSION" ]; then
+            docker tag $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
+            docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-arm64
+          fi
+
+  librewxr_x64:
+    name: Build LibreWXR Image (x64)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Checkout LibreWXR (${{ env.LIBREWXR_REPO }}@${{ env.LIBREWXR_REF }})
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ${{ env.LIBREWXR_REPO }}
+          ref: ${{ env.LIBREWXR_REF }}
+          path: librewxr-src
+
+      - name: Build the LibreWXR base image
+        run: docker build -t librewxr-base:ci librewxr-src
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public (amd64)
+        id: login-librewxr-x64
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Build and push LibreWXR amd64 image
+        env:
+          REGISTRY: ${{ steps.login-librewxr-x64.outputs.registry }}
+          REGISTRY_ALIAS: j9v4j3c7
+          REPOSITORY: pirate-librewxr
+          IMAGE_TAG: ${{ env.IMAGE_VERSION }}-amd64
+        run: |
+          docker build -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+            -f Docker/pirate-librewxr-dockerfile --build-arg LIBREWXR_IMAGE=librewxr-base:ci .
+          docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG
+          if [ -n "$RELEASE_VERSION" ]; then
+            docker tag $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+              $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64
+            docker push $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64
+          fi
+
+  manifest_librewxr:
+    name: Create LibreWXR MultiArch Manifest
+    needs: [librewxr_arm, librewxr_x64]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR Public (Manifest LibreWXR)
+        id: login-manifest-librewxr
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Create and push manifest for LibreWXR image
+        env:
+          REGISTRY: ${{ steps.login-manifest-librewxr.outputs.registry }}
+          REGISTRY_ALIAS: j9v4j3c7
+          REPOSITORY: pirate-librewxr
+          IMAGE_TAG: ${{ env.IMAGE_VERSION }}
+        run: |
+          docker buildx imagetools create -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+            $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
+            $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
+
           if [ -n "$RELEASE_VERSION" ]; then
             docker buildx imagetools create -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION \
               $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$RELEASE_VERSION-amd64 \

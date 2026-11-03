@@ -15,11 +15,16 @@
 # and the Pirate Weather Prod and work volumes mounted at forecast_path /
 # forecast_process_dir. The render workers keep the plain LibreWXR image.
 #
-#   docker build -f Docker/pirate-librewxr-dockerfile -t pirate-librewxr .
+#   docker build -f Docker/pirate-librewxr-dockerfile -t pirate-librewxr \
+#       --build-arg LIBREWXR_IMAGE=<librewxr image> .
 # ======================================================================
 
-ARG LIBREWXR_IMAGE_TAG=latest
-FROM ghcr.io/joshuakimsey/librewxr:${LIBREWXR_IMAGE_TAG}
+# The LibreWXR image to build on. The hooks and snapshot sync this image
+# relies on live on the Pirate-Weather/LibreWXR fork until they are merged
+# upstream, so CI builds that fork first and passes it here; once upstream
+# ships them, point this at ghcr.io/joshuakimsey/librewxr:<release>.
+ARG LIBREWXR_IMAGE=ghcr.io/joshuakimsey/librewxr:latest
+FROM ${LIBREWXR_IMAGE}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

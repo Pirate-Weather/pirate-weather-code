@@ -212,9 +212,12 @@ render nodes can run in several regions with the last good data if the pipeline 
   rewrites the pipeline's absolute paths, writes `state.json` last and prunes the
   per-node caches. Measured on this host: ~1 GB raw per 10-minute cycle at full
   regions. Nothing is needed on the Pirate Weather side.
-- [ ] Deploy: run LibreWXR's pipeline service from `Docker/pirate-librewxr-dockerfile`
-  (the LibreWXR image plus this repo's code) with the nowcast hook set, and the
-  state and lightning hooks once the cache mirror exists.
+- [ ] Deploy: run LibreWXR's pipeline service from the `pirate-librewxr` image
+  (`Docker/pirate-librewxr-dockerfile`: LibreWXR from the fork branch plus this
+  repo's code; built and pushed to ECR Public by `build.yml`, build-checked by
+  `sanity.yml`) with `LIBREWXR_HOOK_NOWCAST_CMD` and `LIBREWXR_SNAPSHOT_SYNC_URL`
+  set. Switch `LIBREWXR_REF` in both workflows to an upstream release tag once
+  the hooks and snapshot sync PRs are merged.
 
 ### Own ERA5 dataset
 Only the needed variables, chunked for point reads, based on the Google ARCO pipeline
