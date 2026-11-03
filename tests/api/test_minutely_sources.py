@@ -203,3 +203,53 @@ def test_librewxr_echo_without_model_precip_is_typed_rain():
 
     assert minute_items[0]["precipType"] == "rain"
     assert minute_items[0]["precipIntensity"] > 0
+
+
+def test_reps_rows_without_time_do_not_blank_minutes_inside_its_span():
+    """Regression: merged arrays start at local midnight, so a model without
+    short-term history (REPS) has NaN times before its first lead and after its
+    last. Those rows broke np.interp's search, and minute 0 of the Canadian
+    chance and error came back missing although REPS had both hours around it.
+    An hour blanked inside the span must still stay missing, not be bridged.
+    """
+    hour = 3600.0
+    midnight = 1793664000.0
+    reps = np.zeros((199, max(REPS.values()) + 1))
+    reps[:, 0] = midnight + hour * np.arange(199)
+    reps[:, REPS["prob"]] = 0.8
+    reps[:, REPS["error"]] = 0.4
+    # The REPS run covers rows 10-79 (its 72 h of leads); the rest have no time
+    reps[:10, 0] = np.nan
+    reps[80:, 0] = np.nan
+    minutes = midnight + 11 * hour + 15 * 60 + 60 * np.arange(61)
+
+    def build(reps_data):
+        return build_minutely_block(
+            minute_array_grib=minutes,
+            source_list=["reps"],
+            hrrr_subh_data=None,
+            hrrr_merged=None,
+            nbm_data=None,
+            dwd_mosmix_data=None,
+            gefs_data=None,
+            gfs_data=None,
+            ecmwf_data=None,
+            era5_data=None,
+            prep_intensity_unit=1.0,
+            version=2,
+            lat=45.42,
+            lon=-75.69,
+            reps_data=reps_data,
+        )[0]
+
+    minutely = build(reps)
+    np.testing.assert_allclose(_column(minutely, "prob"), 0.8)
+    np.testing.assert_allclose(_column(minutely, "error"), 0.4)
+
+    # Hour 12 missing for every variable (the reader blanks its time too):
+    # the minutes next to it have no value, as in the hourly block.
+    gap = reps.copy()
+    gap[12, :] = np.nan
+    minutely = build(gap)
+    assert np.isnan(_column(minutely, "prob")).all()
+    assert np.isnan(_column(minutely, "error")).all()

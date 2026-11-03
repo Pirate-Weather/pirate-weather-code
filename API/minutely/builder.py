@@ -40,6 +40,51 @@ from API.utils.precip import dbz_to_rate
 from API.utils.source_priority import should_gfs_precede_dwd
 
 
+def _rows_with_time(model_data):
+    """
+    Return a model array whose time column np.interp can search.
+
+    The merged arrays cover the whole request window from local midnight, so
+    rows before a model's first lead (models without short-term history, such
+    as REPS) and after its last lead have NaN times, as does any row the reader
+    blanked because every variable was missing. np.interp and
+    fast_nearest_interp need increasing sample times: a NaN breaks their binary
+    search, and a minute that lies between two valid hours can come back NaN
+    (seen at minute 0 for REPS probability and error in Canada).
+
+    Rows outside the model's span are dropped: no data exists there, and the
+    interpolation's left/right fill already marks those minutes missing. A row
+    without a time inside the span keeps its NaN values and gets its time from
+    its neighbours, so missing data stays missing instead of being bridged.
+
+    Returns:
+        The array with a finite, increasing time column, or None when no row
+        has a time.
+    """
+    if model_data is None or len(model_data) == 0:
+        return model_data
+
+    times = model_data[:, 0]
+    has_time = np.isfinite(times)
+    if has_time.all():
+        return model_data
+    if not has_time.any():
+        return None
+
+    timed_rows = np.flatnonzero(has_time)
+    trimmed = model_data[timed_rows[0] : timed_rows[-1] + 1]
+    trimmed_has_time = has_time[timed_rows[0] : timed_rows[-1] + 1]
+    if not trimmed_has_time.all():
+        trimmed = trimmed.copy()
+        row_index = np.arange(len(trimmed))
+        trimmed[~trimmed_has_time, 0] = np.interp(
+            row_index[~trimmed_has_time],
+            row_index[trimmed_has_time],
+            trimmed[trimmed_has_time, 0],
+        )
+    return trimmed
+
+
 def _interp_cmc(minute_array_grib, model_data, categorical_columns=()):
     """Interpolate a CMC model array to the minutely time grid."""
     if model_data is None or len(model_data) == 0:
@@ -1101,6 +1146,21 @@ def build_minutely_block(
     """
     InterPminute = np.full((61, max(DATA_MINUTELY.values()) + 1), MISSING_DATA)
     InterPminute[:, DATA_MINUTELY["time"]] = minute_array_grib
+
+    # Every interpolation below searches the model's time column, which has NaN
+    # rows outside the model's span; give each model a searchable time column
+    # first. LibreWXR masks its own rows (time and reflectivity both finite).
+    hrrr_subh_data = _rows_with_time(hrrr_subh_data)
+    hrrr_merged = _rows_with_time(hrrr_merged)
+    nbm_data = _rows_with_time(nbm_data)
+    dwd_mosmix_data = _rows_with_time(dwd_mosmix_data)
+    gefs_data = _rows_with_time(gefs_data)
+    gfs_data = _rows_with_time(gfs_data)
+    ecmwf_data = _rows_with_time(ecmwf_data)
+    era5_data = _rows_with_time(era5_data)
+    gdps_data = _rows_with_time(gdps_data)
+    geps_data = _rows_with_time(geps_data)
+    reps_data = _rows_with_time(reps_data)
 
     # Interpolate data sources
     gefsMinuteInterpolation = (
