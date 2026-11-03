@@ -1220,6 +1220,26 @@ async def calculate_grid_indexing(
                 seconds=LIBREWXR_MAX_NOWCAST_AGE_SECONDS
             ):
                 dataOut_librewxr = False
+        if dataOut_librewxr is not False:
+            sourceIDX["librewxr"] = {
+                "x": int(x_librewxr),
+                "y": int(y_librewxr),
+                "lat": round(
+                    LIBREWXR_LAT_START - y_librewxr * LIBREWXR_GRID_RESOLUTION_DEG, 2
+                ),
+                "lon": round(
+                    (
+                        (
+                            LIBREWXR_LON_START
+                            + x_librewxr * LIBREWXR_GRID_RESOLUTION_DEG
+                            + 180
+                        )
+                        % 360
+                    )
+                    - 180,
+                    2,
+                ),
+            }
 
     if readHRRR:
         dataOut = zarr_results["SubH"]
