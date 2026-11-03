@@ -188,17 +188,20 @@ Plan in [pirateweather discussion #414](https://github.com/Pirate-Weather/pirate
 use LibreWXR's global radar nowcast for minutely precipitation worldwide (likely
 better than HRRR sub-hourly even inside its domain), and mirror its cache to S3 so
 render nodes can run in several regions with the last good data if the pipeline fails.
-- [x] Minutely store: `ingest/LibreWXR_Local_Ingest.py`, a sidecar polling the
-  pipeline's `state.json` (no LibreWXR changes needed: every handoff is already an
-  atomically replaced file), publishes `LibreWXR.zarr` (see Done, 2026-11-02).
+- [x] Minutely store: `ingest/LibreWXR_Local_Ingest.py`, run by LibreWXR's nowcast
+  hook once per nowcast, publishes `LibreWXR.zarr` (see Done, 2026-11-02).
+- [ ] Upstream the hooks: branch `cycle-hooks` of the LibreWXR fork adds
+  `LIBREWXR_HOOK_STATE_CMD` / `LIBREWXR_HOOK_NOWCAST_CMD` / `LIBREWXR_HOOK_LIGHTNING_CMD`
+  (`src/librewxr/hooks.py`); submit it as a PR to JoshuaKimsey/LibreWXR.
 - [ ] Mirror the LibreWXR cache (`state.json`, radar/NWP/nowcast memmaps, lightning
   artifact) file by file to S3 after each cycle, and a pull side for render nodes
   that writes `state.json` last and rewrites the pipeline's absolute `memmap_dir`
   paths. Exclude the per-node caches (`coord/`, `tiles_shared/`, `workers/`).
   About 1 GB per 10-minute cycle, mostly the nowcast memmaps (measured; accepted).
   Joshua's roadmap has the same idea as "network split mode" (LibreWXR issue #51).
-- [ ] Run the sidecar as a compose service (`Docker/pirate-librewxr-sidecar-dockerfile`,
-  built on the LibreWXR image) next to LibreWXR's own pipeline + renderer services.
+- [ ] Deploy: run LibreWXR's pipeline service from `Docker/pirate-librewxr-dockerfile`
+  (the LibreWXR image plus this repo's code) with the nowcast hook set, and the
+  state and lightning hooks once the cache mirror exists.
 
 ### Own ERA5 dataset
 Only the needed variables, chunked for point reads, based on the Google ARCO pipeline
@@ -368,7 +371,7 @@ implausible value blanks every above-max value").
 ## Done
 
 ### LibreWXR radar nowcast for the minutely block (2026-11-02)
-`ingest/LibreWXR_Local_Ingest.py` composites LibreWXR's latest radar frame (T+0) and
+`ingest/LibreWXR_Local_Ingest.py`, run by LibreWXR's nowcast hook, composites LibreWXR's latest radar frame (T+0) and
 its nine 10-minute nowcast steps onto one global 0.04 degree grid as composite
 reflectivity (`REFC_composite`, dBZ; NaN outside radar coverage, 0 below
 `REFC_THRESHOLD`) and publishes `LibreWXR.zarr` with `write_final_zarr` /
