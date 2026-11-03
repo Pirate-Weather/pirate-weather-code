@@ -1,13 +1,13 @@
 """LibreWXR radar nowcast export for the minutely forecast.
 
-A sidecar to the LibreWXR data pipeline (https://github.com/JoshuaKimsey/LibreWXR).
-It polls the pipeline's cache directory (``LIBREWXR_CACHE_DIR``, where the pipeline
-rewrites ``state.json`` after every fetch cycle) and, whenever a new nowcast has been
-generated, composites the latest observed radar frame (T+0) and every extrapolated
-nowcast step (T+10 ... T+90 min at the default 9 frames) onto one global 0.04 degree
-lat/lon grid as composite reflectivity in dBZ. The result is published as
-``LibreWXR.zarr`` and ``LibreWXR.time.pickle`` in the same layout as the other final
-stores, so the API reads it like any other model.
+Run by a LibreWXR data pipeline's nowcast hook (``LIBREWXR_HOOK_NOWCAST_CMD``,
+https://github.com/JoshuaKimsey/LibreWXR) once per nowcast, after the pipeline
+has written the ``state.json`` snapshot that names the nowcast memmaps. It
+composites the latest observed radar frame (T+0) and every extrapolated nowcast
+step (T+10 ... T+90 min at the default 9 frames) onto one global 0.04 degree
+lat/lon grid as composite reflectivity in dBZ and publishes the result as
+``LibreWXR.zarr`` and ``LibreWXR.time.pickle`` in the same layout as the other
+final stores, so the API reads it like any other model.
 
 Values follow LibreWXR's own point sampling (``librewxr.mcp.sampling``): the finest
 radar region covering a cell wins, the stored uint8 pixel ``(dBZ + 32) * 2`` is decoded,
@@ -16,17 +16,19 @@ exported, never the NWP blend LibreWXR uses for its tiles, so cells outside rada
 coverage are NaN and the API falls back to its models there. Inside coverage, no echo
 and reflectivity below ``REFC_THRESHOLD`` are 0 dBZ, as for HRRR.
 
-Runs for ever by default; ``--once`` does a single pass (for a scheduler or a test).
-Needs the ``librewxr`` package importable, with the same ``LIBREWXR_*`` settings as
-the pipeline (region list, RRQPE offset), e.g. by running it from the pipeline's
-environment file.
+One pass per run, like the other ingests: it reads the cache the hook names
+(``LIBREWXR_CACHE_DIR``), exits early when that nowcast is already published, and
+exits non-zero on failure so the pipeline logs it. It runs inside the pipeline's
+environment, so it needs the ``librewxr`` package (region definitions, projections,
+coverage masks) and the store writer's dependencies; ``Docker/pirate-librewxr-dockerfile``
+builds that image. The publishing settings are the usual ingest ones (``save_type``,
+``forecast_path``, ``forecast_process_dir``, ``AWS_KEY`` / ``AWS_SECRET``, ``s3_endpoint``).
 
 Alexander Rey, November 2026
 """
 
 from __future__ import annotations
 
-import argparse
 import logging
 import os
 import shutil
@@ -77,7 +79,6 @@ LIBREWXR_MAX_VALID_DBZ = 80.0
 ingest_version = INGEST_VERSION_STR
 
 librewxr_cache_dir = os.getenv("LIBREWXR_CACHE_DIR", default="")
-poll_seconds = float(os.getenv("LIBREWXR_POLL_SECONDS", default="15"))
 
 forecast_process_dir = os.getenv(
     "forecast_process_dir", default="/mnt/nvme/data/LibreWXR"
@@ -394,13 +395,8 @@ def export_nowcast(
     return True
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Poll the LibreWXR cache and export each new nowcast."""
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--once", action="store_true", help="do one pass instead of polling for ever"
-    )
-    args = parser.parse_args(argv)
+def main() -> int:
+    """Export the nowcast the LibreWXR cache currently holds; one pass."""
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
@@ -418,35 +414,20 @@ def main(argv: list[str] | None = None) -> int:
         aws_access_key_id,
         aws_secret_access_key,
     )
-    logger.info(
-        "Watching %s every %.0f s, publishing to %s",
-        cache_dir,
-        poll_seconds,
-        forecast_path,
-    )
 
-    last_mtime = None
-    while True:
-        mtime = lib["state_mtime"](cache_dir)
-        if mtime is not None and mtime != last_mtime:
-            try:
-                if not export_nowcast(
-                    lib, cache_dir, forecast_remote, zarr_store_workers
-                ):
-                    logger.info("No Update to LibreWXR")
-                last_mtime = mtime
-            except LookupError as exc:
-                # The pipeline is still warming up; state.json is rewritten every cycle
-                logger.info("LibreWXR not ready: %s", exc)
-                last_mtime = mtime
-            except (OSError, ValueError):
-                # A memmap replaced mid-read or an invalid composite: the next
-                # state.json rewrite retries from scratch
-                logger.exception("LibreWXR export failed; retrying on the next cycle")
-                last_mtime = mtime
-        if args.once:
-            return 0
-        time.sleep(poll_seconds)
+    try:
+        if not export_nowcast(lib, cache_dir, forecast_remote, zarr_store_workers):
+            logger.info("No Update to LibreWXR")
+    except LookupError as exc:
+        # The pipeline is still warming up, or this snapshot predates its
+        # nowcast; the hook runs again for the next one
+        logger.info("LibreWXR not ready: %s", exc)
+    except (OSError, ValueError):
+        # A memmap replaced mid-read or an invalid composite: the next nowcast
+        # starts from scratch, and the pipeline logs this exit
+        logger.exception("LibreWXR export failed")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

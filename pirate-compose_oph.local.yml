@@ -262,33 +262,6 @@ services:
       zarr_store_workers: "2"
     command: ["ingest/HRRR_6H_Local_Ingest.py"]
 
-  # LibreWXR radar nowcast for the minutely block. Not scheduled: a long-lived
-  # sidecar that polls the LibreWXR pipeline's cache (its state.json is rewritten
-  # after every 10-minute fetch cycle) and publishes LibreWXR.zarr each time a
-  # new nowcast appears. Mount the LibreWXR cache volume read-only at the same
-  # path the pipeline uses (docker-compose.yml in the LibreWXR repository mounts
-  # it at /data/cache) and give it the same LIBREWXR_* settings file, so region
-  # lists and the RRQPE calibration offset match the pipeline. Build with
-  # Docker/pirate-librewxr-sidecar-dockerfile (based on the LibreWXR image).
-  librewxr_sidecar:
-    image: pirate-librewxr-sidecar:latest
-    container_name: pirate-librewxr-sidecar
-    profiles: ["librewxr"]
-    restart: unless-stopped
-    mem_limit: 6g
-    env_file:
-      - ${LIBREWXR_ENV_FILE:-/dev/null}
-    environment:
-      <<: *ingest_env
-      forecast_process_dir: "/work/LibreWXR"
-      zarr_store_workers: "4"
-      LIBREWXR_CACHE_DIR: "/data/cache"
-      LIBREWXR_POLL_SECONDS: "15"
-    volumes:
-      - ${PW_PROD_ROOT:?set PW_PROD_ROOT in .env}:/data/Prod
-      - ${PW_WORK_ROOT:?set PW_WORK_ROOT in .env}:/work
-      - librewxr-cache:/data/cache:ro
-
   subh_ingest:
     <<: *ingest
     container_name: pirate-ingest-subh
@@ -446,11 +419,3 @@ services:
       forecast_process_dir: "/work/WMO_Alerts"
       historic_path: "/data/Hist/WMO_Alerts"
     command: ["ingest/WMO_Alerts_Local.py"]
-
-volumes:
-  # The LibreWXR compose project's cache volume (docker names it
-  # <project>_librewxr-cache; set LIBREWXR_CACHE_VOLUME if the project is not
-  # "librewxr"), mounted read-only into the sidecar.
-  librewxr-cache:
-    external: true
-    name: ${LIBREWXR_CACHE_VOLUME:-librewxr_librewxr-cache}
