@@ -148,6 +148,7 @@ class InitialRequestContext:
     ex_reps: int
     inc_day_night: int
     inc_aimodels: int
+    inc_rrfs: int
     inc_airqualitydetails: int
     summary_text: bool
     unit_system: str
@@ -467,6 +468,9 @@ def _parse_parameters(
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
     inc_aimodels = int("aimodels" in included)
+    # include=rrfs reads RRFS (NOAA's planned HRRR replacement) and puts it
+    # first in every element's priority order; without it RRFS is never read.
+    inc_rrfs = int("rrfs" in included)
     inc_airqualitydetails = int("airqualitydetails" in include_params)
 
     if inc_aimodels:
@@ -479,6 +483,7 @@ def _parse_parameters(
         ex_nbm = 1
         ex_alerts = 1
         ex_hrrr = 1
+        inc_rrfs = 0
         ex_gefs = 1
         ex_rtma_ru = 1
         ex_ecmwf = 1
@@ -491,6 +496,8 @@ def _parse_parameters(
         ex_minutely = 1
     if time_machine:
         ex_alerts = 1
+        # RRFS stores keep no history
+        inc_rrfs = 0
         ex_dwd_mosmix = 1
         ex_librewxr = 1
 
@@ -527,6 +534,7 @@ def _parse_parameters(
         ex_reps,
         ex_urma,
         ex_librewxr,
+        inc_rrfs,
     )
 
 
@@ -730,6 +738,7 @@ async def prepare_initial_request(
         ex_reps,
         ex_urma,
         ex_librewxr,
+        inc_rrfs,
     ) = _parse_parameters(
         exclude,
         include,
@@ -892,6 +901,7 @@ async def prepare_initial_request(
         ex_librewxr=ex_librewxr,
         inc_day_night=inc_day_night,
         inc_aimodels=inc_aimodels,
+        inc_rrfs=inc_rrfs,
         inc_airqualitydetails=inc_airqualitydetails,
         summary_text=summary_text,
         unit_system=unit_system,

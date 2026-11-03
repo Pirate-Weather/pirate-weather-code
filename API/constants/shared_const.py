@@ -49,6 +49,12 @@ HISTORY_PERIODS = {
 # the model run time as the first stored valid time minus this lead.
 FIRST_FORECAST_LEAD_HOURS = {
     "HRRR": 1,
+    "RRFS": 1,
+    "RRFS_6H": 18,
+    "RRFS_NA": 1,
+    "RRFS_NA_6H": 18,
+    # RRFS sub-hourly starts at the first 15-minute step
+    "RRFS_SubH": 0.25,
     "NBM": 1,
     "GEFS": 3,
     "HRDPS": 1,

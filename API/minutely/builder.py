@@ -33,6 +33,8 @@ from API.constants.model_const import (
     LIBREWXR,
     NBM,
     REPS,
+    RRFS,
+    RRFS_SUBH,
 )
 from API.constants.shared_const import MISSING_DATA
 from API.utils.geo import is_in_canada
@@ -286,6 +288,64 @@ def _interp_hrrr(minute_array_grib, hrrr_subh_data, hrrr_merged):
                 right=MISSING_DATA,
             )
     return hrrrSubHInterpolation
+
+
+def _interp_rrfs(minute_array_grib, rrfs_subh_data, rrfs_merged):
+    """
+    Interpolate RRFS (include=rrfs) to minutely intervals in the RRFS_SUBH layout.
+
+    The 15-minute store is used where it covers the hour; it only runs to 5 h
+    and exists for CONUS only, so otherwise (and on the 13 km North American
+    grid) the hourly RRFS fields fill the same columns. Columns the hourly
+    store does not have stay NaN so later sources fill them.
+
+    Returns:
+        Interpolated RRFS data, or None without any RRFS data.
+    """
+    if rrfs_subh_data is not None:
+        rrfsSubHInterpolation = np.full(
+            (len(minute_array_grib), len(rrfs_subh_data[0, :])), np.nan
+        )
+        for i in range(len(rrfs_subh_data[0, :]) - 1):
+            rrfsSubHInterpolation[:, i + 1] = np.interp(
+                minute_array_grib,
+                rrfs_subh_data[:, 0].squeeze(),
+                rrfs_subh_data[:, i + 1],
+                left=MISSING_DATA,
+                right=MISSING_DATA,
+            )
+        if not np.isnan(rrfsSubHInterpolation[1, 1]) or rrfs_merged is None:
+            return rrfsSubHInterpolation
+    elif rrfs_merged is None:
+        return None
+
+    rrfsSubHInterpolation = np.full(
+        (len(minute_array_grib), max(RRFS_SUBH.values()) + 1), np.nan
+    )
+    for key in [
+        "gust",
+        "pressure",
+        "temp",
+        "dew",
+        "wind_u",
+        "wind_v",
+        "intensity",
+        "snow",
+        "ice",
+        "freezing_rain",
+        "rain",
+        "refc",
+        "solar",
+        "vis",
+    ]:
+        rrfsSubHInterpolation[:, RRFS_SUBH[key]] = np.interp(
+            minute_array_grib,
+            rrfs_merged[:, 0].squeeze(),
+            rrfs_merged[:, RRFS[key]],
+            left=MISSING_DATA,
+            right=MISSING_DATA,
+        )
+    return rrfsSubHInterpolation
 
 
 def _interp_librewxr(minute_array_grib, librewxr_data):
@@ -618,6 +678,7 @@ def _calculate_precip_type_probs(
     lat,
     lon,
     prioritize_ai_models=False,
+    rrfsSubHInterpolation=None,
 ):
     """
     Calculate precipitation type probabilities.
@@ -641,6 +702,19 @@ def _calculate_precip_type_probs(
         Array of precipitation type probabilities.
     """
     InterTminute = np.zeros((61, 5))
+
+    # RRFS is only present for include=rrfs, which puts it ahead of every model
+    if rrfsSubHInterpolation is not None and not np.all(
+        np.isnan(rrfsSubHInterpolation[:, RRFS_SUBH["rain"]])
+    ):
+        for i in [
+            RRFS_SUBH["snow"],
+            RRFS_SUBH["ice"],
+            RRFS_SUBH["freezing_rain"],
+            RRFS_SUBH["rain"],
+        ]:
+            InterTminute[:, i - 7] = rrfsSubHInterpolation[:, i]
+        return InterTminute
 
     # Determine priority order based on location
     # In North America: ECMWF > GFS > DWD MOSMIX > GEFS > ERA5
@@ -770,6 +844,7 @@ def _calculate_intensity(
     lat,
     lon,
     prioritize_ai_models=False,
+    rrfsSubHInterpolation=None,
 ):
     """
     Calculate precipitation intensity.
@@ -790,6 +865,26 @@ def _calculate_intensity(
     """
     intensity = np.full(len(precipTypes), MISSING_DATA)
     refc_used = False
+
+    # RRFS (include=rrfs) leads, from reflectivity like the HRRR path below
+    if rrfsSubHInterpolation is not None and not np.all(
+        np.isnan(rrfsSubHInterpolation[:, RRFS_SUBH["refc"]])
+    ):
+        temp_arr = rrfsSubHInterpolation[:, RRFS_SUBH["temp"]]
+        refc_arr = rrfsSubHInterpolation[:, RRFS_SUBH["refc"]]
+        mask = (precipTypes == PRECIP_TYPES["none"]) & (refc_arr > 0)
+        precipTypes[mask] = np.where(
+            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
+            PRECIP_TYPES["rain"],
+            np.where(
+                temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C,
+                PRECIP_TYPES["snow"],
+                PRECIP_TYPES["sleet"],
+            ),
+        )
+        intensity = dbz_to_rate(refc_arr, precipTypes)
+        refc_used = True
+        return intensity, precipTypes, refc_used
 
     if prioritize_ai_models:
         if should_gfs_precede_dwd(lat, lon):
@@ -1106,6 +1201,8 @@ def build_minutely_block(
     geps_data: np.ndarray | None = None,
     reps_data: np.ndarray | None = None,
     librewxr_data: np.ndarray | None = None,
+    rrfs_subh_data: np.ndarray | None = None,
+    rrfs_merged: np.ndarray | None = None,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -1114,6 +1211,7 @@ def build_minutely_block(
     np.ndarray,
     list,
     list,
+    np.ndarray | None,
     np.ndarray | None,
 ]:
     """
@@ -1136,6 +1234,9 @@ def build_minutely_block(
         era5_data: ERA5 data.
         librewxr_data: LibreWXR radar composite (reflectivity at T+0 and each
             nowcast step), which takes precedence wherever it has coverage.
+        rrfs_subh_data: RRFS sub-hourly data (include=rrfs only).
+        rrfs_merged: RRFS merged hourly data (include=rrfs only). RRFS leads
+            every model; only the LibreWXR radar observations take precedence.
         prep_intensity_unit: Precipitation intensity unit.
         version: API version.
         lat: Latitude of the location.
@@ -1161,6 +1262,8 @@ def build_minutely_block(
     gdps_data = _rows_with_time(gdps_data)
     geps_data = _rows_with_time(geps_data)
     reps_data = _rows_with_time(reps_data)
+    rrfs_subh_data = _rows_with_time(rrfs_subh_data)
+    rrfs_merged = _rows_with_time(rrfs_merged)
 
     # Interpolate data sources
     gefsMinuteInterpolation = (
@@ -1182,6 +1285,7 @@ def build_minutely_block(
         if "hrrrsubh" in source_list
         else None
     )
+    rrfsSubHInterpolation = _interp_rrfs(minute_array_grib, rrfs_subh_data, rrfs_merged)
     librewxrMinuteInterpolation = (
         _interp_librewxr(minute_array_grib, librewxr_data)
         if "librewxr" in source_list
@@ -1258,6 +1362,7 @@ def build_minutely_block(
         lat,
         lon,
         prioritize_ai_models,
+        rrfsSubHInterpolation=rrfsSubHInterpolation,
     )
 
     maxPchance = (
@@ -1316,11 +1421,17 @@ def build_minutely_block(
         lat,
         lon,
         prioritize_ai_models,
+        rrfsSubHInterpolation=rrfsSubHInterpolation,
     )
     # LibreWXR radar takes precedence over every model wherever it has coverage
     if librewxrMinuteInterpolation is not None:
         intensity, precipTypes = _apply_librewxr_intensity(
-            intensity, precipTypes, hrrrSubHInterpolation, librewxrMinuteInterpolation
+            intensity,
+            precipTypes,
+            rrfsSubHInterpolation
+            if rrfsSubHInterpolation is not None
+            else hrrrSubHInterpolation,
+            librewxrMinuteInterpolation,
         )
         refc_used = True
     InterPminute[:, DATA_MINUTELY["intensity"]] = intensity
@@ -1397,4 +1508,5 @@ def build_minutely_block(
         pTypesText,
         pTypesIcon,
         hrrrSubHInterpolation,
+        rrfsSubHInterpolation,
     )

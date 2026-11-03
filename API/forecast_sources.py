@@ -16,6 +16,7 @@ from API.constants.model_const import (
     GFS,
     HRDPS,
     REPS,
+    RRFS,
     URMA,
 )
 from API.constants.shared_const import MISSING_DATA
@@ -69,6 +70,7 @@ class MergeResult:
     aifs: np.ndarray | None
     metadata: SourceMetadata
     urma: np.ndarray | None = None
+    rrfs: np.ndarray | None = None
 
 
 def nearest_index(a, v) -> int:
@@ -145,6 +147,26 @@ def build_source_metadata(
 
     if isinstance(era5_merged, np.ndarray):
         metadata.add("era5")
+
+    # RRFS (include=rrfs). Each block is listed under the grid it came from
+    # ("rrfs" for 3 km CONUS, "rrfs_na" for 13 km North America), like HRRR's
+    # 0-18 and 18-48 h stores.
+    rrfs_grid = grid_result.rrfs_grid
+    if isinstance(grid_result.dataOut_rrfs_subh, np.ndarray):
+        metadata.add(
+            "rrfssubh",
+            time_value=_format_run_time(grid_result.rrfsSubhRunTime),
+            time_key="rrfs_subh",
+        )
+    if isinstance(grid_result.dataOut_rrfs, np.ndarray):
+        metadata.add(
+            f"{rrfs_grid}_0-18", time_value=_format_run_time(grid_result.rrfsRunTime)
+        )
+    if isinstance(grid_result.dataOut_rrfs_6h, np.ndarray):
+        metadata.add(
+            f"{rrfs_grid}_18-83",
+            time_value=_format_run_time(grid_result.rrfs6hRunTime),
+        )
 
     if isinstance(grid_result.dataOut, np.ndarray):
         metadata.add(
@@ -382,6 +404,35 @@ def _merge_hrrr_blocks(
     )
 
 
+def _merge_rrfs_blocks(
+    data_rrfs: np.ndarray | None,
+    data_rrfs_6h: np.ndarray | None,
+    base_timestamp: float,
+    num_hours: int,
+) -> np.ndarray:
+    """Join the RRFS hourly (1-18 h) and 6-hourly (18-83 h) stores.
+
+    The two come from different runs (the 6-hourly store only updates at 00,
+    06, 12 and 18z), so the hourly rows are kept and the 6-hourly store
+    continues from the first time after them. Either store may be missing on
+    its own (the AWS bucket drops cycles); the other is then used alone.
+    """
+    if data_rrfs is None:
+        rrfs_combined = data_rrfs_6h
+    elif data_rrfs_6h is None:
+        rrfs_combined = data_rrfs
+    else:
+        last_hourly_time = np.nanmax(data_rrfs[:, 0])
+        later_rows = data_rrfs_6h[:, 0] > last_hourly_time
+        rrfs_combined = np.concatenate(
+            (data_rrfs[np.isfinite(data_rrfs[:, 0])], data_rrfs_6h[later_rows]),
+            axis=0,
+        )
+    return _merge_simple_source(
+        rrfs_combined, base_timestamp, num_hours, max(RRFS.values()) + 1
+    )
+
+
 def _merge_urma_source(
     data: np.ndarray, base_timestamp: float, num_hours: int, min_timestamp: float
 ) -> tuple[np.ndarray | None, float | None]:
@@ -431,6 +482,9 @@ def merge_hourly_models(
     loc_tag: str,
     data_urma: np.ndarray | None = None,
     urma_min_timestamp: float | None = None,
+    data_rrfs: np.ndarray | None = None,
+    data_rrfs_6h: np.ndarray | None = None,
+    rrfs_grid: str | None = None,
 ) -> MergeResult:
     hrrr_merged = None
     nbm_merged = None
@@ -446,6 +500,18 @@ def merge_hourly_models(
     aigefs_merged = None
     aifs_merged = None
     urma_merged = None
+    rrfs_merged = None
+
+    if rrfs_grid is not None and (data_rrfs is not None or data_rrfs_6h is not None):
+        rrfs_merged = _merge_rrfs_blocks(
+            data_rrfs, data_rrfs_6h, base_day_utc_grib, num_hours
+        )
+        if not np.isfinite(rrfs_merged[:, 0]).any():
+            rrfs_merged = None
+            metadata.drop(f"{rrfs_grid}_0-18")
+            metadata.drop(f"{rrfs_grid}_18-83")
+            metadata.drop("rrfssubh", time_key="rrfs_subh")
+            logger.warning("RRFS data not available for the requested time range.")
 
     if isinstance(data_urma, np.ndarray) and urma_min_timestamp is not None:
         urma_merged, latest_urma_time = _merge_urma_source(
@@ -579,4 +645,5 @@ def merge_hourly_models(
         aifs=aifs_merged,
         metadata=metadata,
         urma=urma_merged,
+        rrfs=rrfs_merged,
     )

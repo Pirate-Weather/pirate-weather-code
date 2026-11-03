@@ -55,6 +55,8 @@ from API.constants.model_const import (
     HRRR,
     HRRR_SUBH,
     NBM,
+    RRFS,
+    RRFS_SUBH,
     RTMA_RU,
     URMA,
 )
@@ -256,6 +258,9 @@ def _build_source_strategies(
 
     if "urma" in source_map:
         order = ("urma", *order)
+    # RRFS is only read for include=rrfs, which asks for it ahead of every other
+    # source; its sub-hourly fields come before its hourly ones, as for HRRR.
+    order = ("rrfssubh", "rrfs", *order)
 
     # Build strategies in priority order
     strategies = []
@@ -397,6 +402,10 @@ def _get_temp(
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["temp"]],
         ),
+        "rrfssubh": (
+            lambda: model_data.get("rrfsSubHInterpolation") is not None,
+            lambda: model_data["rrfsSubHInterpolation"][0, RRFS_SUBH["temp"]],
+        ),
         "hrrrsubh": (
             lambda: "hrrrsubh" in sourceList,
             lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["temp"]],
@@ -474,6 +483,10 @@ def _get_dew(
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["dew"]],
+        ),
+        "rrfssubh": (
+            lambda: model_data.get("rrfsSubHInterpolation") is not None,
+            lambda: model_data["rrfsSubHInterpolation"][0, RRFS_SUBH["dew"]],
         ),
         "hrrrsubh": (
             lambda: "hrrrsubh" in sourceList,
@@ -553,6 +566,13 @@ def _get_humidity(
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["humidity"]],
+        ),
+        "rrfs": (
+            lambda: model_data.get("RRFS_Merged") is not None,
+            lambda: (
+                _interp_scalar(model_data["RRFS_Merged"], RRFS["humidity"], state)
+                * humidUnit
+            ),
         ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
@@ -642,6 +662,10 @@ def _get_pressure(
         Current pressure.
     """
     source_map = {
+        "rrfs": (
+            lambda: model_data.get("RRFS_Merged") is not None,
+            lambda: _interp_scalar(model_data["RRFS_Merged"], RRFS["pressure"], state),
+        ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
             lambda: _interp_scalar(model_data["HRRR_Merged"], HRRR["pressure"], state),
@@ -722,6 +746,13 @@ def _get_wind(
             lambda: math.sqrt(
                 model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_u"]] ** 2
                 + model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_v"]] ** 2
+            ),
+        ),
+        "rrfssubh": (
+            lambda: model_data.get("rrfsSubHInterpolation") is not None,
+            lambda: math.sqrt(
+                model_data["rrfsSubHInterpolation"][0, RRFS_SUBH["wind_u"]] ** 2
+                + model_data["rrfsSubHInterpolation"][0, RRFS_SUBH["wind_v"]] ** 2
             ),
         ),
         "hrrrsubh": (
@@ -816,6 +847,10 @@ def _get_gust(
         "rtma_ru": (
             lambda: "rtma_ru" in sourceList,
             lambda: model_data["dataOut_rtma_ru"][0, RTMA_RU["gust"]],
+        ),
+        "rrfssubh": (
+            lambda: model_data.get("rrfsSubHInterpolation") is not None,
+            lambda: model_data["rrfsSubHInterpolation"][0, RRFS_SUBH["gust"]],
         ),
         "hrrrsubh": (
             lambda: "hrrrsubh" in sourceList,
@@ -988,6 +1023,13 @@ def _get_bearing(
                 model_data["dataOut_rtma_ru"][0, RTMA_RU["wind_v"]],
             ),
         ),
+        "rrfssubh": (
+            lambda: model_data.get("rrfsSubHInterpolation") is not None,
+            lambda: _bearing_from_components(
+                model_data["rrfsSubHInterpolation"][0, RRFS_SUBH["wind_u"]],
+                model_data["rrfsSubHInterpolation"][0, RRFS_SUBH["wind_v"]],
+            ),
+        ),
         "hrrrsubh": (
             lambda: "hrrrsubh" in sourceList,
             lambda: _bearing_from_components(
@@ -1110,6 +1152,12 @@ def _get_cloud(
             lambda: "ecmwf_ifs" in sourceList,
             lambda: (
                 _interp_scalar(model_data["ECMWF_Merged"], ECMWF["cloud"], state) * 0.01
+            ),
+        ),
+        "rrfs": (
+            lambda: model_data.get("RRFS_Merged") is not None,
+            lambda: (
+                _interp_scalar(model_data["RRFS_Merged"], RRFS["cloud"], state) * 0.01
             ),
         ),
         "hrrr": (
@@ -1283,6 +1331,10 @@ def _get_vis(
                 else model_data["dataOut_rtma_ru"][0, RTMA_RU["vis"]]
             ),
         ),
+        "rrfssubh": (
+            lambda: model_data.get("rrfsSubHInterpolation") is not None,
+            lambda: model_data["rrfsSubHInterpolation"][0, RRFS_SUBH["vis"]],
+        ),
         "hrrrsubh": (
             lambda: "hrrrsubh" in sourceList,
             lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["vis"]],
@@ -1296,6 +1348,10 @@ def _get_vis(
             lambda: _interp_scalar(
                 model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["vis"], state
             ),
+        ),
+        "rrfs": (
+            lambda: model_data.get("RRFS_Merged") is not None,
+            lambda: _interp_scalar(model_data["RRFS_Merged"], RRFS["vis"], state),
         ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
@@ -1420,6 +1476,13 @@ def _get_smoke(sourceList, model_data, state: InterpolationState):
     Returns:
         Current smoke.
     """
+    if model_data.get("RRFS_Merged") is not None:
+        val = (
+            model_data["RRFS_Merged"][state.idx1, RRFS["smoke"]] * state.fac1
+            + model_data["RRFS_Merged"][state.idx2, RRFS["smoke"]] * state.fac2
+        )
+        if not np.isnan(val):
+            return clipLog(val, CLIP_SMOKE["min"], CLIP_SMOKE["max"], "Smoke Current")
     if model_data["has_hrrr_merged"]:
         val = (
             model_data["HRRR_Merged"][state.idx1, HRRR["smoke"]] * state.fac1
@@ -1450,6 +1513,10 @@ def _get_solar(
         Current solar radiation.
     """
     source_map = {
+        "rrfssubh": (
+            lambda: model_data.get("rrfsSubHInterpolation") is not None,
+            lambda: model_data["rrfsSubHInterpolation"][0, RRFS_SUBH["solar"]],
+        ),
         "hrrrsubh": (
             lambda: "hrrrsubh" in sourceList,
             lambda: model_data["hrrrSubHInterpolation"][0, HRRR_SUBH["solar"]],
@@ -1471,6 +1538,10 @@ def _get_solar(
             lambda: _interp_scalar(
                 model_data["DWD_MOSMIX_Merged"], DWD_MOSMIX["solar"], state
             ),
+        ),
+        "rrfs": (
+            lambda: model_data.get("RRFS_Merged") is not None,
+            lambda: _interp_scalar(model_data["RRFS_Merged"], RRFS["solar"], state),
         ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
@@ -1535,6 +1606,10 @@ def _get_cape(
         "nbm": (
             lambda: "nbm" in sourceList,
             lambda: _interp_scalar(model_data["NBM_Merged"], NBM["cape"], state),
+        ),
+        "rrfs": (
+            lambda: model_data.get("RRFS_Merged") is not None,
+            lambda: _interp_scalar(model_data["RRFS_Merged"], RRFS["cape"], state),
         ),
         "hrrr": (
             lambda: model_data["has_hrrr_merged"],
@@ -1659,6 +1734,12 @@ def _get_lifted_index(
         Current lifted index.
     """
     source_map = {
+        "rrfs": (
+            lambda: model_data.get("RRFS_Merged") is not None,
+            lambda: _interp_scalar(
+                model_data["RRFS_Merged"], RRFS["lifted_index"], state
+            ),
+        ),
         "hrdps": (
             lambda: "hrdps" in sourceList,
             lambda: _interp_scalar(
@@ -1774,6 +1855,10 @@ def _get_convective_inhibition(
         Current convective inhibition.
     """
     source_map = {
+        "rrfs": (
+            lambda: model_data.get("RRFS_Merged") is not None,
+            lambda: _interp_scalar(model_data["RRFS_Merged"], RRFS["cin"], state),
+        ),
         "gdps": (
             lambda: "gdps" in sourceList,
             lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["cin"], state),
@@ -1889,6 +1974,8 @@ def build_current_section(
     HRDPS_Merged=None,
     GDPS_Merged=None,
     URMA_Merged=None,
+    rrfsSubHInterpolation=None,
+    RRFS_Merged=None,
 ) -> CurrentSection:
     """
     Calculate the currently block and return it alongside the raw array.
@@ -1929,6 +2016,8 @@ def build_current_section(
         timeMachine: Whether this is a time machine request.
         tmExtra: Extra time machine parameters.
         hrrrSubHInterpolation: HRRR sub-hourly interpolated data.
+        rrfsSubHInterpolation: RRFS minutely interpolation (include=rrfs only).
+        RRFS_Merged: RRFS merged data (include=rrfs only).
         HRRR_Merged: HRRR merged data.
         NBM_Merged: NBM merged data.
         ECMWF_Merged: ECMWF merged data.
@@ -1973,6 +2062,10 @@ def build_current_section(
         "dataOut_rtma_ru": dataOut_rtma_ru,
         "hrrrSubHInterpolation": hrrrSubHInterpolation,
         "HRRR_Merged": HRRR_Merged,
+        # RRFS (include=rrfs only): the minutely block's RRFS interpolation,
+        # which falls back to the hourly RRFS fields, and the merged hourly data
+        "rrfsSubHInterpolation": rrfsSubHInterpolation,
+        "RRFS_Merged": RRFS_Merged,
         "NBM_Merged": NBM_Merged,
         "DWD_MOSMIX_Merged": DWD_MOSMIX_Merged,
         "ECMWF_Merged": ECMWF_Merged,

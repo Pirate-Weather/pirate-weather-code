@@ -24,6 +24,7 @@ from API.constants.model_const import (
     NBM,
     RAQDPS,
     REPS,
+    RRFS,
     SILAM,
     URMA,
 )
@@ -295,6 +296,10 @@ def _stack_precip_with_priority(
         else:
             order = _PRECIP_PRIORITY_ORDER_ROW
 
+    # RRFS is only present for include=rrfs, which asks for it ahead of every
+    # other model
+    if source_data.get("rrfs") is not None:
+        order = ("rrfs", *order)
     return _stack_in_order(num_hours, order, source_data)
 
 
@@ -333,6 +338,10 @@ def _stack_with_priority(
 
     if source_data.get("urma") is not None:
         order = ("urma", *order)
+    # RRFS is only present for include=rrfs, which asks for it ahead of every
+    # other model (URMA is Time Machine only, where RRFS is never read)
+    if source_data.get("rrfs") is not None:
+        order = ("rrfs", *order)
     return _stack_in_order(num_hours, order, source_data)
 
 
@@ -356,6 +365,7 @@ def prepare_data_inputs(
     gdps_merged=None,
     geps_merged=None,
     urma_merged=None,
+    rrfs_merged=None,
 ):
     """
     Prepare data inputs for the hourly block.
@@ -364,6 +374,8 @@ def prepare_data_inputs(
         source_list: List of available data sources.
         nbm_merged: NBM merged data array.
         hrrr_merged: HRRR merged data array.
+        rrfs_merged: RRFS merged data array (include=rrfs only), which leads
+            every element it provides.
         dwd_mosmix_merged: DWD MOSMIX merged data array.
         ecmwf_merged: ECMWF merged data array.
         gefs_merged: GEFS merged data array.
@@ -428,6 +440,9 @@ def prepare_data_inputs(
 
     # --- prcipIntensity_inputs ---
     prcip_intensity_source_data = {
+        "rrfs": rrfs_merged[:, RRFS["intensity"]] * 3600
+        if rrfs_merged is not None
+        else None,
         "nbm": nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
         "hrrr": hrrr_merged[:, HRRR["intensity"]] * 3600
         if (
@@ -543,6 +558,14 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "rrfs": _component_precip_type(
+                rrfs_merged[:, RRFS["snow"]],
+                rrfs_merged[:, RRFS["ice"]],
+                rrfs_merged[:, RRFS["freezing_rain"]],
+                rrfs_merged[:, RRFS["rain"]],
+            )
+            if rrfs_merged is not None
+            else None,
             "nbm": _component_precip_type(
                 nbm_merged[:, NBM["snow"]] if nbm_merged is not None else None,
                 nbm_merged[:, NBM["ice"]] if nbm_merged is not None else None,
@@ -645,6 +668,7 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["temp"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["temp"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["temp"]]
             if hrdps_merged is not None
@@ -670,6 +694,7 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["dew"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["dew"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["dew"]]
             if hrdps_merged is not None
@@ -709,6 +734,9 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["humidity"]] * 100 if urma_valid else None,
             "nbm": nbm_merged[:, NBM["humidity"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["humidity"]]
+            if rrfs_merged is not None
+            else None,
             "hrrr": hrrr_merged[:, HRRR["humidity"]]
             if hrrr_merged is not None
             else None,
@@ -729,6 +757,9 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "rrfs": rrfs_merged[:, RRFS["pressure"]]
+            if rrfs_merged is not None
+            else None,
             "hrrr": hrrr_merged[:, HRRR["pressure"]]
             if hrrr_merged is not None
             else None,
@@ -764,6 +795,11 @@ def prepare_data_inputs(
             if urma_valid
             else None,
             "nbm": nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
+            "rrfs": _wind_speed(
+                rrfs_merged[:, RRFS["wind_u"]], rrfs_merged[:, RRFS["wind_v"]]
+            )
+            if rrfs_merged is not None
+            else None,
             "hrrr": _wind_speed(
                 hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]]
             )
@@ -807,6 +843,7 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["gust"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["gust"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["gust"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["gust"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["gust"]]
             if hrdps_merged is not None
@@ -835,6 +872,11 @@ def prepare_data_inputs(
             if urma_valid
             else None,
             "nbm": nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
+            "rrfs": _bearing(
+                rrfs_merged[:, RRFS["wind_u"]], rrfs_merged[:, RRFS["wind_v"]]
+            )
+            if rrfs_merged is not None
+            else None,
             "hrrr": _bearing(
                 hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]]
             )
@@ -879,6 +921,9 @@ def prepare_data_inputs(
             "urma": urma_merged[:, URMA["cloud"]] * 0.01 if urma_valid else None,
             "nbm": nbm_merged[:, NBM["cloud"]] * 0.01
             if nbm_merged is not None
+            else None,
+            "rrfs": rrfs_merged[:, RRFS["cloud"]] * 0.01
+            if rrfs_merged is not None
             else None,
             "hrrr": hrrr_merged[:, HRRR["cloud"]] * 0.01
             if hrrr_merged is not None
@@ -934,6 +979,7 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["vis"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["vis"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["vis"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["vis"]] if hrrr_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["vis"]]
             if dwd_valid
@@ -966,6 +1012,7 @@ def prepare_data_inputs(
     # --- smoke_inputs ---
     smoke_inputs = _stack_fields(
         num_hours,
+        rrfs_merged[:, RRFS["smoke"]] if rrfs_merged is not None else None,
         hrrr_merged[:, HRRR["smoke"]] if hrrr_merged is not None else None,
     )
 
@@ -976,6 +1023,7 @@ def prepare_data_inputs(
         lon,
         source_data={
             "nbm": nbm_merged[:, NBM["accum"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["accum"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["accum"]]
             if hrdps_merged is not None
@@ -1045,6 +1093,7 @@ def prepare_data_inputs(
         lon,
         source_data={
             "nbm": nbm_merged[:, NBM["solar"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["solar"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["solar"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["solar"]]
             if hrdps_merged is not None
@@ -1064,6 +1113,7 @@ def prepare_data_inputs(
     # --- cape_inputs ---
     cape_inputs = _stack_fields(
         num_hours,
+        rrfs_merged[:, RRFS["cape"]] if rrfs_merged is not None else None,
         nbm_merged[:, NBM["cape"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["cape"]] if hrrr_merged is not None else None,
         hrdps_merged[:, HRDPS["cape"]] if hrdps_merged is not None else None,
@@ -1078,12 +1128,16 @@ def prepare_data_inputs(
     # The thunderstorm indices use the usual regional priority: the Canadian
     # models first in Canada, GFS ahead of GDPS elsewhere. HRDPS stores the
     # surface-parcel LFTX, while GDPS (MU-VT) and GFS (4LFTX) store a
-    # most-unstable / best-layer lifted index.
+    # most-unstable / best-layer lifted index. RRFS (include=rrfs) stores the
+    # 500-1000 mb layer lifted index.
     lifted_index_inputs = _stack_with_priority(
         num_hours,
         lat,
         lon,
         source_data={
+            "rrfs": rrfs_merged[:, RRFS["lifted_index"]]
+            if rrfs_merged is not None
+            else None,
             "hrdps": hrdps_merged[:, HRDPS["lifted_index"]]
             if hrdps_merged is not None
             else None,
@@ -1123,6 +1177,7 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "rrfs": rrfs_merged[:, RRFS["cin"]] if rrfs_merged is not None else None,
             "gdps": gdps_merged[:, GDPS["cin"]] if gdps_merged is not None else None,
             "gfs": gfs_merged[:, GFS["cin"]] if gfs_merged is not None else None,
         },

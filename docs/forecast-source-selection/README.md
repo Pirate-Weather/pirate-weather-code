@@ -66,6 +66,29 @@ This means AI precedence does not require each API field to have a separately
 named AI source. The AI data is merged into its compatible conventional schema,
 then selected first.
 
+## Enabling RRFS
+
+`include=rrfs` is a second explicit priority mode for NOAA's Rapid Refresh
+Forecast System (RRFS), the planned HRRR replacement. Without it RRFS is never
+read. When it is present:
+
+- RRFS is read wherever it covers the request: the 3 km CONUS stores (the HRRR
+  grid, 0-83 h, plus 15-minute output to 5 h) inside the HRRR domain, and the
+  13 km North American stores (0-83 h, no sub-hourly output) elsewhere in
+  their domain.
+- RRFS leads every element it supplies, in every region and also ahead of
+  `include=aimodels` output: `currently`, `minutely`, `hourly`, `daily`, and
+  day/night. In `currently`, RRFS sub-hourly (or, without it, hourly RRFS
+  interpolated to the minute) comes first, then hourly RRFS.
+- The LibreWXR radar composite still replaces minutely intensity wherever it
+  has coverage, because it is an observation rather than a model.
+- RRFS provides no precipitation probability or error, so those keep their
+  usual sources.
+- `flags.sources` lists `rrfs_0-18` / `rrfs_18-83` (CONUS) or `rrfs_na_0-18` /
+  `rrfs_na_18-83` (North America), and `rrfssubh`.
+
+Time Machine requests never read RRFS, which keeps no history.
+
 ## Conventional hourly priority
 
 For most hourly weather elements, source stacks begin with the following

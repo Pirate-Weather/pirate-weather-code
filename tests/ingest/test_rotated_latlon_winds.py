@@ -52,3 +52,36 @@ def test_rrfs_na_wind_rotation_matches_closed_form_angle():
         RRFS_NA_NORTH_POLE_LAT, RRFS_NA_NORTH_POLE_LON, np.zeros(1), np.zeros(1)
     )
     assert np.allclose([centre[0][0, 0], centre[1][0, 0]], [55.0, -113.0])
+
+
+def test_api_rrfs_na_lookup_finds_the_cell_the_ingest_wrote():
+    """The ingest places the NA grid with cartopy (checked against wgrib2's
+    coordinates on every run), while the API finds a request's cell with its
+    own closed-form rotated-pole lookup. A pole or longitude convention that
+    differed between the two would read a neighbouring or distant cell for
+    every North American RRFS request, with nothing failing. Round-trip
+    sampled cell centres through the API lookup.
+    """
+    from API.request.grid_indexing import (
+        RRFS_NA_ROTATED_GRID,
+        _nearest_rotated_grid_coords,
+    )
+
+    rows = np.arange(0, RRFS_NA_GRID_SHAPE[0], 37)
+    cols = np.arange(0, RRFS_NA_GRID_SHAPE[1], 41)
+    rlat = RRFS_NA_FIRST_RLAT + RRFS_NA_GRID_STEP_DEG * rows
+    rlon = RRFS_NA_FIRST_RLON + RRFS_NA_GRID_STEP_DEG * cols
+    lat, lon, _ = rotated_latlon_grid_geometry(
+        RRFS_NA_NORTH_POLE_LAT, RRFS_NA_NORTH_POLE_LON, rlat, rlon
+    )
+
+    for i, row in enumerate(rows):
+        for j, col in enumerate(cols):
+            x, y, _, _ = _nearest_rotated_grid_coords(
+                float(lat[i, j]),
+                float(lon[i, j]),
+                RRFS_NA_ROTATED_GRID,
+                max_distance=0.005,
+                model_name="RRFS_NA",
+            )
+            assert (y, x) == (row, col)
