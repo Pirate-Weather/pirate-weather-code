@@ -6,6 +6,11 @@ on:
   push:
     branches-ignore: ['dev']
 
+env:
+  # Same LibreWXR source as build.yml
+  LIBREWXR_REPO: Pirate-Weather/LibreWXR
+  LIBREWXR_REF: network-split
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
   cancel-in-progress: true
@@ -101,4 +106,60 @@ jobs:
           file: Docker/pirate-api-dockerfile
           push: false
           tags: ${{ steps.meta.outputs.tags }}
+          platforms: linux/arm64
+
+  librewxr_amd64:
+    name: LibreWXR (x64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Checkout LibreWXR (${{ env.LIBREWXR_REPO }}@${{ env.LIBREWXR_REF }})
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ${{ env.LIBREWXR_REPO }}
+          ref: ${{ env.LIBREWXR_REF }}
+          path: librewxr-src
+
+      - name: Build the LibreWXR base image
+        run: docker build -t librewxr-base:ci librewxr-src
+
+      - name: Build LibreWXR image for amd64
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          file: Docker/pirate-librewxr-dockerfile
+          build-args: LIBREWXR_IMAGE=librewxr-base:ci
+          push: false
+          tags: ghcr.io/complianceascode/pirate-librewxr:sanity
+          platforms: linux/amd64
+
+  librewxr_arm64:
+    name: LibreWXR (ARM64)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.event.pull_request.base.repo.full_name
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7.0.1
+
+      - name: Checkout LibreWXR (${{ env.LIBREWXR_REPO }}@${{ env.LIBREWXR_REF }})
+        uses: actions/checkout@v7.0.1
+        with:
+          repository: ${{ env.LIBREWXR_REPO }}
+          ref: ${{ env.LIBREWXR_REF }}
+          path: librewxr-src
+
+      - name: Build the LibreWXR base image
+        run: docker build -t librewxr-base:ci librewxr-src
+
+      - name: Build LibreWXR image for arm64
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          file: Docker/pirate-librewxr-dockerfile
+          build-args: LIBREWXR_IMAGE=librewxr-base:ci
+          push: false
+          tags: ghcr.io/complianceascode/pirate-librewxr:sanity
           platforms: linux/arm64

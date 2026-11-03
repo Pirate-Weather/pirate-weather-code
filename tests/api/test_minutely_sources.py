@@ -6,6 +6,7 @@ that decide which model a user's minutely forecast actually comes from.
 """
 
 import numpy as np
+import pytest
 
 from API.constants.forecast_const import DATA_MINUTELY
 from API.constants.model_const import (
@@ -14,10 +15,12 @@ from API.constants.model_const import (
     GEFS,
     GFS,
     HRRR_SUBH,
+    LIBREWXR,
     NBM,
     REPS,
 )
 from API.minutely.builder import build_minutely_block
+from API.utils.precip import dbz_to_rate
 
 MINUTES = np.arange(0, 61 * 60, 60, dtype=float)
 
@@ -154,3 +157,99 @@ def test_aigefs_precip_type_falls_back_to_temperature():
 
     np.testing.assert_allclose(_column(minutely, "snow_intensity"), 0.4 * SNOW_RATIO)
     np.testing.assert_allclose(_column(minutely, "rain_intensity"), 0.0)
+
+
+def test_librewxr_radar_takes_precedence_inside_coverage():
+    """The LibreWXR radar composite must drive minutely intensity wherever it
+    has coverage and hand back to the models (here HRRR sub-hourly) where it is
+    NaN. A precedence slip would silently replace observed radar with a model
+    forecast, or blank the minutely block outside radar coverage.
+    """
+    hrrr_subh = _source_array(HRRR_SUBH, temp=10.0, rain=1.0, refc=20.0)
+    librewxr = _source_array(LIBREWXR, refc=np.nan)
+    librewxr[:31, LIBREWXR["refc"]] = 40.0
+
+    minutely = _build(
+        ["hrrrsubh", "librewxr"],
+        lat=40.7,
+        lon=-74.0,
+        hrrr_subh_data=hrrr_subh,
+        librewxr_data=librewxr,
+    )[0]
+
+    rain = np.full(61, "rain")
+    radar_rate = dbz_to_rate(np.full(61, 40.0), rain)[0]
+    hrrr_rate = dbz_to_rate(np.full(61, 20.0), rain)[0]
+    intensity = _column(minutely, "intensity")
+    assert intensity[:31] == pytest.approx(radar_rate)
+    assert intensity[31:] == pytest.approx(hrrr_rate)
+
+
+def test_librewxr_echo_without_model_precip_is_typed_rain():
+    """Radar echoes the models did not forecast must still appear as
+    precipitation, typed from the HRRR sub-hourly temperature; dropping them
+    would hide observed rain from the minutely block and ``currently``.
+    """
+    dry_hrrr = _source_array(HRRR_SUBH, temp=10.0)
+    librewxr = _source_array(LIBREWXR, refc=35.0)
+
+    minute_items = _build(
+        ["hrrrsubh", "librewxr"],
+        lat=40.7,
+        lon=-74.0,
+        hrrr_subh_data=dry_hrrr,
+        librewxr_data=librewxr,
+    )[2]
+
+    assert minute_items[0]["precipType"] == "rain"
+    assert minute_items[0]["precipIntensity"] > 0
+
+
+def test_reps_rows_without_time_do_not_blank_minutes_inside_its_span():
+    """Regression: merged arrays start at local midnight, so a model without
+    short-term history (REPS) has NaN times before its first lead and after its
+    last. Those rows broke np.interp's search, and minute 0 of the Canadian
+    chance and error came back missing although REPS had both hours around it.
+    An hour blanked inside the span must still stay missing, not be bridged.
+    """
+    hour = 3600.0
+    midnight = 1793664000.0
+    reps = np.zeros((199, max(REPS.values()) + 1))
+    reps[:, 0] = midnight + hour * np.arange(199)
+    reps[:, REPS["prob"]] = 0.8
+    reps[:, REPS["error"]] = 0.4
+    # The REPS run covers rows 10-79 (its 72 h of leads); the rest have no time
+    reps[:10, 0] = np.nan
+    reps[80:, 0] = np.nan
+    minutes = midnight + 11 * hour + 15 * 60 + 60 * np.arange(61)
+
+    def build(reps_data):
+        return build_minutely_block(
+            minute_array_grib=minutes,
+            source_list=["reps"],
+            hrrr_subh_data=None,
+            hrrr_merged=None,
+            nbm_data=None,
+            dwd_mosmix_data=None,
+            gefs_data=None,
+            gfs_data=None,
+            ecmwf_data=None,
+            era5_data=None,
+            prep_intensity_unit=1.0,
+            version=2,
+            lat=45.42,
+            lon=-75.69,
+            reps_data=reps_data,
+        )[0]
+
+    minutely = build(reps)
+    np.testing.assert_allclose(_column(minutely, "prob"), 0.8)
+    np.testing.assert_allclose(_column(minutely, "error"), 0.4)
+
+    # Hour 12 missing for every variable (the reader blanks its time too):
+    # the minutes next to it have no value, as in the hourly block.
+    gap = reps.copy()
+    gap[12, :] = np.nan
+    minutely = build(gap)
+    assert np.isnan(_column(minutely, "prob")).all()
+    assert np.isnan(_column(minutely, "error")).all()

@@ -133,36 +133,54 @@ claude mcp add --transport http pirate-weather "https://mcp.pirateweather.net/mc
 
 Claude docs: [Custom connectors using remote MCP](https://support.anthropic.com/en/articles/11175166-getting-started-with-custom-integrations-using-remote-mcp), [Building custom connectors via remote MCP](https://support.anthropic.com/en/articles/11503834-building-custom-integrations-via-remote-mcp-servers), and [Claude Code MCP setup](https://docs.anthropic.com/en/docs/claude-code/mcp).
 
-### Local SSD Ingest (No Pirate Weather API Key)
-If your goal is to download and keep as much raw model data locally as possible, use the local Ofelia compose template with `save_type=Download`:
+### Local Stack (No Pirate Weather API Key)
+To run the whole service on one machine, with every ingest on a schedule, local storage (`save_type=Download`) and the API serving from it, use the local Ofelia compose file:
 
 ```
 pirate-compose_oph.local.yml
 ```
 
-Host mount paths are controlled by environment variables (`PW_WEATHER_ROOT`, `PW_WORK_ROOT`) so this works across machines without editing compose files.
+Host paths come from `.env`, so the compose file works across machines without edits:
+- `PW_PROD_ROOT`: the published stores the API reads (~81 GiB). Put it on the fastest disk.
+- `PW_WORK_ROOT`: ingest scratch space (tens of GB per heavy model). Use a fast local disk.
+- `PW_BULK_WORK_ROOT`: scratch for GFS and URMA (~40 GB and ~21 GB at peak). A larger, slower disk is fine; keep it off the disk holding `PW_PROD_ROOT` if that disk is small.
+- `PW_HIST_ROOT`: short-term history stores (~30 GB). A larger, slower disk is fine.
 
 1. Copy the template env file and adjust paths for your machine:
 ```
 cp .env.example .env
 ```
 
-2. Create storage folders:
+2. Create the storage folders:
 ```
-mkdir -p /mnt/pirate-weather/Weather /mnt/pirate-weather/Work
+mkdir -p /mnt/pirate-weather/Prod /mnt/pirate-weather/Work /mnt/pirate-weather/WorkBulk /mnt/pirate-weather/Hist
 ```
 
-3. Build and run:
-
+3. Build both images, create the ingest containers, and start the API and scheduler:
 ```
 docker build -f Docker/pirate-ingest-dockerfile -t pirateingest:latest .
+docker build -f Docker/pirate-api-dockerfile -t pirateapi:latest .
 
+docker compose -f pirate-compose_oph.local.yml --profile ingest create
 docker compose -f pirate-compose_oph.local.yml up -d
 ```
 
-This runs local ingest jobs and writes output under the SSD-backed `Weather` and `Work` folders without requiring `PW_API`.
+[Ofelia](https://github.com/mcuadros/ofelia) then starts each ingest on its schedule. To fill the stores sooner, start an ingest by hand, e.g. `docker start -a pirate-ingest-gfs`; avoid starting the heavy ones (GFS, NBM, DWD, ECMWF) at the same time. A cold start rebuilds the short-term history, so GFS and URMA take 1-2 hours the first time. The API picks up each store as soon as it is published:
+```
+curl 127.0.0.1:8000/forecast/abc123/45.42,-75.70
+```
 
-**Filesystem note (Ubuntu/Linux):** prefer `ext4` for `PW_WEATHER_ROOT` and `PW_WORK_ROOT`. Large ingest runs are significantly faster and more reliable on `ext4` than `NTFS` mounts.
+After rebuilding `pirateingest:latest`, rerun the `--profile ingest create` command so the ingest containers use the new image.
+
+**Optional: LibreWXR radar for the minutely forecast.** The `librewxr` service runs a [LibreWXR](https://github.com/JoshuaKimsey/LibreWXR) data pipeline whose nowcast hook publishes `LibreWXR.zarr` every ~10 minutes; the API then uses the radar nowcast for the minutely block wherever there is radar coverage. It needs ~14 GB of memory and ~5 GB for its cache (`PW_LIBREWXR_CACHE_ROOT`). Its image is built on the Pirate-Weather LibreWXR fork (branch `network-split`), which adds the hooks:
+```
+git clone -b network-split https://github.com/Pirate-Weather/LibreWXR.git ../LibreWXR
+docker build -t librewxr-base:local ../LibreWXR
+docker build -f Docker/pirate-librewxr-dockerfile --build-arg LIBREWXR_IMAGE=librewxr-base:local -t pirate-librewxr:latest .
+docker compose -f pirate-compose_oph.local.yml --profile librewxr up -d librewxr
+```
+
+**Filesystem note (Ubuntu/Linux):** prefer `ext4` for all three roots. Large ingest runs are significantly faster and more reliable on `ext4` than `NTFS` mounts.
 
 ## Development
 For additional details on contributing to this project, check out the [docs folder](https://github.com/Pirate-Weather/pirate-weather-code/docs). There, we have specific guides on adding a model, adjusting variables, or editing the text summaries. If you're new to NumPy (used extensively throughout the codebase), see the [NumPy Guide](docs/NUMPY_GUIDE.md) for common patterns and operations.

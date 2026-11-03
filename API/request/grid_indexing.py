@@ -36,7 +36,16 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MIN,
 )
 from API.constants.model_const import ERA5, ERA5_SOURCE_VARS, RAQDPS, SILAM
-from API.constants.shared_const import FIRST_FORECAST_LEAD_HOURS, HISTORY_PERIODS
+from API.constants.shared_const import (
+    FIRST_FORECAST_LEAD_HOURS,
+    HISTORY_PERIODS,
+    LIBREWXR_GRID_HEIGHT,
+    LIBREWXR_GRID_NORTH,
+    LIBREWXR_GRID_RESOLUTION_DEG,
+    LIBREWXR_GRID_WEST,
+    LIBREWXR_GRID_WIDTH,
+    LIBREWXR_MAX_NOWCAST_AGE_SECONDS,
+)
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
 
@@ -46,6 +55,10 @@ SILAM_LON_START = -179.8
 SILAM_GRID_DELTA = 0.2
 SILAM_LAT_COUNT = 897
 SILAM_LON_COUNT = 1800
+# LibreWXR composite cell centres: half a cell in from the grid edge, rows
+# north to south (negative latitude step), columns west to east
+LIBREWXR_LAT_START = LIBREWXR_GRID_NORTH - LIBREWXR_GRID_RESOLUTION_DEG / 2
+LIBREWXR_LON_START = LIBREWXR_GRID_WEST + LIBREWXR_GRID_RESOLUTION_DEG / 2
 RAQDPS_VALUE_COLUMNS = tuple(index for name, index in RAQDPS.items() if name != "time")
 SILAM_VALUE_COLUMNS = tuple(
     index for name, index in SILAM.items() if name not in {"time", "blh"}
@@ -369,6 +382,7 @@ class ZarrSources:
     raqdps: Any = None
     silam: Any = None
     raqdps_lat_lon: Any = None
+    librewxr: Any = None
 
 
 @dataclass
@@ -449,6 +463,8 @@ class GridIndexingResult:
     y_silam: float | None = None
     silam_lat: float | None = None
     silam_lon: float | None = None
+    dataOut_librewxr: np.ndarray | bool = False
+    librewxrRunTime: float | None = None
     dataOut_urma: np.ndarray | bool = False
     urmaRunTime: float | None = None
     x_urma: float | None = None
@@ -546,6 +562,21 @@ def _cache_stats_delta(
     return {key: after.get(key, 0) - before.get(key, 0) for key in after}
 
 
+# Regular lat/lon grids of the global models and the WMO alert grid, built
+# once: a request only needs the nearest index on each of them.
+GFS_LATS = np.arange(-90, 90, 0.25)
+GFS_LONS = np.arange(0, 360, 0.25)
+ECMWF_LATS = np.arange(90, -90, -0.25)
+ECMWF_LONS = np.arange(-180, 180, 0.25)
+# GDPS: 2400 x 1201 at 0.15 degrees, GEPS: 720 x 361 at 0.5 degrees
+GDPS_LATS = np.linspace(-90.0, 90.0, 1201)
+GDPS_LONS = np.linspace(0, 360.0 - 0.15, 2400)
+GEPS_LATS = np.linspace(-90.0, 90.0, 361)
+GEPS_LONS = np.linspace(0.0, 360.0 - 0.5, 720)
+WMO_ALERT_LATS = np.arange(-60, 85, 0.0625)
+WMO_ALERT_LONS = np.arange(-180, 180, 0.0625)
+
+
 async def calculate_grid_indexing(
     *,
     lat: float,
@@ -571,6 +602,7 @@ async def calculate_grid_indexing(
     ex_reps: int = 0,
     ex_raqdps: int = 0,
     ex_silam: int = 0,
+    ex_librewxr: int = 0,
     inc_aimodels: int = 0,
     read_wmo_alerts: bool = True,
     base_day_utc: datetime.datetime | None = None,
@@ -600,6 +632,7 @@ async def calculate_grid_indexing(
     readAIGFS = False
     readAIGEFS = False
     readAIFS = False
+    readLibreWXR = False
 
     def _get_grid_coords(
         lat,
@@ -787,14 +820,12 @@ async def calculate_grid_indexing(
 
     timer.log("### GFS/GEFS Start ###")
 
-    lats_gfs = np.arange(-90, 90, 0.25)
-    lons_gfs = np.arange(0, 360, 0.25)
-    abslat = np.abs(lats_gfs - lat)
-    abslon = np.abs(lons_gfs - lon)
+    abslat = np.abs(GFS_LATS - lat)
+    abslon = np.abs(GFS_LONS - lon)
     y_p = np.argmin(abslat)
     x_p = np.argmin(abslon)
-    gfs_lat = lats_gfs[y_p]
-    gfs_lon = lons_gfs[x_p]
+    gfs_lat = GFS_LATS[y_p]
+    gfs_lon = GFS_LONS[x_p]
 
     x_hrdps = None
     y_hrdps = None
@@ -830,8 +861,8 @@ async def calculate_grid_indexing(
         dataOut_ecmwf = False
     else:
         readECMWF = True
-        lats_ecmwf = np.arange(90, -90, -0.25)
-        lons_ecmwf = np.arange(-180, 180, 0.25)
+        lats_ecmwf = ECMWF_LATS
+        lons_ecmwf = ECMWF_LONS
         abslat_ecmwf = np.abs(lats_ecmwf - lat)
         abslon_ecmwf = np.abs(lons_ecmwf - az_lon)
         y_p_eur = np.argmin(abslat_ecmwf)
@@ -878,8 +909,8 @@ async def calculate_grid_indexing(
         if ex_gdps != 1 and zarr_sources.gdps is not None:
             try:
                 # Build GDPS lat/lon arrays (-90 -> 90, -180 -> 179.85)
-                lats_gdps = np.linspace(-90.0, 90.0, 1201)
-                lons_gdps = np.linspace(0, 360.0 - 0.15, 2400)
+                lats_gdps = GDPS_LATS
+                lons_gdps = GDPS_LONS
 
                 # Convert input lon to 0..360 for GDPS indexing
                 target_lon_360 = (az_lon + 360.0) % 360.0
@@ -897,8 +928,8 @@ async def calculate_grid_indexing(
         if ex_geps != 1 and zarr_sources.geps is not None:
             try:
                 # GEPS: 720 x 361, 0.5° resolution, lon 0..359.5, lat -90..90
-                lats_geps = np.linspace(-90.0, 90.0, 361)
-                lons_geps = np.linspace(0.0, 360.0 - 0.5, 720)
+                lats_geps = GEPS_LATS
+                lons_geps = GEPS_LONS
                 # Convert input lon to 0..360 for GEPS indexing
                 lon360 = (az_lon + 360.0) % 360.0
                 abslat = np.abs(lats_geps - lat)
@@ -969,8 +1000,8 @@ async def calculate_grid_indexing(
     elif ai_models_requested and not is_na:
         if ex_aifs != 1 and zarr_sources.ecmwf_aifs is not None:
             if x_p_eur is None or y_p_eur is None:
-                lats_ecmwf = np.arange(90, -90, -0.25)
-                lons_ecmwf = np.arange(-180, 180, 0.25)
+                lats_ecmwf = ECMWF_LATS
+                lons_ecmwf = ECMWF_LONS
                 abslat_ecmwf = np.abs(lats_ecmwf - lat)
                 abslon_ecmwf = np.abs(lons_ecmwf - az_lon)
                 y_p_eur = np.argmin(abslat_ecmwf)
@@ -1066,6 +1097,22 @@ async def calculate_grid_indexing(
     else:
         ERA5_MERGED = False
 
+    # LibreWXR radar composite for the minutely block: a global regular lat/lon
+    # grid, so only the current forecast (never Time Machine) reads it.
+    dataOut_librewxr = False
+    librewxrRunTime = None
+    if not time_machine and ex_librewxr != 1 and zarr_sources.librewxr is not None:
+        readLibreWXR = True
+        y_librewxr = _nearest_regular_grid_index(
+            lat, LIBREWXR_LAT_START, -LIBREWXR_GRID_RESOLUTION_DEG, LIBREWXR_GRID_HEIGHT
+        )
+        x_librewxr = _nearest_regular_grid_index(
+            az_lon,
+            LIBREWXR_LON_START,
+            LIBREWXR_GRID_RESOLUTION_DEG,
+            LIBREWXR_GRID_WIDTH,
+        )
+
     zarrTasks = {}
     if readHRRR:
         zarrTasks["SubH"] = weather.zarr_read("SubH", zarr_sources.subh, x_hrrr, y_hrrr)
@@ -1073,6 +1120,10 @@ async def calculate_grid_indexing(
             "HRRR_6H", zarr_sources.hrrr_6h, x_hrrr, y_hrrr
         )
         zarrTasks["HRRR"] = weather.zarr_read("HRRR", zarr_sources.hrrr, x_hrrr, y_hrrr)
+    if readLibreWXR:
+        zarrTasks["LibreWXR"] = weather.zarr_read(
+            "LibreWXR", zarr_sources.librewxr, x_librewxr, y_librewxr
+        )
     if readNBM:
         zarrTasks["NBM"] = weather.zarr_read("NBM", zarr_sources.nbm, x_nbm, y_nbm)
     if readGFS:
@@ -1121,11 +1172,11 @@ async def calculate_grid_indexing(
         )
 
     WMO_alertDat = None
-    if read_wmo_alerts:
-        wmo_alerts_lats = np.arange(-60, 85, 0.0625)
-        wmo_alerts_lons = np.arange(-180, 180, 0.0625)
-        wmo_abslat = np.abs(wmo_alerts_lats - lat)
-        wmo_abslon = np.abs(wmo_alerts_lons - az_lon)
+    # The WMO alert store is optional: until its ingest has published (e.g. a
+    # fresh deployment), serve the forecast without WMO alerts.
+    if read_wmo_alerts and zarr_sources.wmo_alerts is not None:
+        wmo_abslat = np.abs(WMO_ALERT_LATS - lat)
+        wmo_abslon = np.abs(WMO_ALERT_LONS - az_lon)
         wmo_alerts_y_p = np.argmin(wmo_abslat)
         wmo_alerts_x_p = np.argmin(wmo_abslon)
         WMO_alertDat = zarr_sources.wmo_alerts[wmo_alerts_y_p, wmo_alerts_x_p]
@@ -1151,6 +1202,44 @@ async def calculate_grid_indexing(
     aigfsRunTime = None
     aigefsRunTime = None
     aifsRunTime = None
+
+    if readLibreWXR:
+        dataOut_librewxr = zarr_results["LibreWXR"]
+        # The reader blanks the time column where every variable is NaN, so a
+        # cell outside radar coverage reads as all NaN: not a source here. The
+        # run time is the radar frame the nowcast starts from (the store's
+        # first time), not the data column.
+        if dataOut_librewxr is not False and np.all(np.isnan(dataOut_librewxr[:, 1:])):
+            dataOut_librewxr = False
+        if dataOut_librewxr is not False:
+            librewxrRunTime = float(zarr_sources.librewxr.times[0])
+            nowcast_age = utc_time - datetime.datetime.fromtimestamp(
+                int(librewxrRunTime), datetime.UTC
+            ).replace(tzinfo=None)
+            if nowcast_age > datetime.timedelta(
+                seconds=LIBREWXR_MAX_NOWCAST_AGE_SECONDS
+            ):
+                dataOut_librewxr = False
+        if dataOut_librewxr is not False:
+            sourceIDX["librewxr"] = {
+                "x": int(x_librewxr),
+                "y": int(y_librewxr),
+                "lat": round(
+                    LIBREWXR_LAT_START - y_librewxr * LIBREWXR_GRID_RESOLUTION_DEG, 2
+                ),
+                "lon": round(
+                    (
+                        (
+                            LIBREWXR_LON_START
+                            + x_librewxr * LIBREWXR_GRID_RESOLUTION_DEG
+                            + 180
+                        )
+                        % 360
+                    )
+                    - 180,
+                    2,
+                ),
+            }
 
     if readHRRR:
         dataOut = zarr_results["SubH"]
@@ -1620,6 +1709,8 @@ async def calculate_grid_indexing(
         aigfsRunTime=aigfsRunTime,
         aigefsRunTime=aigefsRunTime,
         aifsRunTime=aifsRunTime,
+        dataOut_librewxr=dataOut_librewxr,
+        librewxrRunTime=librewxrRunTime,
         x_rtma=x_rtma,
         y_rtma=y_rtma,
         rtma_lat=rtma_lat,

@@ -62,6 +62,20 @@ xarray's `max_gap` semantics (leave long gaps alone). Used by the DWD ingest wit
 `max_gap_hours=3`; `fill_station_gaps` runs first and already blanks whole series
 with long gaps, so the impact is limited to gaps it doesn't catch.
 
+### AQI averaging windows are cut off at local midnight
+The AQ series (`prepare_aq_inputs`, `API/data_inputs.py`) follows `hour_array_grib`,
+which starts at local midnight (`base_day_utc`). `rolling_mean` / `nowcast_pm`
+(`API/constants/aqi_const.py`) clip their window at the start of the array, so
+hour *h* of today averages only *h* + 1 hours: the 24 h PM and SO2 averages, the
+12 h NowCast and the 8 h O3/CO averages are short for most of today, and the
+`currently` AQI just after midnight is a 1-2 h average. Hours from tomorrow on have
+full windows. SILAM already keeps 48 h of history for this
+(`HISTORY_PERIODS["SILAM"]`), but the API never reads before midnight.
+Fix: build the AQ series from 24 h before local midnight, average, then trim to the
+response window. RAQDPS only reaches back to its latest run (4-16 h before now);
+the earlier hours fall back to SILAM per hour (`_prefer`), so a window that crosses
+the RAQDPS run time mixes two models.
+
 ## Improvements
 
 ### Improve the Canada vs US model selection
@@ -78,21 +92,6 @@ Keep it cheap on the read path: no per-request polygon tests against large
 geometries. Update `docs/forecast-source-selection/README.md` and
 `tests/api/test_regional_source_priority.py` with points on both sides of the border.
 Related: the `is_in_north_america` boundary issue above.
-
-### Read-time interpolation of missing values
-`zarr_read` (`API/io/store_reader.py`) linearly fills interior NaN runs along time
-(`has_interior_nan_holes` / `_interp_row`, logged as "Interpolating missing data")
-for every model except DWD MOSMIX and URMA. A value that is genuinely missing in the
-source (e.g. HRDPS CAPE -999, which the ingest stores as NaN) is therefore filled
-from its neighbours at read time instead of falling back to another model, which is
-what the per-hour source priority is for. Decide whether to keep NaN for all models
-(more consistent; changes API output wherever holes exist, e.g. HRRR smoke) or just
-for the MSC models, whose stores now only carry real gaps.
-
-Before deciding, check how often genuine NaN values show up in each model's source
-data and published stores: count NaN per variable over each store's real grid
-(the store's `shape` minus the padding to `FINAL_CHUNK_SIZES`), and
-read the reader's "Interpolating missing data" warnings in production logs.
 
 ### `interp_time_take_blend`: blend in the data's dtype
 `API/ingest_utils.py` (`interp_time_take_blend`): the blend weights `w` are float64,
@@ -124,27 +123,47 @@ Options:
 
 Check the effect on the day/night and next 24 hour summaries too, which share the code.
 
-### Summaries: lists of three or more days or periods read awkwardly (added to translations repository 2026-10-24)
-Weekly (`API/PirateWeeklyText.py`, `calculate_summary_text`) and next 24 hour
-(`API/PirateDailyText.py`, `_get_time_phrase`) summaries join separate days or
-periods with nested `and`s, e.g. "Rain today and Friday and Sunday and next
-Wednesday." The translations' `and` only uses a comma when its first argument
-already contains one, and no template produces one, so there is no way to say
-"today, Friday, Sunday and next Wednesday" today.
-Needs a translations change first, e.g. a `list` template that takes the items
-as one list and joins them the language's way, then use it for three or more
-items here.
+### Switch from pytz to `zoneinfo`
+pytz still gets tz database updates, but its `localize()` / `normalize()` model
+predates the standard library's and is easy to misuse: the "Local midnight is off
+by an hour on DST transition days" bug above is a pytz `replace()` on an aware
+datetime, which `zoneinfo` gets right. `zoneinfo` is also faster (200k
+localize-and-convert calls: 0.16 s against 1.5 s), though that is negligible next
+to the store reads. Used in `API/alerts.py`, `API/hourly/builder.py`,
+`API/processing/utils.py`, `API/request/preprocess.py`, `API/responseLocal.py`,
+`API/utils/geo.py`, `API/utils/solar.py`, `API/utils/time_indexing.py`,
+`dst_test.py` and two tests. timezonefinder stays: it maps a point to a zone name,
+which `zoneinfo` cannot do.
 
-### Weekly summary: steady temperatures (added to translations repository 2026-10-24)
-`calculate_temp_summary` always picks rising, falling, peaking or valleying, even
-for a flat week (Honolulu: highs of 26/26/25/26/26/25/26/26 °C reads as if the
-temperature trends). Needs a translations key, e.g. `temperatures-steady`
-("highs steady around $1"). Then use it when the week's highs span a small range
-(e.g. 2 °C / 4 °F) and give the rounded mean.
+Things to watch:
+- **Ambiguous times** (the repeated hour when clocks fall back): pytz `localize()`
+  defaults to standard time (01:30 on 2026-11-01 in New York is -05:00), while
+  `zoneinfo` takes the first occurrence (-04:00) unless `fold=1` is set. Decide
+  this wherever a local wall-clock time is built and converted to UTC.
+- **Nonexistent times** (the skipped hour when clocks spring forward): neither
+  library raises, but the offsets they pick differ. The hour and day arrays only
+  use whole hours and midnights, so this mostly affects test fixtures.
+- **API changes:** `tz.localize(dt)` becomes `dt.replace(tzinfo=tz)`, `pytz.utc`
+  becomes `datetime.UTC`, and `.normalize()` is no longer needed. The
+  `timezone_localizer` argument passed to `API/hourly/builder.py` and
+  `API/utils/time_indexing.py` needs reworking.
+- **tz data source:** `zoneinfo` reads the OS tz database, which slim Docker images
+  often lack. Add `tzdata` to `Docker/requirements-api.txt` in place of the pytz pin
+  so updates stay a pinned dependency.
+- **Tests:** port `tests/api/test_dst_time_indexing.py` and
+  `tests/api/test_polar_daynight_logic.py`, and first add regression tests for
+  DST-day midnight and the fall-back hour, so any output change on transition
+  days is deliberate. The production comparison won't show it unless it runs on
+  a transition day.
 
-New keys raise `ValueError` in translations that don't have them yet; the
-`Translation.is_supported()` method can be used to switch over only once the
-installed translations support a key.
+Fix in the same change:
+- `get_offset` (`API/utils/geo.py`) localizes `utc_time`'s wall-clock time as if
+  it were local, so the reported `offset` can be an hour off for a few hours
+  around each DST transition. With `zoneinfo`:
+  `utc_time.replace(tzinfo=datetime.UTC).astimezone(tz).utcoffset()`.
+- `API/request/preprocess.py:681` calls `tf.timezone_at()` again with the same
+  point `get_offset()` just looked up; reuse the zone it returns to save one
+  point-in-polygon lookup per request.
 
 ## v3 goals
 
@@ -159,6 +178,17 @@ there (forecast/historic split, test refactor, ingest standardization) are not l
 and the API's ECMWF grid lookup; the store grows about 6x, so check chunking against
 the read path.
 
+### ECMWF: store relative humidity at ingest
+Do this in the new 0.1° ingest script. The ECMWF store has temperature and dewpoint
+but no humidity, so the API derives it per request with metpy
+(`_calculate_ecmwf_relative_humidity` in `API/current/metrics.py`). Compute 2 m
+relative humidity from `2t`/`2d` at ingest, in percent like GFS and HRRR (URMA
+stores a fraction), and read it directly; this is per-model work that moves upstream exactly. While
+there, fix an inconsistency: the hourly humidity stack (`prepare_data_inputs` in
+`API/data_inputs.py`) leaves ECMWF out entirely, while the current-conditions block
+uses it. Decide whether ECMWF should feed hourly humidity too; adding it changes
+output for locations where ECMWF is the top humidity source.
+
 ### Validate wind direction in the regional models
 As done for HRRR, which rotates grid-relative winds with
 `earth_relative_wind_components` (`API/ingest_utils.py`). Check whether HRDPS
@@ -167,19 +197,27 @@ As done for HRRR, which rotates grid-relative winds with
 ### LibreWXR for maps, radar coverage and minutely precipitation
 Plan in [pirateweather discussion #414](https://github.com/Pirate-Weather/pirateweather/discussions/414#discussioncomment-18934138):
 use LibreWXR's global radar nowcast for minutely precipitation worldwide (likely
-better than HRRR sub-hourly even inside its domain). LibreWXR gets three small hooks
-that run user scripts (plus `zarr` as a dependency):
-- on each finished radar composite: write one global minutely zarr, chunked along
-  time, and upload it to S3 for the Pirate Weather minutely forecast;
-- on each completed full ingest (`state.json` updated): sync everything to S3 for the
-  render nodes;
-- on each lightning update: sync it to S3 for the render nodes.
-
-This decouples ingest from serving: render nodes can run in several regions, and the
-last good data stays available if the ingest pipeline fails. The old `*_Maps.zarr`
-stores were removed from the ingests in v3 (`75a2443`). Pirate Weather side: read the
-minutely zarr in the minutely builder (`API/minutely/`) and decide its priority
-against HRRR sub-hourly.
+better than HRRR sub-hourly even inside its domain), and mirror its cache to S3 so
+render nodes can run in several regions with the last good data if the pipeline fails.
+- [x] Minutely store: `ingest/LibreWXR_Local_Ingest.py`, run by LibreWXR's nowcast
+  hook once per nowcast, publishes `LibreWXR.zarr` (see Done, 2026-11-02).
+- [ ] Upstream the hooks: branch `cycle-hooks` of the LibreWXR fork adds
+  `LIBREWXR_HOOK_STATE_CMD` / `LIBREWXR_HOOK_NOWCAST_CMD` / `LIBREWXR_HOOK_LIGHTNING_CMD`
+  (`src/librewxr/hooks.py`); submit it as a PR to JoshuaKimsey/LibreWXR.
+- [x] Mirror the LibreWXR cache to object storage for render nodes: done inside
+  LibreWXR as "snapshot sync" (fork branch `network-split`, on top of `cycle-hooks`,
+  for LibreWXR issue #51): the pipeline publishes each `state.json` and the files it
+  names to an fsspec URL (`LIBREWXR_SNAPSHOT_SYNC_URL`, S3 or `file://`), and
+  `python -m librewxr.snapshot_pull` on a render host pulls them into its cache,
+  rewrites the pipeline's absolute paths, writes `state.json` last and prunes the
+  per-node caches. Measured on this host: ~1 GB raw per 10-minute cycle at full
+  regions. Nothing is needed on the Pirate Weather side.
+- [ ] Deploy: run LibreWXR's pipeline service from the `pirate-librewxr` image
+  (`Docker/pirate-librewxr-dockerfile`: LibreWXR from the fork branch plus this
+  repo's code; built and pushed to ECR Public by `build.yml`, build-checked by
+  `sanity.yml`) with `LIBREWXR_HOOK_NOWCAST_CMD` and `LIBREWXR_SNAPSHOT_SYNC_URL`
+  set. Switch `LIBREWXR_REF` in both workflows to an upstream release tag once
+  the hooks and snapshot sync PRs are merged.
 
 ### Own ERA5 dataset
 Only the needed variables, chunked for point reads, based on the Google ARCO pipeline
@@ -263,6 +301,14 @@ happened for ~5 min (no CPU, no network) before "Starting final URMA merge from
 283 hourly stores" (4,275 s), then 2.5 min opening the stores one at a time. Find
 the wait; the store opens fall under "Open the history stores in parallel".
 
+### SILAM: daily run checks before FMI posts the new cycle
+SILAM runs once a day at 07:00 UTC (the production schedule), but FMI posts the
+00Z file late. On the local stack, the 07:00 run on 2026-10-31 found only the
+2026-10-29 00Z file in the THREDDS catalog and exited "No Update". The
+2026-10-30 00Z file had appeared by 14:36 UTC, so the API serves SILAM about a
+day behind. Find when FMI usually posts each cycle and move the run after it, or
+add a second daily run (e.g. 19:00 UTC); "No Update" exits cost ~3 s.
+
 ### Canadian models: parallel GRIB conversion
 HRDPS, GDPS, REPS and GEPS download one variable at a time (~6 MB/s from the MSC
 datamart), then convert on a single core: GDPS spends 12.6 min downloading and
@@ -339,6 +385,61 @@ some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("
 implausible value blanks every above-max value").
 
 ## Done
+
+### LibreWXR radar nowcast for the minutely block (2026-11-02)
+`ingest/LibreWXR_Local_Ingest.py`, run by LibreWXR's nowcast hook, composites LibreWXR's latest radar frame (T+0) and
+its nine 10-minute nowcast steps onto one global 0.04 degree grid as composite
+reflectivity (`REFC_composite`, dBZ; NaN outside radar coverage, 0 below
+`REFC_THRESHOLD`) and publishes `LibreWXR.zarr` with `write_final_zarr` /
+`publish_ingest_run`, local disk or S3 like every other ingest. The API reads it
+like any model (`FORECAST_STORES`, `exclude=librewxr`) and the minutely builder
+lets it override every model's intensity minute by minute wherever it is finite;
+precipitation type still comes from the models (HRRR sub-hourly temperature for
+untyped echoes, else rain). `currently` follows minute 0.
+- LibreWXR trial on this host: `/home/ubuntu/LibreWXR` (v0.8.0), run from
+  `/home/ubuntu/librewxr-run` with the cache on `/mnt/disk/data/librewxr/cache`,
+  9 nowcast frames; pipeline ~7 GB RSS, one cycle 60 s, cache ~5 GB.
+- Export: composite 11 s (one thread), peak 3.5 GB; the write dominated at 5-cell
+  chunks (1.6 M chunks, 530 s) and takes 36 s at 25-cell chunks, still one sub-KB
+  chunk per point read. Store ~60 MB per cycle, old versions pruned by `publish_store`.
+- Only the radar extrapolation is exported, never LibreWXR's NWP blend; the
+  blend weight is not stored. RRQPE's display offset is undone; a saturated pixel
+  (95.5 dBZ) becomes NaN.
+
+### No read-time interpolation of missing values (2026-11-02)
+`zarr_read` no longer fills interior NaN runs along time (`has_interior_nan_holes` /
+`_interp_row` are gone): a value the model did not give stays NaN and the merge takes
+the next source for that hour, as URMA and DWD MOSMIX already did.
+- **Scan first:** ~2000 points per current Prod store; only three had interior holes.
+  - GDPS CAPE/CIN (48% of points): MSC bitmap-masks them where no parcel is
+    buoyant (40-50% of the globe). They stay NaN; GFS fills those hours.
+  - AIGFS APCP (100%): an ingest bug. wgrib2 writes the 24 h multiples as
+    `0-1 day acc fcst`, which the `hour`-only match skipped, so APCP was missing
+    at every 24th lead and the reader drew a line across it. Fixed in the match.
+  - RTMA `tp`: one point, one 2-hour gap.
+- No store had an hour missing for every variable.
+
+### Summaries: lists of three or more days or periods read awkwardly (2026-10-31)
+Weekly (`API/PirateWeeklyText.py`, `calculate_summary_text`) and next 24 hour
+(`API/PirateDailyText.py`, `_get_time_phrase`) summaries join separate days or
+periods with nested `and`s, e.g. "Rain today and Friday and Sunday and next
+Wednesday." The translations' `and` only uses a comma when its first argument
+already contains one, and no template produces one, so there is no way to say
+"today, Friday, Sunday and next Wednesday" today.
+Needs a translations change first, e.g. a `list` template that takes the items
+as one list and joins them the language's way, then use it for three or more
+items here.
+
+### Weekly summary: steady temperatures (2026-10-31)
+`calculate_temp_summary` always picks rising, falling, peaking or valleying, even
+for a flat week (Honolulu: highs of 26/26/25/26/26/25/26/26 °C reads as if the
+temperature trends). Needs a translations key, e.g. `temperatures-steady`
+("highs steady around $1"). Then use it when the week's highs span a small range
+(e.g. 2 °C / 4 °F) and give the rounded mean.
+
+New keys raise `ValueError` in translations that don't have them yet; the
+`Translation.is_supported()` method can be used to switch over only once the
+installed translations support a key.
 
 ### Sharded stores, times in attributes, tensorstore reader, new sync (2026-10-23)
 - **Stores:** every final store is a sharded zarr v3 array (`FINAL_SHARD_SIZES`

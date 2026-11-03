@@ -8,6 +8,7 @@ weather forecasts, and generating API responses.
 
 import asyncio
 import datetime
+import functools
 import logging
 import os
 import pickle
@@ -18,6 +19,7 @@ from contextlib import asynccontextmanager
 
 import aiobotocore.session as _aio_session
 import numpy as np
+import orjson
 from astral import LocationInfo, moon
 from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
@@ -83,6 +85,7 @@ from API.legacy.summary import (
     build_minutely_summary,
 )
 from API.minutely.builder import build_minutely_block
+from API.PirateDailyText import HourColumns
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
 from API.utils.filtering import apply_block_indices as _apply_block_indices
@@ -311,11 +314,65 @@ def _prefer_ai_with_fallback(ai_data, base_data):
     return out
 
 
+# Distinct (location, day) pairs remembered per worker; a table is ~2 KB
+SOLAR_TABLE_CACHE_SIZE = 4096
+
+
+@functools.lru_cache(maxsize=SOLAR_TABLE_CACHE_SIZE)
+def _solar_day_table(lat, az_lon, tz_name, base_day, daily_days, day_array_grib):
+    """Sunrise, sunset, dawn, dusk and moon phase for each forecast day, in
+    the ``InterSday`` layout, plus the polar day/night flags.
+
+    The table depends only on the location and the day, so it is memoised:
+    clients poll the same coordinates all day, and astral costs ~1 ms per
+    request. The cached array is read-only; the sections only read it.
+
+    Returns (InterSday, is_all_day, is_all_night).
+    """
+    # +1 to account for the extra 4 hours of summary
+    InterSday = np.zeros(shape=(daily_days + 1, 21))
+    loc = LocationInfo("name", "region", tz_name, lat, az_lon)
+    day_array_grib = np.asarray(day_array_grib)
+
+    is_all_day = False
+    is_all_night = False
+
+    for i in range(daily_days + 1):
+        (
+            sunrise_value,
+            sunset_value,
+            dawn_value,
+            dusk_value,
+            saw_all_day,
+            saw_all_night,
+        ) = calculate_solar_times(
+            day_index=i,
+            base_day=base_day,
+            location=loc,
+            day_array_grib=day_array_grib,
+            latitude=lat,
+        )
+        InterSday[i, DATA_DAY["sunrise"]] = sunrise_value
+        InterSday[i, DATA_DAY["sunset"]] = sunset_value
+        InterSday[i, DATA_DAY["dawn"]] = dawn_value
+        InterSday[i, DATA_DAY["dusk"]] = dusk_value
+        is_all_day = is_all_day or saw_all_day
+        is_all_night = is_all_night or saw_all_night
+
+        m = moon.phase(base_day + datetime.timedelta(days=i))
+        moon_phase_value = np.clip(m / 27.99, 0.0, 1.0)
+        InterSday[i, DATA_DAY["moon_phase"]] = np.round(
+            moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
+        )
+
+    InterSday.flags.writeable = False
+    return InterSday, is_all_day, is_all_night
+
+
 @app.get("/timemachine/{apikey}/{location}")
 @app.get("/forecast/{apikey}/{location}")
 async def PW_Forecast(
     request: Request,
-    response: Response,
     location: str,
     units: str | None = None,
     extend: str | None = None,
@@ -331,7 +388,7 @@ async def PW_Forecast(
     daily_indices: str | None = None,
     hourly_indices: str | None = None,
     day_night_indices: str | None = None,
-) -> dict:
+) -> Response:
     """
     Main entry point for the Pirate Weather API forecast.
 
@@ -375,7 +432,7 @@ async def PW_Forecast(
         day_night_indices: CSV of non-negative integers selecting items from day_night.data.
 
     Returns:
-        dict: The complete weather forecast JSON object.
+        Response: The complete weather forecast as JSON.
     """
 
     # Timing Check
@@ -457,6 +514,7 @@ async def PW_Forecast(
     incAIModels = initial.inc_aimodels
     exRAQDPS = initial.ex_raqdps
     exSILAM = initial.ex_silam
+    exLIBREWXR = initial.ex_librewxr
     exHRDPS = initial.ex_hrdps
     exGDPS = initial.ex_gdps
     exGEPS = initial.ex_geps
@@ -526,6 +584,7 @@ async def PW_Forecast(
         wmo_alerts=stores.WMO_Alerts_Zarr,
         era5_data=stores.ERA5_Data,
         dwd_mosmix=stores.DWD_MOSMIX_Zarr,
+        librewxr=stores.LibreWXR_Zarr,
         aigfs=stores.AIGFS_Zarr,
         aigefs=stores.AIGEFS_Zarr,
         ecmwf_aifs=stores.ECMWF_AIFS_Zarr,
@@ -561,6 +620,7 @@ async def PW_Forecast(
         ex_reps=exREPS,
         ex_raqdps=exRAQDPS,
         ex_silam=exSILAM,
+        ex_librewxr=exLIBREWXR,
         inc_aimodels=incAIModels,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
@@ -748,7 +808,7 @@ async def PW_Forecast(
     sourceIDX = merge_result.metadata.source_idx
 
     # Validate that at least one forecast model source is available.
-    # RTMA-RU, hrrrsubh, and etopo provide only current/elevation data, not forecasts.
+    # RTMA-RU, hrrrsubh, librewxr and etopo provide only current/elevation data, not forecasts.
     # If all forecast sources are excluded or unavailable, return a 400 error.
     if not any(src in sourceList for src in FORECAST_SOURCES):
         raise HTTPException(
@@ -775,6 +835,9 @@ async def PW_Forecast(
             minute_array_grib=minute_array_grib,
             source_list=sourceList,
             hrrr_subh_data=dataOut if isinstance(dataOut, np.ndarray) else None,
+            librewxr_data=grid_result.dataOut_librewxr
+            if isinstance(grid_result.dataOut_librewxr, np.ndarray)
+            else None,
             hrrr_merged=HRRR_Merged
             if ("hrrr_0-18" in sourceList and "hrrr_18-48" in sourceList)
             else None,
@@ -838,46 +901,20 @@ async def PW_Forecast(
     hourlyHalfDayIndex = time_indexing.hourly_half_day_index
     hourlyHalfNightIndex = time_indexing.hourly_half_night_index
 
-    # +1 to account for the extra 4 hours of summary
-    InterSday = np.zeros(shape=(daily_days + 1, 21))
-
     # Timing Check
     timer.log("Sunrise start")
 
-    loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
-
-    is_all_day = False
-    is_all_night = False
-
-    # 10. Calculate Sunrise, Sunset, Moon Phase for each day in the forecast
-    # This information is used to determine day/night cycles and moon phases
-    for i in range(daily_days + 1):
-        (
-            sunrise_value,
-            sunset_value,
-            dawn_value,
-            dusk_value,
-            saw_all_day,
-            saw_all_night,
-        ) = calculate_solar_times(
-            day_index=i,
-            base_day=baseDay,
-            location=loc,
-            day_array_grib=day_array_grib,
-            latitude=lat,
-        )
-        InterSday[i, DATA_DAY["sunrise"]] = sunrise_value
-        InterSday[i, DATA_DAY["sunset"]] = sunset_value
-        InterSday[i, DATA_DAY["dawn"]] = dawn_value
-        InterSday[i, DATA_DAY["dusk"]] = dusk_value
-        is_all_day = is_all_day or saw_all_day
-        is_all_night = is_all_night or saw_all_night
-
-        m = moon.phase(baseDay + datetime.timedelta(days=i))
-        moon_phase_value = np.clip(m / 27.99, 0.0, 1.0)
-        InterSday[i, DATA_DAY["moon_phase"]] = np.round(
-            moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
-        )
+    # 10. Sunrise, sunset, dawn, dusk and moon phase for each day in the
+    # forecast (day/night cycles of the icons and text), memoised per
+    # location and day. The polar fallback only looks at the forecast days.
+    InterSday, is_all_day, is_all_night = _solar_day_table(
+        lat,
+        az_Lon,
+        tz_name,
+        baseDay,
+        daily_days,
+        tuple(day_array_grib[: daily_days + 1].tolist()),
+    )
 
     # 11. Extract and prepare specific weather variables (temperature, wind, etc.) from the merged model data
     # This step pulls out the relevant data arrays for each weather variable from the merged dataset
@@ -947,6 +984,18 @@ async def PW_Forecast(
     if silam_smoke_frp is not None and not np.all(np.isnan(silam_smoke_frp)):
         smoke_inputs = np.column_stack([smoke_inputs, silam_smoke_frp.reshape(-1, 1)])
 
+    # The hourly response objects and their text are only needed for the hours
+    # returned. Time Machine and the legacy summaries (no summary text) take the
+    # most common text over every hour, so those build them all.
+    if timeMachine or not summaryText:
+        hourly_display_hours = None
+    elif exHourly == 1:
+        hourly_display_hours = range(0)
+    else:
+        hourly_display_hours = range(
+            int(baseTimeOffset), int(baseTimeOffset) + ouputHours
+        )
+
     # This constructs the hourly forecast objects, applying unit conversions and formatting
     with timing_tracker.track("Hourly block"):
         (
@@ -958,7 +1007,7 @@ async def PW_Forecast(
             dayZeroSnow,
             dayZeroIce,
             _,
-            _,
+            PTypeHour,
             _,
             InterPhour,
         ) = build_hourly_block(
@@ -1027,6 +1076,7 @@ async def PW_Forecast(
             if URMA_Merged is not None
             else None,
             version=version,
+            display_hours=hourly_display_hours,
         )
 
     pTypeMap = np.array(
@@ -1048,6 +1098,15 @@ async def PW_Forecast(
             PRECIP_TYPE_DISPLAY["rain"],
             PRECIP_TYPE_DISPLAY["mixed"],
         ]
+    )
+
+    # The daily, half-day and next-24-hour summaries each aggregate a window
+    # of the same hours; their values and per-hour flags are gathered once.
+    # The legacy summaries (no summary text) don't aggregate hours.
+    hour_columns = (
+        HourColumns.from_interphour(InterPhour, hour_array_grib, PTypeHour)
+        if summaryText
+        else None
     )
 
     # 13. Generate the daily forecast section
@@ -1089,6 +1148,8 @@ async def PW_Forecast(
             loc_tag=loc_tag,
             aq_inputs=aq_inputs,
             inc_airqualitydetails=incAirQualityDetails,
+            include_day_night=inc_day_night == 1 and not timeMachine,
+            hour_columns=hour_columns,
         )
     dayList = daily_section.day_list
     dayList_si = daily_section.day_list_si
@@ -1235,23 +1296,23 @@ async def PW_Forecast(
             base_time_offset_int=base_time_offset_int,
             logger=logger,
             loc_tag=loc_tag,
+            hour_columns=hour_columns,
         )
-        filtered_hourList = remove_conditional_fields(
-            hourList,
+        if timeMachine:
+            output_hourList = hourList[0:ouputHours]
+        else:
+            output_hourList = hourList[
+                base_time_offset_int : base_time_offset_int + ouputHours
+            ]
+        returnOBJ["hourly"]["summary"] = hour_summary
+        returnOBJ["hourly"]["icon"] = hour_icon
+        returnOBJ["hourly"]["data"] = remove_conditional_fields(
+            output_hourList,
             version,
             timeMachine,
             tmExtra,
             inc_airqualitydetails=incAirQualityDetails,
         )
-        returnOBJ["hourly"]["summary"] = hour_summary
-        returnOBJ["hourly"]["icon"] = hour_icon
-
-        if timeMachine:
-            returnOBJ["hourly"]["data"] = filtered_hourList[0:ouputHours]
-        else:
-            returnOBJ["hourly"]["data"] = filtered_hourList[
-                base_time_offset_int : base_time_offset_int + ouputHours
-            ]
 
     if inc_day_night == 1 and not timeMachine:
         returnOBJ["day_night"] = {}
@@ -1380,21 +1441,24 @@ async def PW_Forecast(
 
     timer.log("Replace NaN Time")
 
+    # orjson writes the same JSON as FastAPI's default (pydantic) serializer at
+    # about a third of the cost; OPT_SERIALIZE_NUMPY covers any numpy scalars.
+    body = orjson.dumps(returnOBJ, option=orjson.OPT_SERIALIZE_NUMPY)
+
     handler_ms = (
         datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
     ).total_seconds() * 1000
 
-    response.headers["X-Node-ID"] = platform.node()
-    response.headers["X-Handler-Time"] = f"{handler_ms:.1f}"
-    response.headers["X-Response-Time"] = str(
-        (
-            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-        ).total_seconds()
-        * 1000
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "X-Node-ID": platform.node(),
+            "X-Handler-Time": f"{handler_ms:.1f}",
+            "X-Response-Time": str(handler_ms),
+            "Cache-Control": "max-age=900, must-revalidate",
+        },
     )
-    response.headers["Cache-Control"] = "max-age=900, must-revalidate"
-
-    return returnOBJ
 
 
 if __name__ == "__main__":

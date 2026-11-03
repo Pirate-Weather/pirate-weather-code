@@ -7,6 +7,7 @@ import struct
 import numpy as np
 import pytest
 
+from API.constants import aqi_const
 from API.constants.aqi_const import (
     compute_aqi_array,
     compute_aqi_for_unit_system,
@@ -128,6 +129,55 @@ def test_aqi_value_for_each_unit_system(unit_system, pollutants, expected):
 def test_aqi_is_nan_without_any_pollutant_data():
     """Missing AQ data must surface as NaN, never as a clean-air index of 0."""
     assert math.isnan(compute_aqi_for_unit_system("us"))
+
+
+@pytest.mark.parametrize("unit_system", ["us", "si"])
+def test_hourly_aqi_array_matches_per_hour_index(unit_system):
+    """The us (EPA) and si (CAQI) hourly AQI are computed for all hours at once
+    for speed; every hour must equal the per-hour reference calculation, across
+    breakpoint edges, gaps between tables, the 1-hour O3 and 24-hour SO2
+    special cases, negative values and missing data."""
+    rng = np.random.default_rng(0)
+    n_hours = 2000
+    pollutants = {
+        "pm25_ug": rng.uniform(-5, 400, n_hours),
+        "pm10_ug": rng.uniform(-5, 700, n_hours),
+        "o3_ppb": rng.uniform(-5, 700, n_hours),
+        "no2_ppb": rng.uniform(-5, 2500, n_hours),
+        "so2_ppb": rng.uniform(-5, 1200, n_hours),
+        "co_ppb": rng.uniform(-5, 60000, n_hours),
+    }
+    for values in pollutants.values():
+        values[rng.random(n_hours) < 0.15] = np.nan
+        values[:7] = [0.0, 9.0, 54.0, 70.0, 124.0, 304.0, 305.0]
+
+    if unit_system == "us":
+        vectorised = aqi_const.compute_epa_aqi_array(
+            pollutants["pm25_ug"],
+            pollutants["pm10_ug"],
+            pollutants["o3_ppb"],
+            pollutants["o3_ppb"],
+            pollutants["no2_ppb"],
+            pollutants["so2_ppb"],
+            pollutants["so2_ppb"],
+            pollutants["co_ppb"],
+        )
+    else:
+        vectorised = aqi_const.compute_caqi_array(
+            pollutants["pm25_ug"],
+            pollutants["pm10_ug"],
+            pollutants["o3_ppb"],
+            pollutants["no2_ppb"],
+            pollutants["so2_ppb"],
+        )
+    per_hour = [
+        compute_aqi_for_unit_system(
+            unit_system, **{name: float(v[i]) for name, v in pollutants.items()}
+        )
+        for i in range(n_hours)
+    ]
+
+    np.testing.assert_array_equal(vectorised, per_hour)
 
 
 # ---------------------------------------------------------------------------

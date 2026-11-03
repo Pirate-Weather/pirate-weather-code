@@ -47,6 +47,9 @@ LAYOUTS = [
     pytest.param("HRRR_Local_Ingest", "HRRR", _HRRR_LAYOUT, id="hrrr"),
     pytest.param("HRRR_6H_Local_Ingest", "HRRR", _HRRR_LAYOUT, id="hrrr_6h"),
     pytest.param(
+        "LibreWXR_Local_Ingest", "LIBREWXR", {"refc": "REFC_composite"}, id="librewxr"
+    ),
+    pytest.param(
         "SubH_Local_Ingest",
         "HRRR_SUBH",
         {

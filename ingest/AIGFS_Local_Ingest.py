@@ -55,11 +55,12 @@ AIGFS_FORECAST_HOURS = FORECAST_LEAD_RANGES["AIGFS"]
 # Unlike the experimental AWS EAGLE ensemble (see AIGEFS), the AWS AIGFS bucket
 # mirrors the operational NOMADS product, so it is tried first.
 AIGFS_SOURCE_PRIORITY = ["aws", "nomads"]
-# APCP is matched as the run total (0-N h) so it only needs differencing
+# APCP is matched as the run total (0-N h) so it only needs differencing;
+# wgrib2 writes whole days as "0-1 day acc fcst", so match both units
 AIGFS_MATCH_STRINGS = (
     ":((TMP):2 m above ground:)"
     "|(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
-    r"|:APCP:surface:0-\d+\s+hour acc fcst:"
+    r"|:APCP:surface:0-\d+\s+(hour|day) acc fcst:"
     "|(:(PRMSL):)"
 )
 

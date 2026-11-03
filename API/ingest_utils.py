@@ -67,6 +67,11 @@ FINAL_CHUNK_SIZES = {
     "RRFS_NA_6H": 25,
     "SubH": 5,
     "RRFS_SubH": 5,
+    # Global 0.04 deg radar composite (LibreWXR nowcast): one variable and ~10
+    # steps, so a 25-cell chunk is still under 1 KB compressed (far below an
+    # HRRR chunk) while the 1.6 M chunks a 5-cell layout needs took 530 s to
+    # write per 10-minute cycle against 36 s with 25 (measured, 2026-11)
+    "LibreWXR": 25,
     "GFS": 3,
     "GEFS": 3,
     "ECMWF": 3,
@@ -105,6 +110,7 @@ FINAL_SHARD_SIZES = {
     "RRFS_NA": 100,  # 15
     "RRFS_NA_6H": 100,  # 55
     "RRFS_SubH": 100,  # 13
+    "LibreWXR": 100,  # < 1 (10 steps x 1 variable)
     "HRDPS": 100,  # 35
     "REPS": 100,  # 22
     "GEPS": 100,  # 76
@@ -245,6 +251,7 @@ KEEPBITS = {
     "KX_surface": 4,  # 1 K step, to 50
     "REFD_1000maboveground": 8,  # 0.1 dBZ step, to 75
     "REFC_entireatmosphere": 8,
+    "REFC_composite": 8,  # LibreWXR radar composite, same step as HRRR
     "BLH": 10,  # 1 m step, to 4000 m
     "Storm_Distance": 11,  # 1 km step, to 5000 km
     "VVEL_500mb": 8,  # 0.01 Pa/s step, to 10

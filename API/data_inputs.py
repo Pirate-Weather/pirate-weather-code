@@ -1,14 +1,15 @@
 import logging
 
-import metpy as mp
 import numpy as np
-from metpy.calc import relative_humidity_from_dewpoint
 
 from API.api_utils import (
+    _lookup_precip_codes,
+    _precip_code_table,
     estimate_visibility_gultepe_rh_pr_numpy,
     map_canadian_precip_type_to_ptype,
     map_ensemble_precip_rates_to_ptype,
     map_wmo4677_to_ptype,
+    relative_humidity_from_dewpoint_c,
 )
 from API.constants.model_const import (
     DWD_MOSMIX,
@@ -257,6 +258,13 @@ def _component_precip_type(snow, ice, freezing_rain, rain):
     return component_ptype
 
 
+# GRIB categorical precipitation type (NCEP table 4.201) to the internal
+# category: 1 snow, 2 ice pellets, 3 freezing rain, 4 rain
+GRIB_PTYPE_TABLE = _precip_code_table(
+    {1: [5, 6, 9], 2: [4, 8, 10], 3: [3, 12], 4: [1, 2, 7, 11]}, 13
+)
+
+
 def _map_grib_precip_type(ptype_values):
     if ptype_values is None:
         return None
@@ -265,14 +273,7 @@ def _map_grib_precip_type(ptype_values):
     ptype_nan_mask = np.isnan(ptype_vals)
     ptype_hour = np.zeros_like(ptype_vals, dtype=int)
     ptype_hour[~ptype_nan_mask] = ptype_vals[~ptype_nan_mask].astype(int)
-    conditions = [
-        np.isin(ptype_hour, [5, 6, 9]),
-        np.isin(ptype_hour, [4, 8, 10]),
-        np.isin(ptype_hour, [3, 12]),
-        np.isin(ptype_hour, [1, 2, 7, 11]),
-    ]
-    choices = [1, 2, 3, 4]
-    mapped_ptype = np.select(conditions, choices, default=0).astype(float)
+    mapped_ptype = _lookup_precip_codes(ptype_hour, GRIB_PTYPE_TABLE)
     mapped_ptype[ptype_nan_mask] = np.nan
     return mapped_ptype
 
@@ -694,11 +695,10 @@ def prepare_data_inputs(
     era5_humidity = None
     if era5_valid:
         era5_humidity = (
-            relative_humidity_from_dewpoint(
-                era5_merged[:, ERA5["2m_temperature"]] * mp.units.units.degC,
-                era5_merged[:, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degC,
-                phase="auto",
-            ).magnitude
+            relative_humidity_from_dewpoint_c(
+                era5_merged[:, ERA5["2m_temperature"]],
+                era5_merged[:, ERA5["2m_dewpoint_temperature"]],
+            )
             * 100
         )
 
@@ -1200,46 +1200,60 @@ def prepare_aq_inputs(
     """
     nan_row = np.full(num_hours, np.nan)
 
-    def _extract(data, var_idx):
-        """Extract ``var_idx`` column from a zarr read result and align to ``hour_array_grib``."""
-        if not isinstance(data, np.ndarray):
+    def _match_hours(data):
+        """For each request hour, the row of ``data`` nearest in time, and
+        whether it is close enough to use."""
+        # Time column is column 0 (unix seconds); match to hour_array_grib.
+        # SILAM timestamps are stored as float32 (±64 s rounding at ~1.75e9).
+        # Locations in fractional UTC-offset timezones (e.g. UTC±3:30, UTC+5:30)
+        # produce request timestamps that are exactly 1800 s from the nearest
+        # SILAM hour.  Float32 rounding can push the stored SILAM timestamp
+        # ~64 s away, making diff > 1800 for ~44 % of hours.
+        # Using a tolerance of one full SILAM time-step (3600 s) ensures the
+        # nearest available hour is always matched while still rejecting gaps
+        # larger than one hour.
+        time_col = data[:, 0].astype(float)
+        request_hours = np.asarray(hour_array_grib, dtype=float)
+        diff = np.abs(time_col[np.newaxis, :] - request_hours[:, np.newaxis])
+        best = np.argmin(diff, axis=1)
+        matched = diff[np.arange(len(best)), best] < 3600  # within one SILAM time-step
+        return best, matched
+
+    # The time matching is the same for every variable of a model, so do it once
+    raqdps_match = (
+        _match_hours(dataOut_raqdps) if isinstance(dataOut_raqdps, np.ndarray) else None
+    )
+    silam_match = (
+        _match_hours(dataOut_silam) if isinstance(dataOut_silam, np.ndarray) else None
+    )
+
+    def _extract(data, match, var_idx):
+        """Extract ``var_idx`` column from a zarr read result, aligned to ``hour_array_grib``."""
+        if match is None:
             return None
+        best, matched = match
         try:
             col = data[:, var_idx].astype(float)
-            # Time column is column 0 (unix seconds); match to hour_array_grib.
-            # SILAM timestamps are stored as float32 (±64 s rounding at ~1.75e9).
-            # Locations in fractional UTC-offset timezones (e.g. UTC±3:30, UTC+5:30)
-            # produce request timestamps that are exactly 1800 s from the nearest
-            # SILAM hour.  Float32 rounding can push the stored SILAM timestamp
-            # ~64 s away, making diff > 1800 for ~44 % of hours.
-            # Using a tolerance of one full SILAM time-step (3600 s) ensures the
-            # nearest available hour is always matched while still rejecting gaps
-            # larger than one hour.
-            time_col = data[:, 0].astype(float)
-            out = np.full(num_hours, np.nan)
-            for hi, t in enumerate(hour_array_grib):
-                diff = np.abs(time_col - float(t))
-                best = np.argmin(diff)
-                if diff[best] < 3600:  # within one SILAM time-step (1 h)
-                    out[hi] = col[best]
-            return out
-        except (IndexError, ValueError, TypeError):
+        except IndexError:
             return None
+        out = np.full(num_hours, np.nan)
+        out[matched] = col[best[matched]]
+        return out
 
-    raqdps_pm25 = _extract(dataOut_raqdps, RAQDPS["pm25"])
-    raqdps_pm10 = _extract(dataOut_raqdps, RAQDPS["pm10"])
-    raqdps_no2 = _extract(dataOut_raqdps, RAQDPS["no2"])
-    raqdps_o3 = _extract(dataOut_raqdps, RAQDPS["o3"])
-    raqdps_so2 = _extract(dataOut_raqdps, RAQDPS["so2"])
+    raqdps_pm25 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["pm25"])
+    raqdps_pm10 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["pm10"])
+    raqdps_no2 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["no2"])
+    raqdps_o3 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["o3"])
+    raqdps_so2 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["so2"])
 
-    silam_pm25 = _extract(dataOut_silam, SILAM["pm25"])
-    silam_pm10 = _extract(dataOut_silam, SILAM["pm10"])
-    silam_no2 = _extract(dataOut_silam, SILAM["no2"])
-    silam_o3 = _extract(dataOut_silam, SILAM["o3"])
-    silam_so2 = _extract(dataOut_silam, SILAM["so2"])
-    silam_co = _extract(dataOut_silam, SILAM["co"])
-    silam_smoke_frp = _extract(dataOut_silam, SILAM["pm_frp_column"])
-    silam_blh = _extract(dataOut_silam, SILAM["blh"])
+    silam_pm25 = _extract(dataOut_silam, silam_match, SILAM["pm25"])
+    silam_pm10 = _extract(dataOut_silam, silam_match, SILAM["pm10"])
+    silam_no2 = _extract(dataOut_silam, silam_match, SILAM["no2"])
+    silam_o3 = _extract(dataOut_silam, silam_match, SILAM["o3"])
+    silam_so2 = _extract(dataOut_silam, silam_match, SILAM["so2"])
+    silam_co = _extract(dataOut_silam, silam_match, SILAM["co"])
+    silam_smoke_frp = _extract(dataOut_silam, silam_match, SILAM["pm_frp_column"])
+    silam_blh = _extract(dataOut_silam, silam_match, SILAM["blh"])
 
     def _prefer(primary, fallback):
         """Return primary where not-NaN, else fallback."""

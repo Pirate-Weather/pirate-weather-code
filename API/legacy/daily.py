@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import logging
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
@@ -14,11 +15,27 @@ from API.constants.text_const import (
     PRECIP_PROB_THRESHOLD,
     WIND_THRESHOLDS,
 )
-from API.PirateDailyText import calculate_day_text
+from API.PirateDailyText import HourColumns, calculate_day_text
 
 
-def select_hour_window(hour_list, *, start_time: int, end_time: int) -> list:
-    """Return hourly entries in the half-open interval [start_time, end_time)."""
+def select_hour_window(
+    hour_list, *, start_time: int, end_time: int, hour_times: list | None = None
+) -> list:
+    """Return hourly entries in the half-open interval [start_time, end_time).
+
+    ``hour_list`` is the forecast's HourColumns (the window is then an
+    HourWindow) or a list of hour dicts; for a list, ``hour_times`` (the
+    sorted ``time`` of every entry) lets the window be found by bisection
+    instead of scanning every hour.
+    """
+    if isinstance(hour_list, HourColumns):
+        start = bisect.bisect_left(hour_list.time, start_time)
+        end = bisect.bisect_left(hour_list.time, end_time)
+        return hour_list.window(start, end)
+    if hour_times is not None:
+        start = bisect.bisect_left(hour_times, start_time)
+        end = bisect.bisect_left(hour_times, end_time)
+        return hour_list[start:end]
     return [
         hour
         for hour in hour_list
