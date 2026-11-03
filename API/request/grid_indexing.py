@@ -35,7 +35,14 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MAX,
     RTMA_RU_Y_MIN,
 )
-from API.constants.model_const import ERA5, ERA5_SOURCE_VARS, RAQDPS, SILAM
+from API.constants.model_const import (
+    ERA5,
+    ERA5_SOURCE_VARS,
+    RAQDPS,
+    RRFS,
+    RRFS_SUBH,
+    SILAM,
+)
 from API.constants.shared_const import (
     FIRST_FORECAST_LEAD_HOURS,
     HISTORY_PERIODS,
@@ -67,7 +74,7 @@ SILAM_VALUE_COLUMNS = tuple(
 
 @dataclass(frozen=True)
 class RotatedLatLonGrid:
-    """Describe a CMC rotated latitude/longitude grid."""
+    """Describe a rotated latitude/longitude grid (CMC models, RRFS North America)."""
 
     north_pole_latitude: float
     north_pole_longitude: float
@@ -100,6 +107,26 @@ REPS_ROTATED_GRID = RotatedLatLonGrid(
     latitude_count=960,
     longitude_count=908,
 )
+# RRFS North American 13 km grid (ingest/RRFS_NA_Local_Ingest.py): GRIB southern
+# pole at (-35, 247), so the rotated north pole is (35, 67). Rows run south to
+# north and columns west to east, as wgrib2 writes them.
+RRFS_NA_ROTATED_GRID = RotatedLatLonGrid(
+    north_pole_latitude=35.0,
+    north_pole_longitude=67.0,
+    first_latitude=-36.9303,
+    first_longitude=-61.0,
+    latitude_increment=0.1083,
+    longitude_increment=0.1083,
+    latitude_count=683,
+    longitude_count=1127,
+)
+# RRFS hourly runs to 18 h and its 6-hourly runs to 83 h. Like HRRR, a run is
+# dropped once about 70% of its hours have passed.
+RRFS_HOURLY_MAX_RUN_AGE = datetime.timedelta(hours=13)
+RRFS_6H_MAX_RUN_AGE = datetime.timedelta(hours=58)
+# RRFS sub-hourly only runs to 5 h (HRRR's runs to 18 h), so a run is dropped
+# while at least 2 h of it remain for the minutely and currently blocks.
+RRFS_SUBH_MAX_RUN_AGE = datetime.timedelta(hours=3)
 
 
 def _normalize_longitude_180(lon):
@@ -190,7 +217,7 @@ def _nearest_regular_grid_index(
 def _rotated_to_geographic(
     latitude: float, longitude: float, grid: RotatedLatLonGrid
 ) -> tuple[float, float]:
-    """Convert a CMC rotated-grid coordinate to geographic latitude/longitude."""
+    """Convert a rotated-grid coordinate to geographic latitude/longitude."""
     rotated_latitude = math.radians(latitude)
     rotated_longitude = math.radians(longitude)
     pole_latitude = math.radians(grid.north_pole_latitude)
@@ -225,7 +252,7 @@ def _nearest_rotated_grid_coords(
     max_distance: float,
     model_name: str,
 ) -> tuple[int, int, float, float]:
-    """Return the nearest CMC rotated-grid point for a geographic location."""
+    """Return the nearest rotated-grid point for a geographic location."""
     geographic_latitude = math.radians(latitude)
     geographic_longitude = math.radians(longitude)
     pole_latitude = math.radians(grid.north_pole_latitude)
@@ -383,6 +410,11 @@ class ZarrSources:
     silam: Any = None
     raqdps_lat_lon: Any = None
     librewxr: Any = None
+    rrfs: Any = None
+    rrfs_6h: Any = None
+    rrfs_subh: Any = None
+    rrfs_na: Any = None
+    rrfs_na_6h: Any = None
 
 
 @dataclass
@@ -471,6 +503,16 @@ class GridIndexingResult:
     y_urma: float | None = None
     urma_lat: float | None = None
     urma_lon: float | None = None
+    # RRFS (include=rrfs only). rrfs_grid is "rrfs" for the 3 km CONUS stores
+    # or "rrfs_na" for the 13 km North American ones; the sub-hourly store
+    # exists for CONUS only.
+    rrfs_grid: str | None = None
+    dataOut_rrfs: np.ndarray | bool = False
+    dataOut_rrfs_6h: np.ndarray | bool = False
+    dataOut_rrfs_subh: np.ndarray | bool = False
+    rrfsRunTime: float | None = None
+    rrfs6hRunTime: float | None = None
+    rrfsSubhRunTime: float | None = None
 
 
 def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
@@ -604,6 +646,7 @@ async def calculate_grid_indexing(
     ex_silam: int = 0,
     ex_librewxr: int = 0,
     inc_aimodels: int = 0,
+    inc_rrfs: int = 0,
     read_wmo_alerts: bool = True,
     base_day_utc: datetime.datetime | None = None,
     num_hours: int = 0,
@@ -710,6 +753,54 @@ async def calculate_grid_indexing(
         sourceIDX["hrrr"]["y"] = int(y_hrrr)
         sourceIDX["hrrr"]["lat"] = round(hrrr_lat, 2)
         sourceIDX["hrrr"]["lon"] = round(((hrrr_lon + 180) % 360) - 180, 2)
+
+    timer.log("### RRFS Detail Start ###")
+
+    # RRFS is read only for include=rrfs. The 3 km CONUS stores are on the HRRR
+    # grid and are used wherever that grid covers the point; elsewhere in North
+    # America the 13 km rotated-grid stores are used. RRFS keeps no history, so
+    # Time Machine never reads it (inc_rrfs is already 0 there).
+    rrfs_grid = None
+    x_rrfs = y_rrfs = rrfs_lat = rrfs_lon = None
+    if inc_rrfs:
+        if (
+            -134 <= az_lon <= -61
+            and 21 <= lat <= 53
+            and (zarr_sources.rrfs is not None or zarr_sources.rrfs_6h is not None)
+        ):
+            rrfs_lat, rrfs_lon, x_rrfs, y_rrfs, rrfs_in_bounds = _get_grid_coords(
+                lat,
+                lon,
+                262.5,
+                38.5,
+                38.5,
+                6371229,
+                -2697500,
+                -1587300,
+                3000,
+                HRRR_X_MIN,
+                HRRR_Y_MIN,
+                HRRR_X_MAX,
+                HRRR_Y_MAX,
+            )
+            if rrfs_in_bounds:
+                rrfs_grid = "rrfs"
+        if rrfs_grid is None and (
+            zarr_sources.rrfs_na is not None or zarr_sources.rrfs_na_6h is not None
+        ):
+            try:
+                x_rrfs, y_rrfs, rrfs_lat, rrfs_lon = _nearest_rotated_grid_coords(
+                    lat,
+                    lon,
+                    RRFS_NA_ROTATED_GRID,
+                    max_distance=0.005,
+                    model_name="RRFS_NA",
+                )
+                rrfs_grid = "rrfs_na"
+            except ValueError as exc:
+                logger.debug("RRFS NA grid lookup failed: %s", exc)
+
+    timer.log("### RRFS Detail END ###")
 
     timer.log("### RTMA_RU Start ###")
 
@@ -1114,6 +1205,28 @@ async def calculate_grid_indexing(
         )
 
     zarrTasks = {}
+    if rrfs_grid == "rrfs":
+        if zarr_sources.rrfs is not None:
+            zarrTasks["RRFS"] = weather.zarr_read(
+                "RRFS", zarr_sources.rrfs, x_rrfs, y_rrfs
+            )
+        if zarr_sources.rrfs_6h is not None:
+            zarrTasks["RRFS_6H"] = weather.zarr_read(
+                "RRFS_6H", zarr_sources.rrfs_6h, x_rrfs, y_rrfs
+            )
+        if zarr_sources.rrfs_subh is not None:
+            zarrTasks["RRFS_SubH"] = weather.zarr_read(
+                "RRFS_SubH", zarr_sources.rrfs_subh, x_rrfs, y_rrfs
+            )
+    elif rrfs_grid == "rrfs_na":
+        if zarr_sources.rrfs_na is not None:
+            zarrTasks["RRFS"] = weather.zarr_read(
+                "RRFS_NA", zarr_sources.rrfs_na, x_rrfs, y_rrfs
+            )
+        if zarr_sources.rrfs_na_6h is not None:
+            zarrTasks["RRFS_6H"] = weather.zarr_read(
+                "RRFS_NA_6H", zarr_sources.rrfs_na_6h, x_rrfs, y_rrfs
+            )
     if readHRRR:
         zarrTasks["SubH"] = weather.zarr_read("SubH", zarr_sources.subh, x_hrrr, y_hrrr)
         zarrTasks["HRRR_6H"] = weather.zarr_read(
@@ -1240,6 +1353,57 @@ async def calculate_grid_indexing(
                     2,
                 ),
             }
+
+    dataOut_rrfs = dataOut_rrfs_6h = dataOut_rrfs_subh = False
+    rrfsRunTime = rrfs6hRunTime = rrfsSubhRunTime = None
+    if rrfs_grid is not None:
+        # Cells outside the NA model domain (the rotated grid's corners) are
+        # NaN for every variable except reflectivity, which the ingest stores
+        # as 0 there, so the reader does not blank their time column. Without
+        # any temperature the cell is not covered and RRFS is not a source.
+        def _rrfs_block(key, temp_column):
+            data = zarr_results.get(key, False)
+            if data is False or not np.isfinite(data[:, temp_column]).any():
+                return False
+            return data
+
+        def _run_age(run_time):
+            return utc_time - datetime.datetime.fromtimestamp(
+                int(run_time), datetime.UTC
+            ).replace(tzinfo=None)
+
+        rrfs_model = "RRFS" if rrfs_grid == "rrfs" else "RRFS_NA"
+        dataOut_rrfs = _rrfs_block("RRFS", RRFS["temp"])
+        if dataOut_rrfs is not False:
+            rrfsRunTime = _forecast_run_time(dataOut_rrfs, rrfs_model)
+            if _run_age(rrfsRunTime) > RRFS_HOURLY_MAX_RUN_AGE:
+                dataOut_rrfs = False
+                rrfsRunTime = None
+        dataOut_rrfs_6h = _rrfs_block("RRFS_6H", RRFS["temp"])
+        if dataOut_rrfs_6h is not False:
+            rrfs6hRunTime = _forecast_run_time(dataOut_rrfs_6h, f"{rrfs_model}_6H")
+            if _run_age(rrfs6hRunTime) > RRFS_6H_MAX_RUN_AGE:
+                dataOut_rrfs_6h = False
+                rrfs6hRunTime = None
+        dataOut_rrfs_subh = _rrfs_block("RRFS_SubH", RRFS_SUBH["temp"])
+        if dataOut_rrfs_subh is not False:
+            rrfsSubhRunTime = _forecast_run_time(dataOut_rrfs_subh, "RRFS_SubH")
+            if _run_age(rrfsSubhRunTime) > RRFS_SUBH_MAX_RUN_AGE:
+                dataOut_rrfs_subh = False
+                rrfsSubhRunTime = None
+        if dataOut_rrfs is not False or dataOut_rrfs_6h is not False:
+            sourceIDX[rrfs_grid] = {
+                "x": int(x_rrfs),
+                "y": int(y_rrfs),
+                "lat": round(rrfs_lat, 2),
+                "lon": round(((rrfs_lon + 180) % 360) - 180, 2),
+            }
+        else:
+            # Without the hourly stores there is no hourly fallback for the
+            # sub-hourly block, so RRFS is not a source at all.
+            dataOut_rrfs_subh = False
+            rrfsSubhRunTime = None
+            rrfs_grid = None
 
     if readHRRR:
         dataOut = zarr_results["SubH"]
@@ -1757,4 +1921,11 @@ async def calculate_grid_indexing(
         y_silam=y_silam,
         silam_lat=silam_lat_val,
         silam_lon=silam_lon_val,
+        rrfs_grid=rrfs_grid,
+        dataOut_rrfs=dataOut_rrfs,
+        dataOut_rrfs_6h=dataOut_rrfs_6h,
+        dataOut_rrfs_subh=dataOut_rrfs_subh,
+        rrfsRunTime=rrfsRunTime,
+        rrfs6hRunTime=rrfs6hRunTime,
+        rrfsSubhRunTime=rrfsSubhRunTime,
     )

@@ -90,6 +90,12 @@ FORECAST_STORES = (
     ("RAQDPS_Zarr", "RAQDPS"),
     ("SILAM_Zarr", "SILAM"),
     ("LibreWXR_Zarr", "LibreWXR"),
+    # RRFS is read only for include=rrfs requests
+    ("RRFS_Zarr", "RRFS"),
+    ("RRFS_6H_Zarr", "RRFS_6H"),
+    ("RRFS_SubH_Zarr", "RRFS_SubH"),
+    ("RRFS_NA_Zarr", "RRFS_NA"),
+    ("RRFS_NA_6H_Zarr", "RRFS_NA_6H"),
 )
 ALERT_STORES = (
     ("NWS_Alerts_Zarr", "NWS_Alerts"),
@@ -278,6 +284,11 @@ class ZarrStores:
     RAQDPS_Zarr: ModelStore | None = None
     SILAM_Zarr: ModelStore | None = None
     LibreWXR_Zarr: ModelStore | None = None
+    RRFS_Zarr: ModelStore | None = None
+    RRFS_6H_Zarr: ModelStore | None = None
+    RRFS_SubH_Zarr: ModelStore | None = None
+    RRFS_NA_Zarr: ModelStore | None = None
+    RRFS_NA_6H_Zarr: ModelStore | None = None
     RAQDPS_LatLon: Any | None = None
 
 

@@ -58,6 +58,8 @@ from API.constants.model_const import (
     HRRR,
     HRRR_SUBH,
     NBM,
+    RRFS,
+    RRFS_SUBH,
     RTMA_RU,
     URMA,
 )
@@ -246,6 +248,9 @@ def convert_data_to_celsius(
     dataOut_hrdps,
     dataOut_gdps,
     dataOut_urma=None,
+    dataOut_rrfs=None,
+    dataOut_rrfs_6h=None,
+    dataOut_rrfs_subh=None,
 ):
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
@@ -279,6 +284,9 @@ def convert_data_to_celsius(
         (dataOut_hrdps, HRDPS, ["temp", "dew"]),
         (dataOut_gdps, GDPS, ["temp", "dew"]),
         (dataOut_urma, URMA, ["temp", "dew"]),
+        (dataOut_rrfs, RRFS, ["temp", "dew"]),
+        (dataOut_rrfs_6h, RRFS, ["temp", "dew"]),
+        (dataOut_rrfs_subh, RRFS_SUBH, ["temp", "dew"]),
     ]
 
     for data_array, indices_dict, keys in model_mappings:
@@ -512,6 +520,7 @@ async def PW_Forecast(
     exAIGFS = initial.ex_aigfs
     exAIFS = initial.ex_aifs
     incAIModels = initial.inc_aimodels
+    incRRFS = initial.inc_rrfs
     exRAQDPS = initial.ex_raqdps
     exSILAM = initial.ex_silam
     exLIBREWXR = initial.ex_librewxr
@@ -591,6 +600,11 @@ async def PW_Forecast(
         raqdps=stores.RAQDPS_Zarr,
         silam=stores.SILAM_Zarr,
         raqdps_lat_lon=stores.RAQDPS_LatLon,
+        rrfs=stores.RRFS_Zarr,
+        rrfs_6h=stores.RRFS_6H_Zarr,
+        rrfs_subh=stores.RRFS_SubH_Zarr,
+        rrfs_na=stores.RRFS_NA_Zarr,
+        rrfs_na_6h=stores.RRFS_NA_6H_Zarr,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores
@@ -622,6 +636,7 @@ async def PW_Forecast(
         ex_silam=exSILAM,
         ex_librewxr=exLIBREWXR,
         inc_aimodels=incAIModels,
+        inc_rrfs=incRRFS,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
         num_hours=numHours,
@@ -652,6 +667,9 @@ async def PW_Forecast(
     WMO_alertDat = grid_result.WMO_alertDat
     dataOut_raqdps = grid_result.dataOut_raqdps
     dataOut_silam = grid_result.dataOut_silam
+    dataOut_rrfs = grid_result.dataOut_rrfs
+    dataOut_rrfs_6h = grid_result.dataOut_rrfs_6h
+    dataOut_rrfs_subh = grid_result.dataOut_rrfs_subh
 
     ERA5_MERGED = grid_result.era5_merged
 
@@ -673,6 +691,9 @@ async def PW_Forecast(
         dataOut_hrdps,
         dataOut_gdps,
         dataOut_urma,
+        dataOut_rrfs=dataOut_rrfs,
+        dataOut_rrfs_6h=dataOut_rrfs_6h,
+        dataOut_rrfs_subh=dataOut_rrfs_subh,
     )
 
     # 5. Build metadata about the data sources used for this forecast
@@ -753,9 +774,16 @@ async def PW_Forecast(
         data_aifs=dataOut_aifs if isinstance(dataOut_aifs, np.ndarray) else None,
         logger=logger,
         loc_tag=loc_tag,
+        data_rrfs=dataOut_rrfs if isinstance(dataOut_rrfs, np.ndarray) else None,
+        data_rrfs_6h=dataOut_rrfs_6h
+        if isinstance(dataOut_rrfs_6h, np.ndarray)
+        else None,
+        rrfs_grid=grid_result.rrfs_grid,
     )
 
     HRRR_Merged = merge_result.hrrr
+    # RRFS (include=rrfs only) comes first in every element's priority order
+    RRFS_Merged = merge_result.rrfs
     NBM_Merged = merge_result.nbm
     GFS_Merged = merge_result.gfs
     URMA_Merged = merge_result.urma
@@ -831,6 +859,7 @@ async def PW_Forecast(
             pTypesText,
             pTypesIcon,
             hrrrSubHInterpolation,
+            rrfsSubHInterpolation,
         ) = build_minutely_block(
             minute_array_grib=minute_array_grib,
             source_list=sourceList,
@@ -841,6 +870,10 @@ async def PW_Forecast(
             hrrr_merged=HRRR_Merged
             if ("hrrr_0-18" in sourceList and "hrrr_18-48" in sourceList)
             else None,
+            rrfs_subh_data=dataOut_rrfs_subh
+            if "rrfssubh" in sourceList and isinstance(dataOut_rrfs_subh, np.ndarray)
+            else None,
+            rrfs_merged=RRFS_Merged,
             nbm_data=dataOut_nbm if "nbm" in sourceList else None,
             dwd_mosmix_data=DWD_MOSMIX_Merged if "dwd_mosmix" in sourceList else None,
             gefs_data=GEFS_Merged if "gefs" in sourceList else None,
@@ -922,6 +955,7 @@ async def PW_Forecast(
         source_list=sourceList,
         nbm_merged=NBM_Merged,
         hrrr_merged=HRRR_Merged,
+        rrfs_merged=RRFS_Merged,
         dwd_mosmix_merged=DWD_MOSMIX_Merged,
         ecmwf_merged=ECMWF_Merged,
         gefs_merged=GEFS_Merged,
@@ -979,7 +1013,7 @@ async def PW_Forecast(
     )
 
     # Extend smoke_inputs with SILAM PM_FRP_column as a lower-priority fallback
-    # (HRRR smoke wins when available; SILAM fire smoke fills NaN gaps).
+    # (RRFS then HRRR smoke win when available; SILAM fire smoke fills NaN gaps).
     silam_smoke_frp = aq_inputs.get("smoke_frp")
     if silam_smoke_frp is not None and not np.all(np.isnan(silam_smoke_frp)):
         smoke_inputs = np.column_stack([smoke_inputs, silam_smoke_frp.reshape(-1, 1)])
@@ -1214,6 +1248,8 @@ async def PW_Forecast(
             dataOut_rtma_ru=dataOut_rtma_ru,
             hrrrSubHInterpolation=hrrrSubHInterpolation,
             HRRR_Merged=HRRR_Merged,
+            rrfsSubHInterpolation=rrfsSubHInterpolation,
+            RRFS_Merged=RRFS_Merged,
             NBM_Merged=NBM_Merged,
             DWD_MOSMIX_Merged=DWD_MOSMIX_Merged,
             ECMWF_Merged=ECMWF_Merged,

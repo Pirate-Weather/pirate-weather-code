@@ -40,6 +40,35 @@ HRRR = {
     "solar": 18,
     "cape": 19,
 }
+# RRFS (ingest/RRFS_*_Local_Ingest.py) is only read with include=rrfs. The CONUS
+# 3 km and North American 13 km stores share one layout: HRRR's first 19
+# columns (MSLET in place of MSLMA for "pressure"), then surface CIN and the
+# 500-1000 mb lifted index. The sub-hourly store matches HRRR_SUBH column for
+# column, so the same index map reads it.
+RRFS = {
+    "vis": 1,
+    "gust": 2,
+    "pressure": 3,
+    "temp": 4,
+    "dew": 5,
+    "humidity": 6,
+    "wind_u": 7,
+    "wind_v": 8,
+    "intensity": 9,
+    "accum": 10,
+    "snow": 11,
+    "ice": 12,
+    "freezing_rain": 13,
+    "rain": 14,
+    "cloud": 15,
+    "smoke": 16,
+    "refc": 17,
+    "solar": 18,
+    "cape": 19,
+    "cin": 20,
+    "lifted_index": 21,
+}
+RRFS_SUBH = HRRR_SUBH
 
 GFS = {
     "vis": 1,
@@ -314,6 +343,10 @@ FORECAST_SOURCES = frozenset(
         "hrrr_0-18",
         "hrrr_18-48",
         "hrrr",
+        "rrfs_0-18",
+        "rrfs_18-83",
+        "rrfs_na_0-18",
+        "rrfs_na_18-83",
         "nbm",
         "gfs",
         "urma",

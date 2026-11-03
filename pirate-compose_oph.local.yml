@@ -25,7 +25,7 @@
 #   docker compose -f pirate-compose_oph.local.yml --profile ingest create
 #   docker compose -f pirate-compose_oph.local.yml up -d
 # The ingest services are in the "ingest" profile so a plain `up` does not start
-# all 22 at once (their combined peak memory is far above one server's).
+# all 27 at once (their combined peak memory is far above one server's).
 # `create` makes their containers; Ofelia starts them on the schedule below.
 # After rebuilding pirateingest:latest, run the `create` again to recreate them.
 
@@ -170,6 +170,25 @@ services:
       ofelia.job-run.subh.schedule: "0 45 * * * *"
       ofelia.job-run.subh.container: "pirate-ingest-subh"
       ofelia.job-run.subh.no-overlap: "true"
+      # RRFS (served only for include=rrfs). Posting is irregular on AWS (cycles
+      # arrive hours late or not at all, and the ingests fall back to NOMADS),
+      # and each ingest takes the newest cycle whose last lead exists, so all
+      # five check hourly; runs that find nothing new exit early.
+      ofelia.job-run.rrfs.schedule: "0 50 * * * *"
+      ofelia.job-run.rrfs.container: "pirate-ingest-rrfs"
+      ofelia.job-run.rrfs.no-overlap: "true"
+      ofelia.job-run.rrfs-subh.schedule: "0 50 * * * *"
+      ofelia.job-run.rrfs-subh.container: "pirate-ingest-rrfs-subh"
+      ofelia.job-run.rrfs-subh.no-overlap: "true"
+      ofelia.job-run.rrfs-na.schedule: "0 50 * * * *"
+      ofelia.job-run.rrfs-na.container: "pirate-ingest-rrfs-na"
+      ofelia.job-run.rrfs-na.no-overlap: "true"
+      ofelia.job-run.rrfs6h.schedule: "0 20 * * * *"
+      ofelia.job-run.rrfs6h.container: "pirate-ingest-rrfs6h"
+      ofelia.job-run.rrfs6h.no-overlap: "true"
+      ofelia.job-run.rrfs-na6h.schedule: "0 20 * * * *"
+      ofelia.job-run.rrfs-na6h.container: "pirate-ingest-rrfs-na6h"
+      ofelia.job-run.rrfs-na6h.no-overlap: "true"
       ofelia.job-run.rtma-ru.schedule: "0 10,25,40,55 * * * *"
       ofelia.job-run.rtma-ru.container: "pirate-ingest-rtma-ru"
       ofelia.job-run.rtma-ru.no-overlap: "true"
@@ -328,6 +347,58 @@ services:
       forecast_process_dir: "/work/SubH"
       zarr_store_workers: "2"
     command: ["ingest/SubH_Local_Ingest.py"]
+
+  # RRFS: measured peaks with 4 write threads were 1.5 GB (hourly, NA,
+  # sub-hourly) and 3.4 GB (6-hourly, NA 6-hourly); these run with 2.
+  rrfs_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-rrfs
+    mem_limit: 4g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/RRFS"
+      zarr_store_workers: "2"
+    command: ["ingest/RRFS_Local_Ingest.py"]
+
+  rrfs_6h_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-rrfs6h
+    mem_limit: 6g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/RRFS_6H"
+      zarr_store_workers: "2"
+    command: ["ingest/RRFS_6H_Local_Ingest.py"]
+
+  rrfs_subh_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-rrfs-subh
+    mem_limit: 4g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/RRFS_SubH"
+      zarr_store_workers: "2"
+    command: ["ingest/RRFS_SubH_Local_Ingest.py"]
+
+  rrfs_na_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-rrfs-na
+    mem_limit: 4g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/RRFS_NA"
+      zarr_store_workers: "2"
+    command: ["ingest/RRFS_NA_Local_Ingest.py"]
+
+  rrfs_na_6h_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-rrfs-na6h
+    mem_limit: 6g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/RRFS_NA_6H"
+      zarr_store_workers: "2"
+    command: ["ingest/RRFS_NA_6H_Local_Ingest.py"]
 
   rtma_ru_ingest:
     <<: *ingest

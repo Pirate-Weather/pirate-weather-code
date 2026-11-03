@@ -12,6 +12,7 @@ from API.constants.model_const import ERA5
 from API.request.grid_indexing import (
     HRDPS_ROTATED_GRID,
     REPS_ROTATED_GRID,
+    RRFS_NA_ROTATED_GRID,
     ZarrSources,
     _load_era5_slice,
     _nearest_2d_grid_coords,
@@ -43,6 +44,43 @@ def test_rotated_cmc_grid_first_grib_point_maps_to_index_zero(
     assert (x_index, y_index) == (0, 0)
     assert grid_latitude == pytest.approx(latitude, abs=1e-5)
     assert grid_longitude == pytest.approx(longitude, abs=1e-5)
+
+
+# (wgrib2 1-based i, j) -> (longitude, latitude) that wgrib2 -ijlat reports for
+# cells of the RRFS North American grid (rrfs.t12z.2dfld.13km.f001.na.grib2,
+# 2026-11-03): the four corners, the rotated origin and two interior cells.
+RRFS_NA_WGRIB2_CELLS = [
+    ((1, 1), 202.621079, -1.557179),
+    ((1127, 1), 291.348687, -1.526135),
+    ((1, 683), 135.891368, 41.459025),
+    ((1127, 683), 358.091675, 41.500447),
+    ((564, 342), 246.952753, 54.999991),
+    ((300, 500), 184.686314, 58.871458),
+    ((900, 120), 282.625936, 21.638009),
+]
+
+
+@pytest.mark.parametrize(("ij", "longitude", "latitude"), RRFS_NA_WGRIB2_CELLS)
+def test_rrfs_na_lookup_finds_the_cell_wgrib2_places_there(ij, longitude, latitude):
+    """The API finds an RRFS North America cell with its own closed-form
+    rotated-pole lookup, while the ingest stores the grid as wgrib2 writes it.
+    A pole, longitude or row-order convention that differed would read a
+    neighbouring or distant cell for every North American include=rrfs request
+    with nothing failing, so pin the lookup to wgrib2's own cell coordinates
+    across the grid (the ingest checks its grid against wgrib2 on every run).
+    """
+    longitude = (longitude + 180.0) % 360.0 - 180.0
+    x_index, y_index, grid_latitude, grid_longitude = _nearest_rotated_grid_coords(
+        latitude,
+        longitude,
+        RRFS_NA_ROTATED_GRID,
+        max_distance=0.005,
+        model_name="RRFS_NA",
+    )
+
+    assert (x_index + 1, y_index + 1) == ij
+    assert grid_latitude == pytest.approx(latitude, abs=1e-3)
+    assert grid_longitude == pytest.approx(longitude, abs=1e-3)
 
 
 def test_rotated_cmc_grid_rejects_location_outside_domain():

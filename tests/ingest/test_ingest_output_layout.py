@@ -29,6 +29,16 @@ _HRRR_LAYOUT = {
     "cape": "CAPE_surface",
 }
 
+# RRFS keeps HRRR's order with its own MSLP and cloud-level names, then adds
+# CIN and the lifted index; the CONUS and North American stores share it.
+_RRFS_LAYOUT = {
+    **_HRRR_LAYOUT,
+    "pressure": "MSLET_meansealevel",
+    "cloud": "TCDC_entireatmosphere_consideredasasinglelayer_",
+    "cin": "CIN_surface",
+    "lifted_index": "LFTX_500M1000mb",
+}
+
 _ANALYSIS_LAYOUT = {
     "vis": "vis",
     "gust": "i10fg",
@@ -46,6 +56,10 @@ _ANALYSIS_LAYOUT = {
 LAYOUTS = [
     pytest.param("HRRR_Local_Ingest", "HRRR", _HRRR_LAYOUT, id="hrrr"),
     pytest.param("HRRR_6H_Local_Ingest", "HRRR", _HRRR_LAYOUT, id="hrrr_6h"),
+    pytest.param("RRFS_Local_Ingest", "RRFS", _RRFS_LAYOUT, id="rrfs"),
+    pytest.param("RRFS_6H_Local_Ingest", "RRFS", _RRFS_LAYOUT, id="rrfs_6h"),
+    pytest.param("RRFS_NA_Local_Ingest", "RRFS", _RRFS_LAYOUT, id="rrfs_na"),
+    pytest.param("RRFS_NA_6H_Local_Ingest", "RRFS", _RRFS_LAYOUT, id="rrfs_na_6h"),
     pytest.param(
         "LibreWXR_Local_Ingest", "LIBREWXR", {"refc": "REFC_composite"}, id="librewxr"
     ),
@@ -71,6 +85,29 @@ LAYOUTS = [
             "solar": "DSWRF_surface",
         },
         id="hrrr_subh",
+    ),
+    pytest.param(
+        "RRFS_SubH_Local_Ingest",
+        "RRFS_SUBH",
+        {
+            "gust": "GUST_surface",
+            "pressure": "PRES_surface",
+            "temp": "TMP_2maboveground",
+            "dew": "DPT_2maboveground",
+            "wind_u": "UGRD_10maboveground",
+            "wind_v": "VGRD_10maboveground",
+            "intensity": "PRATE_surface",
+            "snow": "CSNOW_surface",
+            "ice": "CICEP_surface",
+            "freezing_rain": "CFRZR_surface",
+            "rain": "CRAIN_surface",
+            "refc": "REFD_1000maboveground",
+            "accum": "APCP_surface",
+            "vis": "VIS_surface",
+            "specific_humidity": "SPFH_2maboveground",
+            "solar": "DSWRF_surface",
+        },
+        id="rrfs_subh",
     ),
     pytest.param("RTMA-RU_Local_Ingest", "RTMA_RU", _ANALYSIS_LAYOUT, id="rtma_ru"),
     pytest.param("URMA_Local_Ingest", "URMA", _ANALYSIS_LAYOUT, id="urma"),

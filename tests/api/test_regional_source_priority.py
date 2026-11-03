@@ -18,6 +18,7 @@ from API.constants.model_const import (
     HRDPS,
     HRRR,
     NBM,
+    RRFS,
 )
 from API.current.metrics import _build_source_strategies
 from tests.helpers.model_arrays import hourly_inputs, model_array
@@ -255,3 +256,39 @@ def test_hourly_ai_mode_precip_probability_prefers_gefs_in_north_america():
     )
 
     assert inputs["prcipProbability_inputs"][0, 0] == pytest.approx(0.8)
+
+
+@pytest.mark.parametrize("ai", [False, True], ids=["conventional", "ai-mode"])
+def test_include_rrfs_leads_every_element_even_in_canada(ai):
+    """include=rrfs promises RRFS ahead of every model. Inside the Canada box
+    and in AI mode other models normally lead, so a missing prepend in one of
+    the order builders would quietly publish HRDPS or AI values to a user who
+    asked for RRFS. Without RRFS data the orders are the existing ones (the
+    tests above).
+    """
+    source_map = {name: name for name in (*AI_CURRENT_SOURCES, "rrfssubh", "rrfs")}
+    order = _build_source_strategies(source_map, *OTTAWA, prioritize_ai_models=ai)
+    assert order[:2] == ["rrfssubh", "rrfs"]
+
+    merged = {
+        "rrfs": model_array(RRFS, 3, temp=5.0, intensity=1 / 3600, accum=1.0),
+        "hrdps": model_array(HRDPS, 3, temp=6.0, intensity=2 / 3600, accum=2.0),
+        "nbm": model_array(NBM, 3, temp=7.0, intensity=3.0, accum=3.0),
+        "gfs": model_array(GFS, 3, temp=8.0, intensity=4 / 3600, accum=4.0),
+    }
+    inputs = hourly_inputs(
+        lat=OTTAWA[0],
+        lon=OTTAWA[1],
+        source_list=["rrfs_0-18", "hrdps", "nbm", "gfs"],
+        prioritize_ai_models=ai,
+        **merged,
+    )
+
+    # RRFS's values (precipitation intensity in mm/h) sit in the first column
+    expected_first = {
+        "temperature_inputs": 5.0,
+        "prcipIntensity_inputs": 1.0,
+        "accum_inputs": 1.0,
+    }
+    for element, value in expected_first.items():
+        assert inputs[element][0, 0] == pytest.approx(value), element
