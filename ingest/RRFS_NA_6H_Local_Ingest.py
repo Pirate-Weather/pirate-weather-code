@@ -1,13 +1,11 @@
 """RRFS North American 6-hourly extended (18-84 h) ingest.
 
 Downloads the 2D fields (2dfld product) of the newest 6-hourly RRFS cycle on the
-North American domain (3 km rotated latitude-longitude grid; only the
-00/06/12/18 UTC cycles run to 84 h), hourly leads 18-83 h, and publishes
-``RRFS_NA_6H.zarr`` and ``RRFS_NA_6H.time.pickle``. The store starts at lead
-18 h (run + 18 h); leads 0-17 come from the hourly RRFS_NA ingest.
-
-The winds are not yet rotated to earth-relative (see the wind rotation step),
-so this ingest stops before publishing.
+North American domain (13 km rotated latitude-longitude grid, 1127 x 683; only
+the 00/06/12/18 UTC cycles run to 84 h), hourly leads 18-83 h, rotates the winds
+to earth-relative and publishes ``RRFS_NA_6H.zarr`` and
+``RRFS_NA_6H.time.pickle``. The store starts at lead 18 h (run + 18 h); leads
+0-17 come from the hourly RRFS_NA ingest.
 
 Alexander Rey, September 2026
 """
@@ -25,8 +23,13 @@ import pandas as pd
 import xarray as xr
 from herbie.fast import Herbie_latest
 
-from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_grib_utils import download_and_validate_subset, run_checked
+from API.constants.shared_const import INGEST_VERSION_STR, KELVIN_TO_CELSIUS
+from API.ingest_grib_utils import (
+    cat_gribs,
+    download_and_validate_subset,
+    quote_path,
+    run_checked,
+)
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -41,6 +44,7 @@ from API.ingest_utils import (
     positive_int_env,
     publish_ingest_run,
     read_published_run_time,
+    rotated_latlon_grid_geometry,
     write_final_zarr,
 )
 
@@ -53,13 +57,29 @@ RRFS_NA_FORECAST_HOURS = FORECAST_LEAD_RANGES["RRFS_NA_6H"]
 RRFS_SOURCE_PRIORITY = ["aws", "nomads"]
 # Herbie's RRFS template selects the North American domain with domain="na"
 RRFS_NA_DOMAIN = "na"
+# The NA 2D fields are on a rotated latitude-longitude grid (GRIB grid template
+# 1, as wgrib2 -grid reports it): rotated south pole at -35 N, 247 E with no
+# extra rotation, 1127 x 683 points 0.1083 deg apart, rotated longitudes from
+# 299 (-61) deg and rotated latitudes from -36.9303 deg, rows south to north.
+RRFS_NA_NORTH_POLE_LAT = 35.0
+RRFS_NA_NORTH_POLE_LON = 247.0 - 180.0
+RRFS_NA_GRID_SHAPE = (683, 1127)
+RRFS_NA_GRID_STEP_DEG = 0.1083
+RRFS_NA_FIRST_RLAT = -36.9303
+RRFS_NA_FIRST_RLON = -61.0
+# Largest allowed gap (deg) between the grid positions recomputed from these
+# constants and the ones wgrib2 writes; they agree to ~1e-11 deg
+RRFS_NA_GRID_POSITION_TOLERANCE_DEG = 1e-4
 
 # Herbie match strings for the 2dfld product
 RRFS_MATCH_STRINGS = (
     ":((DPT|TMP|APTMP|RH):2 m above ground:)"
     "|:((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE|CIN):surface:.*hour fcst)"
     "|(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
-    "|(:TCDC:entire atmosphere:.*hour fcst)"
+    # RRFS labels the column cloud cover "entire atmosphere (considered as a
+    # single layer)" (HRRR: "entire atmosphere"); the instantaneous field, not
+    # the (N-1)-N h average.
+    r"|(:TCDC:entire atmosphere \(considered as a single layer\):\d+ hour fcst:)"
     # Like HRRR, each file holds a 0-N h run total and an (N-1)-N h bucket. This
     # selects the one-hour bucket (17-18 ... 82-83 h), which is already an hourly
     # total; differencing run totals would leave the first lead (18 h) as a
@@ -67,11 +87,17 @@ RRFS_MATCH_STRINGS = (
     "|(:APCP:surface:[1-9][0-9]*-[0-9]+ hour acc)"
     # RRFS carries several aerosol MASSDEN fields at 8 m; smoke is the
     # particulate organic matter one.
-    "|:(MASSDEN:8 m above ground:*hour fcst:aerosol=Particulate organic matter dry:)"
-    "|(:(MSLMA):)"
+    r"|(:MASSDEN:8 m above ground:\d+ hour fcst:aerosol=Particulate organic matter dry:)"
+    # RRFS has no MAPS sea-level pressure (HRRR's MSLMA); MSLET is the
+    # Eta-reduced sea-level pressure, the nearest equivalent.
+    "|(:MSLET:mean sea level:)"
     "|(:REFD:1000 m above ground:)"
     "|(:LFTX:500-1000 mb:)"
 )
+
+# GRIB variables outside the generic wgrib2 stats range for valid reasons: CIN
+# is negative by convention and routinely below the range minimum (-100 J/kg).
+RRFS_EXCLUDED_STATS_VARIABLES = ["CIN"]
 
 # Smoke (MASSDEN) is in kg/m^3; scale to ug/m^3 so float32 storage keeps precision
 MASSDEN_KG_TO_UG = 1e9
@@ -83,7 +109,7 @@ MASSDEN_KG_TO_UG = 1e9
 zarr_vars = (
     "VIS_surface",
     "GUST_surface",
-    "MSLMA_meansealevel",
+    "MSLET_meansealevel",
     "TMP_2maboveground",
     "DPT_2maboveground",
     "RH_2maboveground",
@@ -95,7 +121,7 @@ zarr_vars = (
     "CICEP_surface",
     "CFRZR_surface",
     "CRAIN_surface",
-    "TCDC_entireatmosphere",
+    "TCDC_entireatmosphere_consideredasasinglelayer_",
     "MASSDEN_8maboveground",
     "REFD_1000maboveground",
     "DSWRF_surface",
@@ -145,6 +171,7 @@ def download_rrfs_na_6h_subset(base_time: pd.Timestamp) -> list[str]:
         herbie_kwargs={"domain": RRFS_NA_DOMAIN},
         download_verbose=False,
         wgrib2_exe=wgrib2_path.strip(),
+        excluded_stats_variables=RRFS_EXCLUDED_STATS_VARIABLES,
     )
 
 
@@ -198,24 +225,15 @@ def main() -> None:
         pd.Timestamp(base_time) + pd.to_timedelta(RRFS_NA_FORECAST_HOURS, unit="h")
     ).values
 
-    # %% Download, merge, rotate winds and convert to NetCDF
+    # %% Download, merge and convert to NetCDF
     grib_list = download_rrfs_na_6h_subset(base_time)
 
     merged_grib_path = forecast_process_path + "_wgrib2_merged.grib2"
     merged_nc_path = forecast_process_path + "_wgrib2_merged.nc"
     run_checked(
-        "cat " + " ".join(grib_list) + f" | {wgrib2_path} - -grib {merged_grib_path}",
+        f"{cat_gribs(grib_list)} | {quote_path(wgrib2_path.strip())} - "
+        f"-grib {quote_path(merged_grib_path)}",
         "RRFS_NA 6-hourly wgrib2 GRIB merge",
-    )
-
-    # The NA domain is a rotated latitude-longitude grid, so its U/V are relative
-    # to the rotated grid. The CONUS approach (-new_grid_winds earth with the
-    # native grid passed to -new_grid) needs a wgrib2 grid definition for this
-    # rotated grid, which has not been worked out and verified yet. Publishing
-    # grid-relative winds would serve wrong wind directions, so stop here.
-    raise NotImplementedError(
-        f"RRFS_NA_6H run {base_time}: earth-relative wind rotation for the rotated "
-        "lat-lon NA grid is not implemented; not publishing grid-relative winds"
     )
 
     run_checked(
@@ -232,23 +250,87 @@ def main() -> None:
             f"forecast leads {RRFS_NA_FORECAST_HOURS}"
         )
 
+    # %% Rotate the winds to earth-relative
+    # The NA U/V are relative to the rotated grid. wgrib2 cannot rotate them in
+    # place on this grid (see rotated_latlon_grid_geometry), so the rotation is
+    # applied here from the grid geometry. The recomputed grid positions must
+    # match the ones wgrib2 wrote, which confirms the grid constants (and so the
+    # rotation angles) still describe the published product.
+    grid_shape = (
+        xarray_forecast_merged.sizes["y"],
+        xarray_forecast_merged.sizes["x"],
+    )
+    if grid_shape != RRFS_NA_GRID_SHAPE:
+        raise RuntimeError(
+            f"RRFS_NA 6-hourly run {base_time} grid is {grid_shape}, expected "
+            f"{RRFS_NA_GRID_SHAPE}; the rotated-grid constants need updating"
+        )
+    rlat = RRFS_NA_FIRST_RLAT + RRFS_NA_GRID_STEP_DEG * np.arange(grid_shape[0])
+    rlon = RRFS_NA_FIRST_RLON + RRFS_NA_GRID_STEP_DEG * np.arange(grid_shape[1])
+    grid_lat, grid_lon, wind_angle = rotated_latlon_grid_geometry(
+        RRFS_NA_NORTH_POLE_LAT, RRFS_NA_NORTH_POLE_LON, rlat, rlon
+    )
+    lat_error = np.abs(grid_lat - xarray_forecast_merged["latitude"].values)
+    lon_error = np.abs(
+        (grid_lon - xarray_forecast_merged["longitude"].values + 180.0) % 360.0 - 180.0
+    )
+    position_error = max(lat_error.max(), lon_error.max())
+    if position_error > RRFS_NA_GRID_POSITION_TOLERANCE_DEG:
+        raise RuntimeError(
+            f"RRFS_NA 6-hourly run {base_time} grid positions differ from the "
+            f"rotated-grid constants by {position_error:.6f} deg; not publishing "
+            "winds rotated with the wrong angles"
+        )
+
+    cos_angle = xr.DataArray(np.cos(wind_angle), dims=("y", "x"))
+    sin_angle = xr.DataArray(np.sin(wind_angle), dims=("y", "x"))
+    ugrd_grid_relative = xarray_forecast_merged["UGRD_10maboveground"]
+    vgrd_grid_relative = xarray_forecast_merged["VGRD_10maboveground"]
+    xarray_forecast_merged["UGRD_10maboveground"] = (
+        ugrd_grid_relative * cos_angle - vgrd_grid_relative * sin_angle
+    )
+    xarray_forecast_merged["VGRD_10maboveground"] = (
+        ugrd_grid_relative * sin_angle + vgrd_grid_relative * cos_angle
+    )
+
     # %% Correct RRFS-specific quirks
     # APCP is downloaded as the one-hour bucket, so it needs no differencing.
     xarray_forecast_merged["MASSDEN_8maboveground"] = (
         xarray_forecast_merged["MASSDEN_8maboveground"] * MASSDEN_KG_TO_UG
     )
 
+    # RRFS encodes the 500-1000 mb lifted index offset by 273.15 (as if a
+    # Kelvin temperature): its values run ~263-301 and, less 273.15, track the
+    # 4-layer lifted index RRFS also publishes (checked 2026-11-03). Remove the
+    # offset so the store holds the lifted index itself (K difference, about
+    # -20 to 30), the range its KEEPBITS precision assumes.
+    xarray_forecast_merged["LFTX_500M1000mb"] = (
+        xarray_forecast_merged["LFTX_500M1000mb"] - KELVIN_TO_CELSIUS
+    )
+    # Every other NA field carries a GRIB bitmap that blanks the grid corners
+    # outside the model domain; LFTX has none and holds a constant filler
+    # (273.2) there, so blank it wherever the bitmapped 2 m temperature is.
+    xarray_forecast_merged["LFTX_500M1000mb"] = xarray_forecast_merged[
+        "LFTX_500M1000mb"
+    ].where(xarray_forecast_merged["TMP_2maboveground"].notnull())
+
     # Set REFD values below the reflectivity threshold to 0
     xarray_forecast_merged["REFD_1000maboveground"] = mask_invalid_refc(
         xarray_forecast_merged["REFD_1000maboveground"]
     )
 
-    # wgrib2 names the rotated grid's dimensions rlat/rlon rather than y/x
+    # wgrib2's NetCDF stores GRIB bitmap points (the NA grid's corners outside
+    # the model domain) with _FillValue 9.999e20, and da.from_zarr below reads
+    # raw values, so drop it to keep those points NaN. mask_invalid_data would
+    # catch 9.999e20, but not in its exempt CIN.
+    for var in xarray_forecast_merged.data_vars:
+        xarray_forecast_merged[var].encoding.pop("_FillValue", None)
+
     xarray_forecast_merged = xarray_forecast_merged.chunk(
         chunks={
             "time": len(RRFS_NA_FORECAST_HOURS),
-            "rlon": process_chunk,
-            "rlat": process_chunk,
+            "x": process_chunk,
+            "y": process_chunk,
         }
     )
     with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
@@ -278,7 +360,12 @@ def main() -> None:
             ).astype("float32")
         )
 
-    daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
+    # CIN is negative by convention and routinely below VALID_DATA_MIN
+    # (-100 J/kg); masking it would drop the strong caps, so leave it unmasked.
+    daskVarArrayListMergeNaN = mask_invalid_data(
+        da.stack(daskVarArrayList, axis=0),
+        ignoreAxis=[zarr_vars.index("CIN_surface")],
+    )
 
     # Write the stacked array to disk before the final rechunk; doing both in one
     # graph overflows memory

@@ -44,12 +44,15 @@ CHUNK_SIZES = {
     "GFS": 100,
     "GEFS": 200,
     "ECMWF": 200,
+    "NBM_Fire": 200,
     "RTMA": 200,
     "DWD": 200,
     "HRDPS": 200,
+    "RDPS": 200,
     "REPS": 200,
     "GDPS": 200,
     "GEPS": 200,
+    "RDAQA": 250,
     "RAQDPS": 250,
     "SILAM": 200,
     "URMA": 200,
@@ -63,8 +66,10 @@ FINAL_CHUNK_SIZES = {
     "HRRR_6H": 5,
     "RRFS": 5,
     "RRFS_6H": 5,
-    "RRFS_NA": 25,
-    "RRFS_NA_6H": 25,
+    # The NA 2D fields are on a 13 km grid (1127 x 683, smaller than CONUS), so
+    # the regional 5-cell chunk keeps a point read to one small chunk
+    "RRFS_NA": 5,
+    "RRFS_NA_6H": 5,
     "SubH": 5,
     "RRFS_SubH": 5,
     # Global 0.04 deg radar composite (LibreWXR nowcast): one variable and ~10
@@ -155,6 +160,7 @@ KEEPBITS = {
     **dict.fromkeys(
         (
             "MSLMA_meansealevel",
+            "MSLET_meansealevel",
             "PRMSL_meansealevel",
             "PRES_meansealevel",
             "PRES_surface",
@@ -192,6 +198,7 @@ KEEPBITS = {
             "CFRZR_Prob",
             "CRAIN_Prob",
             "TCDC_entireatmosphere",
+            "TCDC_entireatmosphere_consideredasasinglelayer_",
             "TCDC_surface",
             "tcc",
             "Precipitation_Prob",
@@ -263,6 +270,7 @@ FORECAST_LEAD_RANGES = {
     "GEFS": list(range(3, 241, 3)),
     "GDPS_1": list(range(1, 84, 1)),
     "GDPS_2": list(range(84, 241, 3)),
+    "NBM_FIRE": list(range(6, 192, 6)),
     "HRRR_1H": list(range(1, 19)),
     "HRRR_6H": list(range(18, 49)),
     "RRFS_1H": list(range(1, 19)),
@@ -275,6 +283,7 @@ FORECAST_LEAD_RANGES = {
     "AIGFS": list(range(6, 241, 6)),
     "AIGEFS": list(range(6, 241, 6)),
     "HRDPS": list(range(1, 49)),
+    "RDPS": list(range(1, 85)),
     "REPS": list(range(3, 73, 3)),
     "GEPS": [*range(3, 193, 3), *range(198, 241, 6)],
 }
@@ -1637,6 +1646,56 @@ def earth_relative_wind_components(
     )
 
     return ut, vt
+
+
+def rotated_latlon_grid_geometry(
+    north_pole_lat: float,
+    north_pole_lon: float,
+    rlat: np.ndarray,
+    rlon: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Geographic position and wind rotation angle of a rotated lat-lon grid.
+
+    wgrib2 cannot rotate winds on a rotated lat-lon grid in place: -new_grid has
+    no rotated lat-lon target, and its NetCDF output leaves U/V grid-relative.
+    The rotation is fixed by the grid geometry, so it is computed here once per
+    run. The angle is the bearing of the grid's +x (rotated east) axis measured
+    counterclockwise from true east, found by stepping a small distance along
+    the rotated longitude at every point; earth-relative winds are then
+
+        u_earth = u * cos(angle) - v * sin(angle)
+        v_earth = u * sin(angle) + v * cos(angle)
+
+    Args:
+        north_pole_lat: Latitude of the rotated grid's north pole (degrees). GRIB
+            gives the south pole, whose negated latitude this is.
+        north_pole_lon: Longitude of the rotated north pole (degrees), the GRIB
+            south-pole longitude minus 180.
+        rlat: Rotated latitudes of the grid rows (degrees, south to north).
+        rlon: Rotated longitudes of the grid columns (degrees, -180 to 180).
+
+    Returns:
+        ``(lat, lon, angle)``: geographic latitude and longitude (degrees,
+        longitude in -180..180) and the rotation angle (radians), each (y, x).
+    """
+    rotated_crs = ccrs.RotatedPole(
+        pole_longitude=north_pole_lon, pole_latitude=north_pole_lat
+    )
+    geographic_crs = ccrs.PlateCarree()
+    rlon_grid, rlat_grid = np.meshgrid(rlon, rlat)
+
+    centre = geographic_crs.transform_points(rotated_crs, rlon_grid, rlat_grid)
+    # A central difference of 1e-3 rotated degrees (~100 m) along rotated east
+    step_deg = 1e-3
+    west = geographic_crs.transform_points(rotated_crs, rlon_grid - step_deg, rlat_grid)
+    east = geographic_crs.transform_points(rotated_crs, rlon_grid + step_deg, rlat_grid)
+    dlon_deg = ((east[..., 0] - west[..., 0] + 180.0) % 360.0) - 180.0
+    mid_lat_rad = np.radians((east[..., 1] + west[..., 1]) / 2.0)
+    d_east = np.radians(dlon_deg) * np.cos(mid_lat_rad)
+    d_north = np.radians(east[..., 1] - west[..., 1])
+    angle = np.arctan2(d_north, d_east)
+
+    return centre[..., 1], centre[..., 0], angle
 
 
 def interp_time_take_blend(

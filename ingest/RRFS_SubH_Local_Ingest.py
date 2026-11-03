@@ -24,7 +24,12 @@ import xarray as xr
 from herbie.fast import Herbie_latest
 
 from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_grib_utils import download_and_validate_subset, run_checked
+from API.ingest_grib_utils import (
+    cat_gribs,
+    download_and_validate_subset,
+    quote_path,
+    run_checked,
+)
 from API.ingest_utils import (
     FINAL_CHUNK_SIZES,
     FINAL_SHARD_SIZES,
@@ -62,12 +67,15 @@ RRFS_LAMBERT_GRID = (
     "237.280472:1799:3000.000000 21.138123:1059:3000.000000"
 )
 
-# Herbie match strings for the subh product. Its APCP records are already
-# 15-minute buckets, so no de-accumulation is needed.
+# Herbie match strings for the subh product. Unlike HRRR's subh files, RRFS
+# labels the top-of-hour step in hours ("2 hour fcst", not "120 min fcst"), so
+# both units are matched; matching minutes only would leave every fourth step
+# NaN. Its APCP records are 0-N min run totals (HRRR: 15-minute buckets), so
+# they are differenced to 15-minute totals below.
 RRFS_SUBH_MATCH_STRINGS = (
     ":((DPT|TMP|SPFH):2 m above ground:)"
-    "|:((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:.*min fcst)"
-    "|(:(UGRD|VGRD):10 m above ground:.*min fcst)"
+    r"|:((CRAIN|CICEP|CSNOW|CFRZR|PRES|PRATE|VIS|GUST|DSWRF):surface:\d+ (min|hour) fcst:)"
+    r"|(:(UGRD|VGRD):10 m above ground:\d+ (min|hour) fcst:)"
     "|(:REFD:1000 m above ground:)"
     "|(:APCP:surface:)"
 )
@@ -200,7 +208,8 @@ def main() -> None:
     regrid_path = forecast_process_path + "_wgrib2_merged.regrid"
     merged_nc_path = forecast_process_path + "_wgrib2_merged.nc"
     run_checked(
-        "cat " + " ".join(grib_list) + f" | {wgrib2_path} - -grib {merged_grib_path}",
+        f"{cat_gribs(grib_list)} | {quote_path(wgrib2_path.strip())} - "
+        f"-grib {quote_path(merged_grib_path)}",
         "RRFS sub-hourly wgrib2 GRIB merge",
     )
     run_checked(
@@ -223,6 +232,19 @@ def main() -> None:
         )
 
     # %% Correct RRFS-specific quirks
+    # APCP is a 0-N min run total; difference it to 15-minute totals, the
+    # quantity the HRRR sub-hourly store holds. The first step is the 0-15 min
+    # total, so prepending zero leaves it unchanged.
+    xarray_forecast_merged["APCP_surface"] = xarray_forecast_merged[
+        "APCP_surface"
+    ].copy(
+        data=np.diff(
+            xarray_forecast_merged["APCP_surface"],
+            axis=xarray_forecast_merged["APCP_surface"].get_axis_num("time"),
+            prepend=0,
+        )
+    )
+
     # Set REFD values below the reflectivity threshold to 0
     xarray_forecast_merged["REFD_1000maboveground"] = mask_invalid_refc(
         xarray_forecast_merged["REFD_1000maboveground"]

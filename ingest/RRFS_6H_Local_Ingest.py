@@ -22,8 +22,13 @@ import pandas as pd
 import xarray as xr
 from herbie.fast import Herbie_latest
 
-from API.constants.shared_const import INGEST_VERSION_STR
-from API.ingest_grib_utils import download_and_validate_subset, run_checked
+from API.constants.shared_const import INGEST_VERSION_STR, KELVIN_TO_CELSIUS
+from API.ingest_grib_utils import (
+    cat_gribs,
+    download_and_validate_subset,
+    quote_path,
+    run_checked,
+)
 from API.ingest_utils import (
     CHUNK_SIZES,
     FINAL_CHUNK_SIZES,
@@ -62,7 +67,10 @@ RRFS_MATCH_STRINGS = (
     ":((DPT|TMP|APTMP|RH):2 m above ground:)"
     "|:((CRAIN|CICEP|CSNOW|CFRZR|PRATE|VIS|GUST|DSWRF|CAPE|CIN):surface:.*hour fcst)"
     "|(:(UGRD|VGRD):10 m above ground:.*hour fcst)"
-    "|(:TCDC:entire atmosphere:.*hour fcst)"
+    # RRFS labels the column cloud cover "entire atmosphere (considered as a
+    # single layer)" (HRRR: "entire atmosphere"); the instantaneous field, not
+    # the (N-1)-N h average.
+    r"|(:TCDC:entire atmosphere \(considered as a single layer\):\d+ hour fcst:)"
     # Like HRRR, each file holds a 0-N h run total and an (N-1)-N h bucket. This
     # selects the one-hour bucket (17-18 ... 82-83 h), which is already an hourly
     # total; differencing run totals would leave the first lead (18 h) as a
@@ -70,11 +78,17 @@ RRFS_MATCH_STRINGS = (
     "|(:APCP:surface:[1-9][0-9]*-[0-9]+ hour acc)"
     # RRFS carries several aerosol MASSDEN fields at 8 m; smoke is the
     # particulate organic matter one.
-    "|:(MASSDEN:8 m above ground:*hour fcst:aerosol=Particulate organic matter dry:)"
-    "|(:(MSLMA):)"
+    r"|(:MASSDEN:8 m above ground:\d+ hour fcst:aerosol=Particulate organic matter dry:)"
+    # RRFS has no MAPS sea-level pressure (HRRR's MSLMA); MSLET is the
+    # Eta-reduced sea-level pressure, the nearest equivalent.
+    "|(:MSLET:mean sea level:)"
     "|(:REFD:1000 m above ground:)"
     "|(:LFTX:500-1000 mb:)"
 )
+
+# GRIB variables outside the generic wgrib2 stats range for valid reasons: CIN
+# is negative by convention and routinely below the range minimum (-100 J/kg).
+RRFS_EXCLUDED_STATS_VARIABLES = ["CIN"]
 
 # Smoke (MASSDEN) is in kg/m^3; scale to ug/m^3 so float32 storage keeps precision
 MASSDEN_KG_TO_UG = 1e9
@@ -86,7 +100,7 @@ MASSDEN_KG_TO_UG = 1e9
 zarr_vars = (
     "VIS_surface",
     "GUST_surface",
-    "MSLMA_meansealevel",
+    "MSLET_meansealevel",
     "TMP_2maboveground",
     "DPT_2maboveground",
     "RH_2maboveground",
@@ -98,7 +112,7 @@ zarr_vars = (
     "CICEP_surface",
     "CFRZR_surface",
     "CRAIN_surface",
-    "TCDC_entireatmosphere",
+    "TCDC_entireatmosphere_consideredasasinglelayer_",
     "MASSDEN_8maboveground",
     "REFD_1000maboveground",
     "DSWRF_surface",
@@ -147,6 +161,7 @@ def download_rrfs_6h_subset(base_time: pd.Timestamp) -> list[str]:
         herbie_retry_sleep_seconds=RRFS_RETRY_SLEEP_SECONDS,
         download_verbose=False,
         wgrib2_exe=wgrib2_path.strip(),
+        excluded_stats_variables=RRFS_EXCLUDED_STATS_VARIABLES,
     )
 
 
@@ -204,7 +219,8 @@ def main() -> None:
     regrid_path = forecast_process_path + "_wgrib2_merged.regrid"
     merged_nc_path = forecast_process_path + "_wgrib2_merged.nc"
     run_checked(
-        "cat " + " ".join(grib_list) + f" | {wgrib2_path} - -grib {merged_grib_path}",
+        f"{cat_gribs(grib_list)} | {quote_path(wgrib2_path.strip())} - "
+        f"-grib {quote_path(merged_grib_path)}",
         "RRFS 6-hourly wgrib2 GRIB merge",
     )
     run_checked(
@@ -232,10 +248,26 @@ def main() -> None:
         xarray_forecast_merged["MASSDEN_8maboveground"] * MASSDEN_KG_TO_UG
     )
 
+    # RRFS encodes the 500-1000 mb lifted index offset by 273.15 (as if a
+    # Kelvin temperature): its values run ~263-301 and, less 273.15, track the
+    # 4-layer lifted index RRFS also publishes (checked 2026-11-03). Remove the
+    # offset so the store holds the lifted index itself (K difference, about
+    # -20 to 30), the range its KEEPBITS precision assumes.
+    xarray_forecast_merged["LFTX_500M1000mb"] = (
+        xarray_forecast_merged["LFTX_500M1000mb"] - KELVIN_TO_CELSIUS
+    )
+
     # Set REFD values below the reflectivity threshold to 0
     xarray_forecast_merged["REFD_1000maboveground"] = mask_invalid_refc(
         xarray_forecast_merged["REFD_1000maboveground"]
     )
+
+    # wgrib2's NetCDF stores GRIB bitmap points with _FillValue 9.999e20, and
+    # da.from_zarr below reads raw values, so drop it to keep any such points
+    # NaN. The CONUS fields have none today, but mask_invalid_data would not
+    # catch 9.999e20 in its exempt CIN if one appeared.
+    for var in xarray_forecast_merged.data_vars:
+        xarray_forecast_merged[var].encoding.pop("_FillValue", None)
 
     xarray_forecast_merged = xarray_forecast_merged.chunk(
         chunks={
@@ -272,7 +304,12 @@ def main() -> None:
             ).astype("float32")
         )
 
-    daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
+    # CIN is negative by convention and routinely below VALID_DATA_MIN
+    # (-100 J/kg); masking it would drop the strong caps, so leave it unmasked.
+    daskVarArrayListMergeNaN = mask_invalid_data(
+        da.stack(daskVarArrayList, axis=0),
+        ignoreAxis=[zarr_vars.index("CIN_surface")],
+    )
 
     # Write the stacked array to disk before the final rechunk; doing both in one
     # graph overflows memory
