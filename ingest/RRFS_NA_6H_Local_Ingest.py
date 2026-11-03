@@ -199,16 +199,24 @@ def main() -> None:
     T0 = time.time()
 
     # %% Determine the model run: the newest 6-hourly cycle whose last lead exists
-    latest_run = Herbie_latest(
-        model="rrfs",
-        n=3,
-        freq="6h",
-        fxx=[RRFS_NA_FORECAST_HOURS[-1]],
-        product="2dfld",
-        domain=RRFS_NA_DOMAIN,
-        verbose=False,
-        priority=RRFS_SOURCE_PRIORITY,
-    )
+    # RRFS posting on AWS is irregular (cycles arrive hours late or not at
+    # all). Herbie_latest raises IndexError when none of the checked cycles
+    # has the lead yet; the published store stays in place (the API drops it
+    # once stale), so end like a run with nothing new.
+    try:
+        latest_run = Herbie_latest(
+            model="rrfs",
+            n=3,
+            freq="6h",
+            fxx=[RRFS_NA_FORECAST_HOURS[-1]],
+            product="2dfld",
+            domain=RRFS_NA_DOMAIN,
+            verbose=False,
+            priority=RRFS_SOURCE_PRIORITY,
+        )
+    except IndexError:
+        logger.warning("No complete RRFS_NA_6H cycle found on AWS or NOMADS, ending")
+        return
     base_time = latest_run.date
 
     # %% Skip the run if this cycle has already been published
