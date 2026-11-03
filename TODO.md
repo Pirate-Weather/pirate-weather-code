@@ -193,12 +193,14 @@ render nodes can run in several regions with the last good data if the pipeline 
 - [ ] Upstream the hooks: branch `cycle-hooks` of the LibreWXR fork adds
   `LIBREWXR_HOOK_STATE_CMD` / `LIBREWXR_HOOK_NOWCAST_CMD` / `LIBREWXR_HOOK_LIGHTNING_CMD`
   (`src/librewxr/hooks.py`); submit it as a PR to JoshuaKimsey/LibreWXR.
-- [ ] Mirror the LibreWXR cache (`state.json`, radar/NWP/nowcast memmaps, lightning
-  artifact) file by file to S3 after each cycle, and a pull side for render nodes
-  that writes `state.json` last and rewrites the pipeline's absolute `memmap_dir`
-  paths. Exclude the per-node caches (`coord/`, `tiles_shared/`, `workers/`).
-  About 1 GB per 10-minute cycle, mostly the nowcast memmaps (measured; accepted).
-  Joshua's roadmap has the same idea as "network split mode" (LibreWXR issue #51).
+- [x] Mirror the LibreWXR cache to object storage for render nodes: done inside
+  LibreWXR as "snapshot sync" (fork branch `network-split`, on top of `cycle-hooks`,
+  for LibreWXR issue #51): the pipeline publishes each `state.json` and the files it
+  names to an fsspec URL (`LIBREWXR_SNAPSHOT_SYNC_URL`, S3 or `file://`), and
+  `python -m librewxr.snapshot_pull` on a render host pulls them into its cache,
+  rewrites the pipeline's absolute paths, writes `state.json` last and prunes the
+  per-node caches. Measured on this host: ~1 GB raw per 10-minute cycle at full
+  regions. Nothing is needed on the Pirate Weather side.
 - [ ] Deploy: run LibreWXR's pipeline service from `Docker/pirate-librewxr-dockerfile`
   (the LibreWXR image plus this repo's code) with the nowcast hook set, and the
   state and lightning hooks once the cache mirror exists.
