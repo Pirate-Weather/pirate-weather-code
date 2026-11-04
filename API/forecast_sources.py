@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from API.api_utils import relative_humidity_from_dewpoint_c
 from API.constants.model_const import (
     AIGEFS,
     AIGFS,
@@ -346,6 +347,14 @@ def _merge_aifs_as_ecmwf(
     out[:, ECMWF["accum_stddev"]] = src[:, ECMWF_AIFS["accum_stddev"]]
     out[:, ECMWF["accum"]] = src[:, ECMWF_AIFS["accum_mean"]]
     out[:, ECMWF["intensity"]] = src[:, ECMWF_AIFS["accum_mean"]]
+    # The AIFS store has no humidity column, unlike the IFS store it stands in for.
+    # Temperatures are already in Celsius here (convert_data_to_celsius runs first).
+    out[:, ECMWF["humidity"]] = (
+        relative_humidity_from_dewpoint_c(
+            src[:, ECMWF_AIFS["temp"]], src[:, ECMWF_AIFS["dew"]]
+        )
+        * 100.0
+    )
     return merged
 
 

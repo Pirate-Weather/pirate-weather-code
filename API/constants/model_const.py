@@ -129,6 +129,7 @@ ECMWF = {
     "prob": 10,
     "accum_mean": 11,
     "accum_stddev": 12,
+    "humidity": 13,
 }
 
 NBM = {

@@ -5,9 +5,13 @@ import logging
 
 import numpy as np
 
-from API.constants.model_const import GFS, HRRR, NBM
+from API.constants.model_const import ECMWF, ECMWF_AIFS, GFS, HRRR, NBM
 from API.data_inputs import prepare_data_inputs
-from API.forecast_sources import SourceMetadata, merge_hourly_models
+from API.forecast_sources import (
+    SourceMetadata,
+    _merge_aifs_as_ecmwf,
+    merge_hourly_models,
+)
 
 NUM_HOURS = 24
 # Local midnight of the request (the first row of every merged array).
@@ -90,3 +94,18 @@ def test_forecast_only_stores_land_on_their_valid_hours():
     np.testing.assert_array_equal(temperature[FIRST_LEAD_OFFSET_HOURS:, 0], 22.0)
     np.testing.assert_array_equal(temperature[FIRST_LEAD_OFFSET_HOURS:, 1], 20.0)
     np.testing.assert_array_equal(temperature[:, 2], 10.0)
+
+
+def test_aifs_standing_in_for_ifs_still_has_humidity():
+    """Current humidity reads the IFS humidity column, but AI mode substitutes AIFS,
+    whose store has none. Without deriving it the column is NaN and the current
+    humidity would silently come from the IFS or another model.
+    """
+    data_aifs = np.full((2, max(ECMWF_AIFS.values()) + 1), 0.0)
+    data_aifs[:, 0] = [0.0, 3600.0]
+    data_aifs[:, ECMWF_AIFS["temp"]] = 20.0
+    data_aifs[:, ECMWF_AIFS["dew"]] = 20.0
+
+    merged = _merge_aifs_as_ecmwf(data_aifs, 0.0, 2)
+
+    np.testing.assert_allclose(merged[:, ECMWF["humidity"]], 100.0)

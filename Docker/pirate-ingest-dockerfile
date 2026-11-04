@@ -150,7 +150,7 @@ COPY Docker/requirements-ingest.txt requirements-ingest.txt
 RUN python3 -m pip install --upgrade pip && \
     grep -v -E '^(cfgrib==|eccodes==|herbie-data==)' requirements-ingest.txt > requirements-ingest-core.txt && \
     python3 -m pip install -r requirements-ingest-core.txt && \
-    python3 -m pip install --no-deps herbie-data==2026.9.1 && \
+    python3 -m pip install --no-deps herbie-data==2026.10.0 && \
     python3 -m pip install --no-deps cfgrib==0.9.15.1 && \
     python3 -m pip install cffi findlibs && \
     python3 -m pip uninstall -y eccodes eccodeslib eckitlib && \

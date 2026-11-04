@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import logging
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -235,3 +236,65 @@ def test_forecast_grid_read_without_published_wmo_alert_store():
     )
 
     assert result.WMO_alertDat is None
+
+
+@pytest.mark.parametrize(
+    ("ecmwf_y_size", "expected_read"),
+    [
+        pytest.param(1803, {"ECMWF": (1934, 375), "ECMWF_AIFS": (774, 150)}, id="0p1"),
+        pytest.param(723, {"ECMWF_AIFS": (774, 150)}, id="stale-0p25-store"),
+    ],
+)
+def test_ecmwf_and_aifs_grids_are_looked_up_separately(ecmwf_y_size, expected_read):
+    """IFS moved to a 0.1 degree grid while AIFS stays at 0.25 degrees. Sharing one
+    index would read AIFS from the wrong place (or past its edge), and a 0.25
+    degree IFS store still published during the switch must be skipped rather than
+    read at 0.1 degree indices, which would serve weather from another location.
+    """
+    reads = {}
+
+    async def zarr_read(model, _store, x, y):
+        reads[model] = (int(x), int(y))
+        return False
+
+    now = datetime.datetime(2026, 11, 4, 12)
+    sources = ZarrSources(
+        subh=None,
+        hrrr_6h=None,
+        hrrr=None,
+        nbm=None,
+        gfs=None,
+        ecmwf=SimpleNamespace(shape=(13, 289, ecmwf_y_size, 3600)),
+        gefs=None,
+        ecmwf_aifs=SimpleNamespace(shape=(10, 235, 723, 1440)),
+    )
+    asyncio.run(
+        calculate_grid_indexing(
+            lat=52.5,
+            lon=13.4,
+            az_lon=13.4,
+            utc_time=now,
+            now_time=now,
+            time_machine=False,
+            ex_hrrr=1,
+            ex_nbm=1,
+            ex_gfs=1,
+            ex_urma=1,
+            ex_ecmwf=0,
+            ex_gefs=1,
+            ex_rtma_ru=1,
+            ex_dwd_mosmix=1,
+            ex_aigfs=1,
+            ex_aigefs=1,
+            ex_aifs=0,
+            inc_aimodels=1,
+            read_wmo_alerts=False,
+            base_day_utc=now,
+            num_hours=24,
+            zarr_sources=sources,
+            weather=SimpleNamespace(zarr_read=zarr_read),
+            logger=logging.getLogger(__name__),
+        )
+    )
+
+    assert reads == expected_read

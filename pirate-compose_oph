@@ -54,7 +54,7 @@ services:
       ofelia.job-run.wmo-alerts-ingest.environment: '["wgrib2_path=/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/WMO_Alerts", "forecast_path=/data/Prod/WMO_Alerts", "historic_path=/data/Hist/WMO_Alerts", "save_type=Download"]'
       ofelia.job-run.wmo-alerts-ingest.command: "API/WMO_Alerts_Local.py" 
       ofelia.job-run.wmo-alerts-ingest.no-overlap: "true"
-      ofelia.job-run.ecmwf-ingest.schedule: "0 0 8/12 * * *"
+      ofelia.job-run.ecmwf-ingest.schedule: "0 30 10/12 * * *"
       ofelia.job-run.ecmwf-ingest.image: "pirateingest:latest" 
       ofelia.job-run.ecmwf-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
       ofelia.job-run.ecmwf-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/ECMWF", "forecast_path=/data/Prod/ECMWF", "historic_path=/data/Hist/ECMWF", "save_type=Download"]'

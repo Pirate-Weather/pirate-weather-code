@@ -13,7 +13,7 @@
 #                 NetCDF many times while writing its store, and on a network
 #                 block volume that took 90 min instead of 40. Peak use is
 #                 tens of GB per heavy model (GDPS ~40 GB).
-#   PW_BULK_WORK_ROOT  scratch for GFS and URMA, which need ~40 GB and ~21 GB but
+#   PW_BULK_WORK_ROOT  scratch for GFS, URMA and ECMWF (GFS ~40 GB, URMA ~21 GB), which
 #                 do not re-read it like GDPS. On one server, GFS, GDPS and URMA
 #                 overlapping on the same disk as PW_PROD_ROOT filled it, so put
 #                 this on a larger disk; it defaults to PW_WORK_ROOT.
@@ -202,8 +202,9 @@ services:
       ofelia.job-run.nws-alerts.schedule: "0 0,30 * * * *"
       ofelia.job-run.nws-alerts.container: "pirate-ingest-nws-alerts"
       ofelia.job-run.nws-alerts.no-overlap: "true"
-      # ECMWF open data
-      ofelia.job-run.ecmwf.schedule: "0 0 8,20 * * *"
+      # ECMWF open data. The 0.1 degree ensemble reaches 240 h on AWS about 10 h after
+      # the run (09:56 UTC for 00Z on 2026-11-04), about 1.7 h later than at 0.25 degrees.
+      ofelia.job-run.ecmwf.schedule: "0 30 10,22 * * *"
       ofelia.job-run.ecmwf.container: "pirate-ingest-ecmwf"
       ofelia.job-run.ecmwf.no-overlap: "true"
       ofelia.job-run.ecmwf-aifs.schedule: "0 0 2,8,14,20 * * *"
@@ -450,7 +451,7 @@ services:
     mem_limit: 18g
     environment:
       <<: *ingest_env
-      forecast_process_dir: "/work/ECMWF"
+      forecast_process_dir: "/work-bulk/ECMWF"
       historic_path: "/data/Hist/ECMWF"
       zarr_store_workers: "4"
     command: ["ingest/ECMWF_Local_Ingest.py"]

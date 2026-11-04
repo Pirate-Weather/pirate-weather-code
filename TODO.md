@@ -152,25 +152,6 @@ Fix in the same change:
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done
 there (forecast/historic split, test refactor, ingest standardization) are not listed.
 
-### ECMWF 0.1째 open data
-[pirateweather#697](https://github.com/Pirate-Weather/pirateweather/issues/697): ECMWF's
-9 km feeds are on AWS since the 2026-10-20 06Z run. Blocked until AWS holds 10 days of
-0.1째 history (not before about 2026-10-30). Keep the ingest's short-term history at
-48 h (`HISTORY_PERIODS["ECMWF"]`). Touches `ingest/ECMWF_Local_Ingest.py` (0.25째 now)
-and the API's ECMWF grid lookup; the store grows about 6x, so check chunking against
-the read path.
-
-### ECMWF: store relative humidity at ingest
-Do this in the new 0.1째 ingest script. The ECMWF store has temperature and dewpoint
-but no humidity, so the API derives it per request with metpy
-(`_calculate_ecmwf_relative_humidity` in `API/current/metrics.py`). Compute 2 m
-relative humidity from `2t`/`2d` at ingest, in percent like GFS and HRRR (URMA
-stores a fraction), and read it directly; this is per-model work that moves upstream exactly. While
-there, fix an inconsistency: the hourly humidity stack (`prepare_data_inputs` in
-`API/data_inputs.py`) leaves ECMWF out entirely, while the current-conditions block
-uses it. Decide whether ECMWF should feed hourly humidity too; adding it changes
-output for locations where ECMWF is the top humidity source.
-
 ### Validate wind direction in the regional models
 As done for HRRR, which rotates grid-relative winds with
 `earth_relative_wind_components` (`API/ingest_utils.py`). Check whether HRDPS
@@ -448,30 +429,21 @@ implausible value blanks every above-max value").
 
 ## Done
 
-### Daily summaries: precipitation periods follow the chance of precipitation (2026-11-04)
-`API/PirateDailyText.py`: a period counted as having precipitation from its
-accumulation alone, and the window's chance was the highest hourly chance in any of
-those periods. A model (often the Canadian ones) with light accumulation from 11am to
-3am but a chance above `PRECIP_PROB_THRESHOLD` only from 1am read "Light rain
-throughout the day" instead of "Light rain overnight".
-- `_aggregate_periods` now takes `min_pop`: only hours at or above it count towards a
-  period's precipitation (accumulations, precipitation intensities and types, wet
-  hours, errors). Fog, wind and cloud still use every hour.
-- `calculate_day_text` aggregates with `PRECIP_PROB_THRESHOLD` first; only when no
-  period has enough likely precipitation (and some hour has unlikely precipitation) does
-  it aggregate again with every hour, keeping the "possible ..." summary as before.
-  Applies to the daily, day/night and next 24 hour summaries alike.
-- The expected-amount sentence still adds up every hour of the window
-  (`_window_accumulation`), as the model's mean includes the unlikely hours, but only
-  for the types that fall in the likely hours, so unlikely snow can't add "12 cm of
-  snow expected" to "Light rain overnight".
-- Precipitation that is only possible is no longer "tapering off" ("Possible light rain
-  tapering off in the afternoon") or occasional, periods of or intermittent; it keeps
-  the "until" or "throughout the day" wording.
-- Cost: +0.6 ms per request (24 windows, 2.8 -> 3.4 ms) with a chance that varies every
-  hour; less in practice.
-- Weighting each hour's accumulation by its chance was considered and not used: it
-  shrinks the amounts used for the light/heavy wording.
+### ECMWF IFS 0.1째 open data, with humidity stored at ingest
+[pirateweather#697](https://github.com/Pirate-Weather/pirateweather/issues/697). The IFS
+ingest reads the 9 km feed through Herbie 2026.10.0 (`resolution="0p1"`); AIFS has no
+0.1째 feed and stays at 0.25째, so the API looks up the two grids separately and skips an
+IFS store still on the old grid. 2 m relative humidity is now a store column. Measured
+on the 2026-11-04 00Z run with 4 write workers and a cold history: 3,514 s, 8.9 GB peak,
+store 17 GB in 706 files (3.0 GB before), 4 history stores 1 GB. Point read through the
+API context 0.46 ms first touch against 0.33 ms at 0.25째, 0.04 ms cached for both. Stored
+values match the source GRIB within bit-rounding. Stored humidity has the same 4-bit
+rounding as GFS (4 % steps above 64 %), so current humidity can differ from the old
+per-request value by up to about 2.8 points.
+The 240 h ensemble file reaches ECMWF about 09:40 after a 00Z run, AWS 09:56 and Google
+12:27, hence the 10:30/22:30 UTC schedule. Publishing keeps two versions, so `Prod` grows
+by about 28 GB: check the disk before deploying. Deploy the API before the ingest: an
+old API would read the new store at the wrong grid cell.
 
 ### LibreWXR radar nowcast for the minutely block (2026-11-02)
 `ingest/LibreWXR_Local_Ingest.py`, run by LibreWXR's nowcast hook, composites LibreWXR's latest radar frame (T+0) and
@@ -618,6 +590,12 @@ agree. Comment-only issues in the same file: the EPA O3/CO tables are labelled �
 but are in ppb, and the module docstring says "three AQI systems" (there are eleven).
 
 ## Needs a decision
+
+### ECMWF in the hourly humidity stack
+The hourly humidity stack (`prepare_data_inputs` in `API/data_inputs.py`) leaves ECMWF
+out, while the current-conditions block uses it. Now that the store has a humidity
+column, decide whether it should feed hourly humidity too; that changes output for
+locations where ECMWF is the top humidity source.
 
 ### GEPS/REPS ensemble precip type: sleet or mixed?
 `API/api_utils.py:541` (`map_ensemble_precip_rates_to_ptype`): the docstring says

@@ -1,19 +1,22 @@
 """ECMWF IFS forecast ingest.
 
-Downloads the newest 12-hourly ECMWF IFS open-data cycle (0.25 degree global
+Downloads the newest 12-hourly ECMWF IFS open-data cycle (0.1 degree / 9 km global
 grid, 3-hourly leads to 144 h then 6-hourly to 240 h): the deterministic ``oper``
 surface fields plus the ``enfo`` ensemble total precipitation, which is reduced
 to precipitation probability, mean and standard deviation. The forecast is
 merged with the first 12 h of the previous 48 h of runs (short-term history,
-archived per run), interpolated to an hourly axis and published as
-``ECMWF.zarr`` plus ``ECMWF.time.pickle``. The store
+archived per run), interpolated to an hourly axis, given a derived 2 m relative
+humidity and published as ``ECMWF.zarr`` plus ``ECMWF.time.pickle``. The store
 starts 48 h before the run time.
+
+Only the IFS has a 0.1 degree feed; AIFS stays at 0.25 degrees.
 
 Alexander Rey, March 2025
 """
 
 import logging
 import os
+import re
 import shutil
 import time
 import warnings
@@ -26,10 +29,12 @@ import xarray as xr
 from dask.diagnostics import ProgressBar
 from herbie import HerbieLatest
 
+from API.api_utils import relative_humidity_from_dewpoint_c
 from API.constants.shared_const import (
     ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H,
     HISTORY_PERIODS,
     INGEST_VERSION_STR,
+    KELVIN_TO_CELSIUS,
 )
 from API.constants.unit_const import MM_PER_M
 from API.ingest_grib_utils import download_and_validate_subset
@@ -61,7 +66,14 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 logger = logging.getLogger(__name__)
 
 # %% Model constants
-ECMWF_SOURCE_PRIORITY = ["google", "ecmwf", "aws", "azure"]
+# Herbie picks the first source holding each lead. Google is the fastest (0.2 s/MB,
+# against 0.8 for ECMWF) but lags: the 240 h 0.1 degree ensemble file of the 00Z run
+# of 2026-11-04 reached ECMWF at 09:40, AWS at 09:56 and Google at 12:27. AWS is last
+# because it answered most GETs with 503 SlowDown; Azure no longer serves the feed.
+ECMWF_SOURCE_PRIORITY = ["google", "ecmwf", "aws"]
+# Named explicitly: Herbie's default depends on the date, and the store layout
+# and the API's grid lookup (ECMWF_LATS/ECMWF_LONS) depend on this resolution.
+ECMWF_RESOLUTION = "0p1"
 # IFS open data only runs to 240 h at 00 and 12 UTC
 ECMWF_RUN_FREQ = "12h"
 ECMWF_FORECAST_HOURS = [
@@ -73,6 +85,9 @@ ECMWF_FORECAST_HOURS = [
 ECMWF_HISTORY_RUN_STEP_HOURS = 12
 ECMWF_HISTORY_LEAD_HOURS = list(range(3, ECMWF_HISTORY_RUN_STEP_HOURS + 1, 3))
 HISTORY_PERIOD_HOURS = HISTORY_PERIODS["ECMWF"]
+# Named for the grid: a 0.25 degree store from before the 0.1 degree switch must
+# not be found and merged. Old stores age out through the prune-history job.
+HIST_STORE_PREFIX = "ECMWF_Hist_0p1_"
 
 # Deterministic fields: 2 m temperature/dew point, 10 m wind, precipitation
 # rate/accumulation/type, mean sea level pressure and total cloud cover
@@ -92,8 +107,9 @@ IFS_OPER_CFGRIB_GROUPS = (
     {"typeOfLevel": "entireAtmosphere"},
 )
 
-# Time chunk of the intermediate merged zarrs
-PROCESS_TIME_CHUNK = 64
+# Time chunk of the intermediate merged zarrs. A multi-step chunk makes dask hold
+# every lead of the whole grid while it assembles tiles (~20 GB at 0.1 degrees).
+PROCESS_TIME_CHUNK = 1
 
 # Variables in the published store. The API reader puts the valid times (the
 # store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
@@ -111,7 +127,11 @@ zarr_vars = (
     "Precipitation_Prob",
     "APCP_Mean",
     "APCP_StdDev",
+    "rh",
 )
+# rh is derived after the hourly interpolation (append_relative_humidity); the
+# rest are read from GRIB and kept in the intermediate and history stores.
+PROCESS_VARS = zarr_vars[:-1]
 # Categorical precipitation type is interpolated with nearest neighbour
 NEAREST_INTERP_VARS = ("ptype",)
 
@@ -165,7 +185,10 @@ def download_ecmwf_subset(
         herbie_download_retries=ECMWF_DOWNLOAD_RETRIES,
         herbie_retry_sleep_seconds=ECMWF_RETRY_SLEEP_SECONDS,
         priority=ECMWF_SOURCE_PRIORITY,
-        herbie_kwargs={"max_threads": ECMWF_MAX_THREADS},
+        herbie_kwargs={
+            "max_threads": ECMWF_MAX_THREADS,
+            "resolution": ECMWF_RESOLUTION,
+        },
         download_max_threads=ECMWF_MAX_THREADS,
     )
 
@@ -197,45 +220,114 @@ def open_ifs_oper(grib_paths: list[str]) -> xr.Dataset:
     return ifs_mf
 
 
-def ifs_ensemble_precip_stats(
-    grib_paths: list[str], lead_hours: list[int]
+def write_ifs_ensemble_precip_stats(
+    grib_paths: list[str], lead_hours: list[int], zarr_path: str
 ) -> xr.Dataset:
-    """Reduce the IFS ensemble total precipitation to hourly-rate statistics."""
-    ens_mf = open_ifs_cfgrib(grib_paths)
+    """Reduce the IFS ensemble total precipitation to hourly-rate statistics.
 
-    # tp accumulates from the run start: difference consecutive leads, keeping
-    # the first lead's 0-to-lead total as is
-    ens_mf["tpd"] = ens_mf["tp"].diff(dim="step")
-    ens_mf["tpd"] = xr.where(
-        ens_mf.step == ens_mf.step.isel(step=0),
-        ens_mf["tp"].isel(step=0),
-        ens_mf["tpd"],
+    At 0.1 degrees one lead is 50 members x 6.5 M cells (1.3 GB as float32), and
+    a lazy multi-file cfgrib open peaked at 11 GB for a single lead. So each lead
+    is decoded, reduced and appended to ``zarr_path`` on its own, holding only the
+    previous lead's totals for the differencing (8.9 GB peak over a full run).
+    """
+    paths_by_lead = {
+        int(re.search(r"-(\d+)h-enfo-", os.path.basename(path)).group(1)): path
+        for path in grib_paths
+    }
+    if sorted(paths_by_lead) != list(lead_hours):
+        raise RuntimeError(
+            f"IFS ensemble files cover leads {sorted(paths_by_lead)}, "
+            f"expected {lead_hours}"
+        )
+
+    previous_total = None
+    previous_lead = 0
+    for lead in lead_hours:
+        with xr.open_dataset(
+            paths_by_lead[lead],
+            engine="cfgrib",
+            decode_timedelta=False,
+            backend_kwargs={"indexpath": ""},
+        ) as ens:
+            total = ens["tp"].values.astype(np.float32)
+            latitude = ens["latitude"].values
+            longitude = ens["longitude"].values
+            if float(ens["step"]) != lead:
+                raise RuntimeError(
+                    f"{paths_by_lead[lead]} holds step {float(ens['step'])}, "
+                    f"expected {lead}"
+                )
+
+        # tp accumulates from the run start: difference consecutive leads, keeping
+        # the first lead's 0-to-lead total as is. Dividing by the interval length
+        # (3 h, or 6 h after 144 h) gives an hourly rate in m/h.
+        interval_total = total if previous_total is None else total - previous_total
+        rate = interval_total / (lead - previous_lead)
+        previous_total = total
+        previous_lead = lead
+
+        # Fraction of members above the shared ensemble threshold (mm/h -> m/h)
+        precip_prob = (rate > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H / MM_PER_M).sum(
+            axis=0, dtype=np.float32
+        ) / rate.shape[0]
+
+        dims = ("step", "latitude", "longitude")
+        lead_stats = xr.Dataset(
+            {
+                "Precipitation_Prob": (dims, precip_prob[np.newaxis]),
+                "APCP_StdDev": (dims, rate.std(axis=0)[np.newaxis]),
+                "APCP_Mean": (dims, rate.mean(axis=0)[np.newaxis]),
+            },
+            coords={
+                "step": [float(lead)],
+                "latitude": latitude,
+                "longitude": longitude,
+            },
+        )
+        if lead == lead_hours[0]:
+            chunks = (
+                PROCESS_TIME_CHUNK,
+                CHUNK_SIZES["ECMWF_IFS"],
+                CHUNK_SIZES["ECMWF_IFS"],
+            )
+            lead_stats.to_zarr(
+                zarr_path,
+                mode="w",
+                consolidated=False,
+                encoding={name: {"chunks": chunks} for name in lead_stats.data_vars},
+            )
+        else:
+            # The grid was written with the first lead
+            lead_stats.drop_vars(["latitude", "longitude"]).to_zarr(
+                zarr_path, append_dim="step", consolidated=False
+            )
+
+    return xr.open_zarr(zarr_path, consolidated=False)
+
+
+def append_relative_humidity(stacked: da.Array) -> da.Array:
+    """Add 2 m relative humidity (percent, like GFS and HRRR) as the last variable.
+
+    Derived from the hourly temperature and dew point (K in the stored fields) so
+    each stored hour equals what the API used to derive per request, and reads no
+    longer pay for the saturation vapour pressure calculation.
+    """
+
+    def relative_humidity_percent(t2m_k, d2m_k):
+        return (
+            relative_humidity_from_dewpoint_c(
+                t2m_k - KELVIN_TO_CELSIUS, d2m_k - KELVIN_TO_CELSIUS
+            )
+            * 100.0
+        ).astype(np.float32)
+
+    relative_humidity = da.map_blocks(
+        relative_humidity_percent,
+        stacked[PROCESS_VARS.index("t2m")],
+        stacked[PROCESS_VARS.index("d2m")],
+        dtype="float32",
     )
-
-    # Divide each interval total by its length (3 h, or 6 h after 144 h) to get
-    # an hourly rate in m/h
-    interval_hours = xr.DataArray(
-        np.diff([0, *lead_hours]).astype(np.float32), dims="step"
-    )
-    ens_mf["tpd"] = ens_mf["tpd"] / interval_hours
-
-    # Fraction of members above the shared ensemble threshold (mm/h -> m/h)
-    precip_prob = (ens_mf["tpd"] > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H / MM_PER_M).sum(
-        dim="number"
-    ) / ens_mf.sizes["number"]
-
-    return xr.Dataset(
-        {
-            "Precipitation_Prob": precip_prob,
-            "APCP_StdDev": ens_mf["tpd"].std(dim="number"),
-            "APCP_Mean": ens_mf["tpd"].mean(dim="number"),
-        },
-        coords={
-            "step": ens_mf["step"],
-            "latitude": ens_mf["latitude"],
-            "longitude": ens_mf["longitude"],
-        },
-    )
+    return da.concatenate([stacked, relative_humidity[np.newaxis]], axis=0)
 
 
 def step_to_valid_time(
@@ -269,8 +361,8 @@ def write_process_zarr(
     ds = ds.chunk(
         chunks={
             "time": PROCESS_TIME_CHUNK,
-            "latitude": CHUNK_SIZES["ECMWF"],
-            "longitude": CHUNK_SIZES["ECMWF"],
+            "latitude": CHUNK_SIZES["ECMWF_IFS"],
+            "longitude": CHUNK_SIZES["ECMWF_IFS"],
         }
     )
     encoding = None
@@ -299,7 +391,7 @@ def main() -> None:
         DEFAULT_ZARR_WORKERS, DEFAULT_ZARR_CONCURRENCY
     )
 
-    process_chunk = CHUNK_SIZES["ECMWF"]
+    process_chunk = CHUNK_SIZES["ECMWF_IFS"]
     final_chunk = FINAL_CHUNK_SIZES["ECMWF"]
 
     # Start each run from an empty processing directory
@@ -318,13 +410,15 @@ def main() -> None:
 
     T0 = time.time()
 
-    # %% Determine the model run: the newest cycle whose 240 h lead exists
+    # %% Determine the model run: the newest cycle whose 240 h lead exists. The
+    # ensemble's last file is published after the deterministic one, so it decides.
     latest_run = HerbieLatest(
         model="ifs",
         n=3,
         freq=ECMWF_RUN_FREQ,
         fxx=ECMWF_FORECAST_HOURS[-1],
-        product="oper",
+        product="enfo",
+        resolution=ECMWF_RESOLUTION,
         verbose=True,
         priority=ECMWF_SOURCE_PRIORITY,
         save_dir=tmp_dir,
@@ -342,7 +436,9 @@ def main() -> None:
     ens_paths = download_ecmwf_subset(
         base_time, ECMWF_FORECAST_HOURS, "enfo", ECMWF_ENFO_MATCH_STRING
     )
-    xr_ensoOut = ifs_ensemble_precip_stats(ens_paths, ECMWF_FORECAST_HOURS)
+    xr_ensoOut = write_ifs_ensemble_precip_stats(
+        ens_paths, ECMWF_FORECAST_HOURS, forecast_process_path + "_ens.zarr"
+    )
 
     # Deterministic fields
     ifs_paths = download_ecmwf_subset(
@@ -382,7 +478,7 @@ def main() -> None:
     for hours_back in history_offsets:
         hist_run_time = base_time - pd.Timedelta(hours=hours_back)
         hist_timestamp = hist_run_time.strftime("%Y%m%dT%H%M%SZ")
-        hist_store_name = f"ECMWF_Hist_v3{hist_timestamp}.zarr"
+        hist_store_name = f"{HIST_STORE_PREFIX}{hist_timestamp}.zarr"
         if history_store_exists(history_remote, hist_store_name):
             logger.info("ECMWF history already stored, skipping %s", hist_store_name)
             continue
@@ -397,8 +493,8 @@ def main() -> None:
         ens_his_paths = download_ecmwf_subset(
             hist_run_time, ECMWF_HISTORY_LEAD_HOURS, "enfo", ECMWF_ENFO_MATCH_STRING
         )
-        xr_enso_hisOut = ifs_ensemble_precip_stats(
-            ens_his_paths, ECMWF_HISTORY_LEAD_HOURS
+        xr_enso_hisOut = write_ifs_ensemble_precip_stats(
+            ens_his_paths, ECMWF_HISTORY_LEAD_HOURS, hist_process_path + "_ens.zarr"
         )
 
         xarray_hist_merged = step_to_valid_time(
@@ -427,7 +523,7 @@ def main() -> None:
     # invented values, so open_history_store fails instead. The history stores
     # keep their own time coordinate, which the concatenation below indexes by.
     hist_store_names = [
-        "ECMWF_Hist_v3"
+        HIST_STORE_PREFIX
         + (base_time - pd.Timedelta(hours=hours_back)).strftime("%Y%m%dT%H%M%SZ")
         + ".zarr"
         for hours_back in history_offsets
@@ -438,7 +534,7 @@ def main() -> None:
 
     def open_history_dataset(name_and_path):
         name, local_path = name_and_path
-        open_history_store(history_remote, name, ("time", *zarr_vars), local_path)
+        open_history_store(history_remote, name, ("time", *PROCESS_VARS), local_path)
         return xr.open_zarr(local_path, consolidated=False)
 
     hist = map_history_stores(
@@ -455,12 +551,12 @@ def main() -> None:
     )
 
     # The API reads variables by position, so a missing one must not shift the rest
-    missing_vars = [v for v in zarr_vars if v not in ds.data_vars]
+    missing_vars = [v for v in PROCESS_VARS if v not in ds.data_vars]
     if missing_vars:
         raise RuntimeError(f"ECMWF run {base_time} is missing {missing_vars}")
 
     # Out-of-range values become NaN
-    for var in zarr_vars:
+    for var in PROCESS_VARS:
         ds_clip = ds[var]
         if np.issubdtype(ds_clip.dtype, np.number):
             ds[var] = ds_clip.where(
@@ -471,7 +567,7 @@ def main() -> None:
     stacked_timesUnix = (ds.time.values - unix_epoch) / one_second
 
     # %% Stack into the (variable, time, y, x) layout the API reads
-    ds_stack = ds[list(zarr_vars)].to_array(dim="var", name="var")
+    ds_stack = ds[list(PROCESS_VARS)].to_array(dim="var", name="var")
     ds_chunk = ds_stack.chunk(
         {
             "var": 1,
@@ -501,12 +597,12 @@ def main() -> None:
         daskVarArrayStackDisk,
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
-        nearest_vars=[zarr_vars.index(v) for v in NEAREST_INTERP_VARS],
+        nearest_vars=[PROCESS_VARS.index(v) for v in NEAREST_INTERP_VARS],
         dtype="float32",
         fill_value=np.nan,
     )
     daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
-        daskVarArrayStackDiskInterp, final_chunk
+        append_relative_humidity(daskVarArrayStackDiskInterp), final_chunk
     )
 
     ecmwf_store_name = "ECMWF.zarr"
