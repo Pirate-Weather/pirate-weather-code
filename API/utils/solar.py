@@ -9,7 +9,6 @@ import datetime
 import numpy as np
 from astral import LocationInfo
 from astral import sun as astral_sun
-from pytz import utc
 
 from API.utils.geo import _polar_is_all_day
 
@@ -19,7 +18,10 @@ UNIX_EPOCH = np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
 def datetime_to_unix_seconds(value: datetime.datetime) -> np.int32:
     """Convert a timezone-aware datetime to unix seconds in UTC."""
     return (
-        (np.datetime64(value.astimezone(utc).replace(tzinfo=None)) - UNIX_EPOCH)
+        (
+            np.datetime64(value.astimezone(datetime.UTC).replace(tzinfo=None))
+            - UNIX_EPOCH
+        )
         .astype("timedelta64[s]")
         .astype(np.int32)
     )

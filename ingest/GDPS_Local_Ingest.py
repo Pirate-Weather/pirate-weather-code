@@ -239,7 +239,8 @@ def interp_lead_groups(
     Mixing hourly, 3-hourly and 6-hourly leads on one axis leaves NaN where a
     field was not published, so each group of fields sharing a lead set is
     interpolated from its own leads. Precipitation type is categorical, so it
-    takes the nearest step instead of a linear blend.
+    takes the nearest step instead of a linear blend, and wind direction blends
+    the short way round the circle.
     """
     var_leads = [
         tuple(GDPS_REDUCED_LEAD_VARS.get(var, GDPS_FORECAST_HOURS)) for var in zarr_vars
@@ -255,11 +256,17 @@ def interp_lead_groups(
             for local, var_index in enumerate(var_indices)
             if zarr_vars[var_index] == "PTYPE_surface"
         ]
+        group_direction = [
+            local
+            for local, var_index in enumerate(var_indices)
+            if zarr_vars[var_index] == "WDIR_10maboveground"
+        ]
         group_hourly = interp_time_take_blend(
             stack[var_indices][:, lead_mask],
             stacked_timesUnix=group_times,
             hourly_timesUnix=hourly_timesUnix,
             nearest_vars=group_nearest or None,
+            direction_vars=group_direction or None,
             dtype="float32",
             fill_value=np.nan,
         )

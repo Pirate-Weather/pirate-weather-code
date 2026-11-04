@@ -427,7 +427,10 @@ def select_daily_precip_type(
     # Only update where not all types are present and some precip exists
     not_all_types = ~all_types
     has_precip = np.max(precip_accum, axis=1) > 0
-    update_mask = not_all_types & has_precip
+    # A mixed hour's accumulation is stored as ice, so the dominant accumulation
+    # can't overrule a day that is already mixed
+    already_mixed = maxPchanceDay == PRECIP_IDX["mixed"]
+    update_mask = not_all_types & has_precip & ~already_mixed
     maxPchanceDay[update_mask] = dominant_type[update_mask]
 
     # For ice accumulation, preserve the distinction between ice (freezing rain)
@@ -441,6 +444,7 @@ def select_daily_precip_type(
         (InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit))
         & (maxPchanceDay != PRECIP_IDX["ice"])
         & (maxPchanceDay != PRECIP_IDX["sleet"])
+        & ~already_mixed
     ] = PRECIP_IDX["ice"]
 
     # If we have all types map the type to mixed
@@ -675,7 +679,7 @@ def map_ensemble_precip_rates_to_ptype(
     out = np.full(n_hours, np.nan, dtype=float)
 
     mixed_mask = strong_count > 1
-    out[mixed_mask] = PRECIP_IDX["sleet"]
+    out[mixed_mask] = PRECIP_IDX["mixed"]
 
     strong_mask = strong_count == 1
     if np.any(strong_mask):

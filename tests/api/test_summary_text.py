@@ -421,3 +421,111 @@ def test_weekly_lists_days_and_steady_highs():
         ],
         ["temperatures-steady", ["celsius", 13]],
     ]
+
+
+def _dry_week(conditions, *, highs=None):
+    """A week without precipitation; conditions maps a day index to its summary."""
+    return [
+        {
+            "time": BASE_TIME + day * 86400,
+            "icon": "clear-day",
+            "precipType": "none",
+            "precipProbability": 0.0,
+            "liquidAccumulation": 0.0,
+            "snowAccumulation": 0.0,
+            "iceAccumulation": 0.0,
+            "rainIntensityMax": 0.0,
+            "snowIntensityMax": 0.0,
+            "iceIntensityMax": 0.0,
+            "temperatureHigh": 20.0 if highs is None else highs[day],
+            "summaryText": ["sentence", conditions.get(day, ["for-day", "clear"])],
+        }
+        for day in range(8)
+    ]
+
+
+MIST = ["during", "mist", "morning"]
+FOG = ["during", "fog", "morning"]
+BREEZY = ["during", "light-wind", "afternoon"]
+WINDY = ["during", "medium-wind", "afternoon"]
+
+
+@pytest.mark.parametrize(
+    ("conditions", "expected"),
+    [
+        pytest.param({}, ["for-week", "no-precipitation"], id="clear"),
+        pytest.param({3: FOG}, ["for-week", "no-precipitation"], id="one-day"),
+        # BASE_TIME is a Friday, so day 2 is Sunday
+        pytest.param(
+            {0: MIST, 1: MIST, 2: MIST},
+            ["during", "mist", ["through", "today", "sunday"]],
+            id="named-from-the-summary-not-the-icon",
+        ),
+        pytest.param(
+            {3: MIST, 5: FOG},
+            ["during", "fog", ["and", "monday", "wednesday"]],
+            id="most-severe-of-the-kind",
+        ),
+        pytest.param(
+            {1: BREEZY, 2: BREEZY},
+            ["over-weekend", "light-wind"],
+            id="over-the-weekend",
+        ),
+        pytest.param(
+            dict.fromkeys(range(8), BREEZY), ["for-week", "light-wind"], id="whole-week"
+        ),
+        # Ranked as in the daily summary: the whole window, then earliest, then
+        # visibility ahead of wind, keeping only one.
+        pytest.param(
+            {0: FOG, 1: FOG, **dict.fromkeys(range(8), BREEZY)},
+            ["for-week", "light-wind"],
+            id="whole-week-beats-visibility",
+        ),
+        pytest.param(
+            {2: BREEZY, 3: BREEZY, 4: FOG, 5: FOG},
+            ["during", "light-wind", ["and", "sunday", "monday"]],
+            id="earliest-start-beats-visibility",
+        ),
+        pytest.param(
+            {2: ["multiple-sentences", FOG, WINDY], 3: WINDY, 5: FOG},
+            ["during", "fog", ["and", "sunday", "wednesday"]],
+            id="same-start-prefers-visibility",
+        ),
+    ],
+)
+def test_dry_week_mentions_notable_conditions(conditions, expected):
+    """A dry week always read "No precipitation throughout the week", even with
+    three days of fog. It should lead with a condition lasting at least two days,
+    ranked like the daily summary and named from the days' summaries: every Dark
+    Sky visibility icon is "fog", which would turn misty days into a foggy week.
+    """
+    text, _ = calculate_weekly_text(_dry_week(conditions), "UTC")
+
+    assert text[1] == expected
+
+
+def test_dry_week_condition_icon_follows_the_icon_set():
+    """The week's icon must match its text, using each set's icons (the Dark Sky
+    set has no mist or breezy icon)."""
+    misty = _dry_week({0: MIST, 1: MIST})
+    breezy = _dry_week({0: BREEZY, 1: BREEZY})
+
+    assert calculate_weekly_text(misty, "UTC", icon="darksky")[1] == "fog"
+    assert calculate_weekly_text(misty, "UTC", icon="pirate")[1] == "mist"
+    assert calculate_weekly_text(breezy, "UTC", icon="darksky")[1] == "wind"
+    assert calculate_weekly_text(breezy, "UTC", icon="pirate")[1] == "breezy"
+
+
+@pytest.mark.parametrize("start_hour", [13, 19, 23])
+def test_rest_of_today_is_not_throughout_the_day(start_hour):
+    """Today's summary only covers the hours left. Rain filling them can't be
+    "throughout the day", which would claim hours the summary no longer looks at.
+    """
+    # Light enough not to add an "expected" sentence
+    rain = RAIN | {"liquidAccumulation": 0.5, "windSpeed": 1.0}
+    hours = make_hours(30 - start_hour, BASE_TIME + start_hour * HOUR, **rain)
+
+    _, text = calculate_day_text(hours, True, "UTC", "day", partial_day=True)
+
+    # ["sentence", ["for-rest-of-day", <rain text>]]
+    assert text[1][0] == "for-rest-of-day"
