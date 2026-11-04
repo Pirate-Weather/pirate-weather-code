@@ -1,4 +1,4 @@
-"""Regional forecast-source priority (Canada box / North America / rest of world).
+"""Regional forecast-source priority (Canada / North America / rest of world).
 
 Expected orders come from docs/forecast-source-selection/README.md, the
 documented contract for which model supplies each element, not from the
@@ -21,10 +21,12 @@ from API.constants.model_const import (
     RRFS,
 )
 from API.current.metrics import _build_source_strategies
+from API.utils.geo import is_in_canada, is_in_north_america
 from tests.helpers.model_arrays import hourly_inputs, model_array
 
 OTTAWA = (45.4215, -75.6972)
 VANCOUVER = (49.2827, -123.1207)
+SEATTLE = (47.6062, -122.3321)
 NEW_YORK = (40.7128, -74.0060)
 BERLIN = (52.5200, 13.4050)
 
@@ -260,7 +262,7 @@ def test_hourly_ai_mode_precip_probability_prefers_gefs_in_north_america():
 
 @pytest.mark.parametrize("ai", [False, True], ids=["conventional", "ai-mode"])
 def test_include_rrfs_leads_every_element_even_in_canada(ai):
-    """include=rrfs promises RRFS ahead of every model. Inside the Canada box
+    """include=rrfs promises RRFS ahead of every model. Inside the Canada
     and in AI mode other models normally lead, so a missing prepend in one of
     the order builders would quietly publish HRDPS or AI values to a user who
     asked for RRFS. Without RRFS data the orders are the existing ones (the
@@ -292,3 +294,84 @@ def test_include_rrfs_leads_every_element_even_in_canada(ai):
     }
     for element, value in expected_first.items():
         assert inputs[element][0, 0] == pytest.approx(value), element
+
+
+@pytest.mark.parametrize(
+    ("place", "lat", "lon", "in_canada"),
+    [
+        # Cities that sit inside the old lat/lon box
+        ("Seattle", 47.61, -122.33, False),
+        ("Chicago", 41.88, -87.63, False),
+        ("Detroit", 42.33, -83.05, False),
+        ("Boston", 42.36, -71.06, False),
+        ("Minneapolis", 44.98, -93.27, False),
+        ("Juneau", 58.30, -134.42, False),
+        # Either side of the border, and enclaves only the border can separate
+        ("Windsor", 42.31, -83.04, True),
+        ("Sault Ste Marie, Ontario", 46.53, -84.35, True),
+        ("Sault Ste Marie, Michigan", 46.49, -84.35, False),
+        ("Point Roberts", 48.98, -123.05, False),
+        ("Northwest Angle", 49.35, -95.05, False),
+        # Canadian zones outside the main ones
+        ("Vancouver", 49.28, -123.12, True),
+        ("Creston", 49.09, -116.51, True),
+        ("Atikokan", 48.75, -91.62, True),
+        ("Blanc-Sablon", 51.43, -57.13, True),
+        ("Alert", 82.50, -62.35, True),
+        # Water
+        ("Hudson Bay", 60.0, -86.0, True),
+        ("Lake Michigan", 43.5, -87.0, False),
+        ("Beaufort Sea", 72.0, -135.0, True),
+        ("Off Cape Cod", 42.0, -68.5, False),
+        # Also in the old box, not Canada
+        ("Nuuk", 64.18, -51.72, False),
+        ("Saint-Pierre", 46.78, -56.18, False),
+        ("New York", 40.71, -74.01, False),
+    ],
+)
+def test_canada_follows_the_border(place, lat, lon, in_canada):
+    """Canadian-first priority came from a lat/lon box holding much of the northern
+    US, so Seattle, Chicago, Detroit, Boston and Minneapolis took HRDPS ahead of
+    NBM and HRRR. Every US test used New York, just south of the box, which hid it.
+    """
+    assert is_in_canada(lat, lon) is in_canada, place
+
+
+def test_northern_us_city_uses_the_us_order():
+    """End to end from the region check to the stack: Seattle's hourly temperature
+    must lead with NBM, and Vancouver's, 190 km away, with HRDPS.
+    """
+    merged = {
+        "nbm": model_array(NBM, 3, temp=1.0),
+        "hrdps": model_array(HRDPS, 3, temp=2.0),
+    }
+
+    def first_temperature(location):
+        inputs = hourly_inputs(
+            lat=location[0], lon=location[1], source_list=["nbm", "hrdps"], **merged
+        )
+        return inputs["temperature_inputs"][0][0]
+
+    assert first_temperature(SEATTLE) == 1.0
+    assert first_temperature(VANCOUVER) == 2.0
+
+
+@pytest.mark.parametrize(
+    ("place", "lat", "lon", "expected"),
+    [
+        ("Dutch Harbor", 53.89, -166.54, True),
+        ("Adak", 51.88, -176.66, True),
+        ("Attu, across the antimeridian", 52.90, 172.90, True),
+        ("St Lawrence Island", 63.40, -170.30, True),
+        ("Chukotka", 66.0, -171.0, False),
+        ("Midway", 28.20, -177.40, False),
+        ("Wake Island", 19.28, 166.65, False),
+        ("Hawaii", 21.31, -157.86, True),
+    ],
+)
+def test_north_america_includes_the_aleutians(place, lat, lon, expected):
+    """West of -168 the old check never ran its Alaska branch, as the box above it
+    had already excluded those longitudes, so the western Aleutians got rest-of-world
+    source priority, with DWD MOSMIX ahead of GFS.
+    """
+    assert is_in_north_america(lat, lon) is expected, place

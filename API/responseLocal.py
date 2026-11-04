@@ -23,7 +23,6 @@ import orjson
 from astral import LocationInfo, moon
 from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
-from timezonefinder import TimezoneFinder
 
 from API.alerts import build_alerts
 from API.api_utils import (
@@ -93,7 +92,7 @@ from API.request.preprocess import prepare_initial_request
 from API.utils.filtering import apply_block_indices as _apply_block_indices
 from API.utils.filtering import apply_blocks_param as _apply_blocks_param
 from API.utils.filtering import parse_indices as _parse_indices
-from API.utils.geo import haversine_distance, is_in_north_america
+from API.utils.geo import get_timezone_finder, haversine_distance, is_in_north_america
 from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
 from API.utils.timing import StepTimer, TimingMiddleware
@@ -230,7 +229,7 @@ lons_etopo = np.arange(
     ETOPO_CONST["lon_resolution"],
 )
 
-tf = TimezoneFinder(in_memory=True)
+tf = get_timezone_finder()
 
 
 def convert_data_to_celsius(

@@ -6,75 +6,7 @@ that would have caught it, then remove the entry.
 
 ## Bugs
 
-### `aqiunits=tw` is silently ignored
-`API/request/preprocess.py:731` documents `tw → Taiwan AQI`, but `tw` is missing from
-`_VALID_AQI_UNITS` and `_AQI_UNITS_MAP`, so the parameter falls back to the unit
-system's default. Either add Taiwan AQI support or fix the comment.
-
-### `useETOPO` environment variable does nothing
-`API/responseLocal.py:108` reads `use_etopo`, but the README Docker example
-(`README.md`, "Option 2") sets `useETOPO=FALSE`. ETOPO is loaded anyway.
-Fix the README (or accept both names).
-
-### `is_in_north_america` exclusion branch is dead; western Aleutians excluded
-`API/utils/geo.py:295-303`: the outer box requires `lon >= -168`, so the inner
-`lon_normalized < -170` "US Minor Outlying Islands" branch can never run. Locations
-west of -168° (western Aleutians) get rest-of-world source priority. Decide the
-intended boundary and simplify.
-
-### One implausible value blanks every above-max value in `clipLog`
-`API/api_utils.py:142-156`: if any value exceeds 125% of the max, *every* value
-above the max becomes `MISSING_DATA`, including plausible ones that would otherwise
-be clamped (one 1000 °C hour also wipes out 61 °C hours instead of clamping them to
-60). The same pattern applies to the min side. Only the out-of-range values should
-be replaced; the rest should still be clipped.
-
-### Daily sleet type is never preserved
-`API/api_utils.py:360-389` (`select_daily_precip_type`): the argmax step overwrites
-`maxPchanceDay` with rain/snow/ice on every day with precipitation (unless all three
-types are present) *before* the "preserve ice/sleet from the hourly data" check runs,
-so that check can never see sleet. Ice-pellet days are always reported as freezing
-rain ("ice").
-
-### `interpolate_temporal_gaps_efficiently` fills gaps longer than `max_gap_hours`
-`API/ingest_utils.py` (~1400-1458): `interpolate_na(limit=max_gap_hours)` fills the
-first `limit` NaNs of *any* gap, and the unconditional `ffill`/`bfill` that follows
-fills the rest, so `[1, nan×5, 7]` with `max_gap_hours=3` becomes
-`[1, 2, 3, 4, 4, 4, 7]` (partial ramp, flat line, jump). The docstring implies
-xarray's `max_gap` semantics (leave long gaps alone). Used by the DWD ingest with
-`max_gap_hours=3`; `fill_station_gaps` runs first and already blanks whole series
-with long gaps, so the impact is limited to gaps it doesn't catch.
-
-### AQI averaging windows are cut off at local midnight
-The AQ series (`prepare_aq_inputs`, `API/data_inputs.py`) follows `hour_array_grib`,
-which starts at local midnight (`base_day_utc`). `rolling_mean` / `nowcast_pm`
-(`API/constants/aqi_const.py`) clip their window at the start of the array, so
-hour *h* of today averages only *h* + 1 hours: the 24 h PM and SO2 averages, the
-12 h NowCast and the 8 h O3/CO averages are short for most of today, and the
-`currently` AQI just after midnight is a 1-2 h average. Hours from tomorrow on have
-full windows. SILAM already keeps 48 h of history for this
-(`HISTORY_PERIODS["SILAM"]`), but the API never reads before midnight.
-Fix: build the AQ series from 24 h before local midnight, average, then trim to the
-response window. RAQDPS only reaches back to its latest run (4-16 h before now);
-the earlier hours fall back to SILAM per hour (`_prefer`), so a window that crosses
-the RAQDPS run time mixes two models.
-
 ## Improvements
-
-### Improve the Canada vs US model selection
-Canadian-first source priority (HRDPS → REPS → GDPS → GEPS ahead of NBM/HRRR) is
-chosen by `is_in_canada` (`API/utils/geo.py`), a bounding box (lat 41.7-83,
-lon -141 to -52) rather than the border. Large parts of the northern US fall inside
-it and get Canadian-first priority instead of NBM/HRRR, e.g. Seattle, Chicago,
-Detroit, Boston and Minneapolis. Every US priority test uses New York (40.7°N),
-just south of the box, so this is untested. Options:
-- a real border check, such as a precomputed country mask on the model grid;
-- choosing by which model domain covers the point best.
-
-Keep it cheap on the read path: no per-request polygon tests against large
-geometries. Update `docs/forecast-source-selection/README.md` and
-`tests/api/test_regional_source_priority.py` with points on both sides of the border.
-Related: the `is_in_north_america` boundary issue above.
 
 ## v3 goals
 
@@ -268,14 +200,6 @@ happened for ~5 min (no CPU, no network) before "Starting final URMA merge from
 283 hourly stores" (4,275 s), then 2.5 min opening the stores one at a time. Find
 the wait; the store opens fall under "Open the history stores in parallel".
 
-### SILAM: daily run checks before FMI posts the new cycle
-SILAM runs once a day at 07:00 UTC (the production schedule), but FMI posts the
-00Z file late. On the local stack, the 07:00 run on 2026-10-31 found only the
-2026-10-29 00Z file in the THREDDS catalog and exited "No Update". The
-2026-10-30 00Z file had appeared by 14:36 UTC, so the API serves SILAM about a
-day behind. Find when FMI usually posts each cycle and move the run after it, or
-add a second daily run (e.g. 19:00 UTC); "No Update" exits cost ~3 s.
-
 ### Canadian models: parallel GRIB conversion
 HRDPS, GDPS, REPS and GEPS download one variable at a time (~6 MB/s from the MSC
 datamart), then convert on a single core: GDPS spends 12.6 min downloading and
@@ -348,11 +272,57 @@ schedules already hold what is needed.
 
 ### Consistent clipping
 [pirate-weather-code#760](https://github.com/Pirate-Weather/pirate-weather-code/issues/760):
-some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("One
-implausible value blanks every above-max value").
+some fields use `clipLog`, others `np.clip`.
 
 ## Done
 
+### DWD doesn't fill over long gaps (2026-11-04)
+Long gaps are genuinely missing data, and now stay missing so another model fills those
+hours. Before, `interpolate_temporal_gaps_efficiently` turned `[1, nan x 5, 7]` into
+`[1, 2, 3, 4, 4, 4, 7]` with a 3 hour limit and held the end values to the ends of the
+series, and `fill_station_gaps` zero-filled long precipitation gaps and carried the type
+code across them. In the 2026-11-04 file, `ww` ends 70 hours early at 499 of 5,648 stations
+and 235 hours early at 87, and those hours held the last code. RR1c's routine 6 hour gaps
+are within the 6 hour station limit, so they are still filled.
+
+### `useETOPO` docs and the stale `aqiunits=tw` entry (2026-11-04)
+The README's Docker example and a compose comment set `useETOPO`, but the API reads
+`use_etopo`, so ETOPO loaded anyway. Both now use the real name. The `aqiunits=tw` entry was
+already out of date: the comment no longer mentions Taiwan and nothing implements it, so
+`tw` falls back like any unknown value. Taiwan AQI support would be a feature, and needs
+breakpoints checked against the official tables.
+
+### SILAM runs after FMI posts each cycle (2026-11-04)
+The 07:00 UTC run always missed that morning's file, leaving the API a day behind. Over the
+last 21 cycles, the file timestamps show FMI posting 00Z near 12:55 UTC the next day (run +
+37 h), twice near 17:50. It now runs at 14:00 and 19:00 UTC, in both compose files.
+
+### AQI averages reach back before local midnight (2026-11-04)
+The AQI series started at local midnight, so hour *h* of today averaged only *h* + 1 hours
+(a `currently` AQI just after midnight was a 1-2 h average). `prepare_aq_inputs` now also
+gives the 24 hours before midnight, for the averages only. No extra reads: the stores are
+read whole and SILAM keeps 48 h of history. RAQDPS only reaches back to its latest run, so
+a window crossing the run time uses SILAM before it, per hour.
+
+### Daily sleet is reported as sleet (2026-11-04)
+`select_daily_precip_type` overwrote the day's hourly type with the dominant accumulation
+before its "preserve sleet" check ran, so every ice-pellet day read as freezing rain.
+
+### `clipLog` only blanks the implausible values (2026-11-04)
+One value past the implausible limit (125 % of the maximum) blanked every value above the
+maximum, including ones that should clamp; the minimum side did the same. A NaN anywhere
+in the array also turned the whole check off, so 1000 C would clamp to 60 C. Each value is
+now judged alone.
+
+### Canada vs US source selection follows the border (2026-11-04)
+`is_in_canada` was a lat/lon box holding much of the northern US, so Seattle, Chicago,
+Detroit, Boston and Minneapolis took Canadian models first. It now uses the point's time
+zone (`CANADA_TIMEZONES`), whose polygons follow the border: right where a nearest-city
+lookup is wrong (Windsor, Northwest Angle, Alert) and already looked up on every request
+(about 2 us; the extra TimezoneFinder was avoided by sharing one). Open water, in `Etc/`
+zones, takes the nearest city's country (about 20 us, cached per point). The box still
+skips both elsewhere. `is_in_north_america` now includes the western Aleutians, out to
+Attu across the antimeridian, by their zones, and still excludes Chukotka and Midway.
 ### `pytz` replaced with `zoneinfo` (2026-11-04)
 `tzdata` replaces the `pytz` pin, and alone loads all 444 zones. Two behaviours to remember:
 two times in one `ZoneInfo` subtract by wall clock (so `baseTimeOffset` uses timestamps), and

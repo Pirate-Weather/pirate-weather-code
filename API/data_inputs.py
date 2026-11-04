@@ -11,6 +11,7 @@ from API.api_utils import (
     map_wmo4677_to_ptype,
     relative_humidity_from_dewpoint_c,
 )
+from API.constants.aqi_const import AQ_LEAD_IN_HOURS
 from API.constants.model_const import (
     DWD_MOSMIX,
     ECMWF,
@@ -1245,9 +1246,13 @@ def prepare_aq_inputs(
 ):
     """Prepare air-quality concentration arrays aligned to the request hour grid.
 
-    Returns a dict with keys: pm25, pm10, o3, no2, so2, co, smoke_frp.
-    Each value is a 1-D numpy array of length ``num_hours`` in the model's native
-    units (µg/m³ for PM; ppb for gases).  Missing values are NaN.
+    Returns a dict with keys: pm25, pm10, o3, no2, so2, co, smoke_frp, lead_in.
+    Each value but lead_in is a 1-D numpy array of length ``num_hours`` in the model's
+    native units (µg/m³ for PM; ppb for gases).  Missing values are NaN.
+
+    ``lead_in`` holds the same pollutants for the AQ_LEAD_IN_HOURS before the grid
+    starts at local midnight, already in memory because the stores are read whole.
+    The AQI's averaging windows need them, or they are short for most of today.
 
     Priority: RAQDPS > SILAM per pollutant.
     RAQDPS does not have CO; it falls back to SILAM CO unconditionally.
@@ -1257,8 +1262,8 @@ def prepare_aq_inputs(
     """
     nan_row = np.full(num_hours, np.nan)
 
-    def _match_hours(data):
-        """For each request hour, the row of ``data`` nearest in time, and
+    def _match_hours(data, request_times):
+        """For each requested hour, the row of ``data`` nearest in time, and
         whether it is close enough to use."""
         # Time column is column 0 (unix seconds); match to hour_array_grib.
         # SILAM timestamps are stored as float32 (±64 s rounding at ~1.75e9).
@@ -1270,7 +1275,7 @@ def prepare_aq_inputs(
         # nearest available hour is always matched while still rejecting gaps
         # larger than one hour.
         time_col = data[:, 0].astype(float)
-        request_hours = np.asarray(hour_array_grib, dtype=float)
+        request_hours = np.asarray(request_times, dtype=float)
         diff = np.abs(time_col[np.newaxis, :] - request_hours[:, np.newaxis])
         best = np.argmin(diff, axis=1)
         matched = diff[np.arange(len(best)), best] < 3600  # within one SILAM time-step
@@ -1278,10 +1283,14 @@ def prepare_aq_inputs(
 
     # The time matching is the same for every variable of a model, so do it once
     raqdps_match = (
-        _match_hours(dataOut_raqdps) if isinstance(dataOut_raqdps, np.ndarray) else None
+        _match_hours(dataOut_raqdps, hour_array_grib)
+        if isinstance(dataOut_raqdps, np.ndarray)
+        else None
     )
     silam_match = (
-        _match_hours(dataOut_silam) if isinstance(dataOut_silam, np.ndarray) else None
+        _match_hours(dataOut_silam, hour_array_grib)
+        if isinstance(dataOut_silam, np.ndarray)
+        else None
     )
 
     def _extract(data, match, var_idx):
@@ -1293,7 +1302,7 @@ def prepare_aq_inputs(
             col = data[:, var_idx].astype(float)
         except IndexError:
             return None
-        out = np.full(num_hours, np.nan)
+        out = np.full(len(best), np.nan)
         out[matched] = col[best[matched]]
         return out
 
@@ -1387,7 +1396,40 @@ def prepare_aq_inputs(
     else:
         smoke_frp_m3 = nan_row.copy()
 
+    # The hours before the grid. RAQDPS only reaches back to its latest run, so
+    # within an averaging window earlier hours can come from SILAM, like any other
+    # hour RAQDPS doesn't have.
+    lead_in = {}
+    if len(hour_array_grib):
+        lead_in_times = (
+            np.asarray(hour_array_grib, dtype=float)[0]
+            - np.arange(AQ_LEAD_IN_HOURS, 0, -1) * 3600.0
+        )
+        raqdps_lead_match = (
+            _match_hours(dataOut_raqdps, lead_in_times)
+            if raqdps_match is not None
+            else None
+        )
+        silam_lead_match = (
+            _match_hours(dataOut_silam, lead_in_times)
+            if silam_match is not None
+            else None
+        )
+        for pollutant in ("pm25", "pm10", "o3", "no2", "so2", "co"):
+            # RAQDPS has no CO; SILAM only
+            raqdps_values = (
+                _extract(dataOut_raqdps, raqdps_lead_match, RAQDPS[pollutant])
+                if pollutant != "co"
+                else None
+            )
+            silam_values = _extract(dataOut_silam, silam_lead_match, SILAM[pollutant])
+            if raqdps_values is None and silam_values is None:
+                lead_in[pollutant] = np.full(AQ_LEAD_IN_HOURS, np.nan)
+            else:
+                lead_in[pollutant] = _prefer(raqdps_values, silam_values)
+
     return {
+        "lead_in": lead_in,
         "pm25": _prefer(raqdps_pm25, silam_pm25),
         "pm10": _prefer(raqdps_pm10, silam_pm10),
         "o3": _prefer(raqdps_o3, silam_o3),

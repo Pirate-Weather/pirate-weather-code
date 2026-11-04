@@ -219,7 +219,7 @@ git clone https://github.com/Pirate-Weather/pirate-weather-code.git
 wget https://files.alexanderrey.ca/api/public/dl/9jMgSLpi
 unzip 9jMgSLpi -d ~/pw-data
 
-docker run -d -p 8083:8083 -v ~/pirate-weather-code/API:/app -v ~/pw-data:/tmp -e "STAGE=TESTING" -e "useETOPO=FALSE" -e "TIMING=TRUE" -e "save_type=Download" -e "force_now=1730869200" --workdir=/efs public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8083
+docker run -d -p 8083:8083 -v ~/pirate-weather-code/API:/app -v ~/pw-data:/tmp -e "STAGE=TESTING" -e "use_etopo=FALSE" -e "TIMING=TRUE" -e "save_type=Download" -e "force_now=1730869200" --workdir=/efs public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8083
 
 curl 127.0.0.1:8083/forecast/123456/47.1756,27.594,1730869200
 ```

@@ -90,7 +90,7 @@ against real stores.
 
 | File | Protects |
 |---|---|
-| `test_regional_source_priority.py` | Regional source order (Canada box / North America / rest of world, with and without `include=aimodels`) for currently and hourly, following `docs/forecast-source-selection/README.md`; Canadian UV and ozone ahead of GFS (#734); ECMWF ahead of DWD in North America; AIGEFS first for precipitation probability in AI mode. |
+| `test_regional_source_priority.py` | Regional source order (Canada / North America / rest of world, with and without `include=aimodels`) for currently and hourly, following `docs/forecast-source-selection/README.md`; Canadian UV and ozone ahead of GFS (#734); ECMWF ahead of DWD in North America; AIGEFS first for precipitation probability in AI mode. |
 | `test_minutely_sources.py` | Minutely fallbacks: no sources gives a dry block; DWD without RR1c falls back to ECMWF; AI models override HRRR-SubH/NBM; Canada uses REPS probability with NBM amounts; AIGEFS precip type comes from temperature. |
 | `test_data_inputs.py` | Short ERA5 series padded to `num_hours` (#624); Canadian model fields stacked in priority with unit handling; Kelvin to Celsius for every model ingested in Kelvin. |
 | `test_dwd_mosmix_hourly.py` | DWD cloud % becomes a fraction, visibility stays in metres, and present-weather codes map to a precip type. |

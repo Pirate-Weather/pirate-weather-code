@@ -169,50 +169,37 @@ def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
 
 
 def clipLog(data, min_val, max_val, name):
+    """Clip data to min_val and max_val, replacing implausible values as missing.
+
+    A value a little out of range (up to 25 % past the limit, plus 2 below the
+    minimum) is model noise and is clamped to the limit. Anything further is bad
+    data: only that value becomes MISSING_DATA and is logged, so one bad hour
+    doesn't blank plausible values beside it.
     """
-    Clip the data between min and max. Log if there is an error
-    """
+    lowest_plausible = min(min_val, min_val * 0.75 - 2)
+    highest_plausible = max(max_val, max_val * 1.25)
 
-    # Print if the clipping is larger than 25 of the min
-    if np.min(data) < (min_val * 0.75) - 2:
-        # Print the data and the index it occurs
-        logger.error("Min clipping required for " + name)
-        logger.error("Min Value: " + str(np.min(data)))
-        if isinstance(data, np.ndarray):
-            logger.error("Min Index: " + str(np.where(data == data.min())))
+    clipped = np.clip(data, min_val, max_val)
+    too_low = np.less(data, lowest_plausible)
+    too_high = np.greater(data, highest_plausible)
 
-        # Replace values below the threshold with MISSING_DATA
-        if np.isscalar(data):
-            if data < min_val:
-                data = MISSING_DATA
-        else:
-            data = np.array(data, dtype=float)
-            data[data < min_val] = MISSING_DATA
+    if not (np.any(too_low) or np.any(too_high)):
+        return clipped
 
-    else:
-        data = np.clip(data, a_min=min_val, a_max=None)
+    if np.any(too_low):
+        logger.error("Min clipping required for %s", name)
+        logger.error("Min Value: %s", np.nanmin(data))
+        logger.error("Min Index: %s", np.where(np.atleast_1d(too_low)))
+    if np.any(too_high):
+        logger.error("Max clipping required for %s", name)
+        logger.error("Max Value: %s", np.nanmax(data))
+        logger.error("Max Index: %s", np.where(np.atleast_1d(too_high)))
 
-    # Same for max
-    if np.max(data) > (max_val * 1.25):
-        logger.error("Max clipping required for " + name)
-        logger.error("Max Value: " + str(np.max(data)))
-
-        # Print the data and the index it occurs
-        if isinstance(data, np.ndarray):
-            logger.error("Max Index: " + str(np.where(data == data.max())))
-
-        # Replace values above the threshold with MISSING_DATA
-        if np.isscalar(data):
-            if data > max_val:
-                data = MISSING_DATA
-        else:
-            data = np.array(data, dtype=float)
-            data[data > max_val] = MISSING_DATA
-
-    else:
-        data = np.clip(data, a_min=None, a_max=max_val)
-
-    return data
+    if np.isscalar(data):
+        return MISSING_DATA
+    clipped = np.array(clipped, dtype=float)
+    clipped[too_low | too_high] = MISSING_DATA
+    return clipped
 
 
 ## Estimate Visibility for ERA5
@@ -424,6 +411,10 @@ def select_daily_precip_type(
     type_map = np.array([PRECIP_IDX["rain"], PRECIP_IDX["snow"], PRECIP_IDX["ice"]])
     dominant_type = type_map[np.argmax(precip_accum, axis=1)]
 
+    # Accumulation only has one ice column, shared by sleet and freezing rain, so the
+    # hourly type (most common on the day) is what tells them apart.
+    hourly_type = maxPchanceDay.copy()
+
     # Only update where not all types are present and some precip exists
     not_all_types = ~all_types
     has_precip = np.max(precip_accum, axis=1) > 0
@@ -432,14 +423,12 @@ def select_daily_precip_type(
     already_mixed = maxPchanceDay == PRECIP_IDX["mixed"]
     update_mask = not_all_types & has_precip & ~already_mixed
     maxPchanceDay[update_mask] = dominant_type[update_mask]
+    maxPchanceDay[
+        (maxPchanceDay == PRECIP_IDX["ice"]) & (hourly_type == PRECIP_IDX["sleet"])
+    ] = PRECIP_IDX["sleet"]
 
-    # For ice accumulation, preserve the distinction between ice (freezing rain)
-    # and sleet (ice pellets) by only overriding if the current type is not already
-    # ice or sleet. This ensures that the hourly-based determination is preserved.
-    # When defaulting is needed (type is not ice/sleet but ice accumulation exists),
-    # we choose ice (freezing rain) as it's generally more common than sleet globally.
     # If significant ice accumulation exists and type is not already ice/sleet,
-    # default to ice (freezing rain)
+    # default to ice (freezing rain), which is more common than sleet globally.
     maxPchanceDay[
         (InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit))
         & (maxPchanceDay != PRECIP_IDX["ice"])

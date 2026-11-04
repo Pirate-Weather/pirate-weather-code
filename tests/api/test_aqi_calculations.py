@@ -9,8 +9,10 @@ import pytest
 
 from API.constants import aqi_const
 from API.constants.aqi_const import (
+    AQ_LEAD_IN_HOURS,
     compute_aqi_array,
     compute_aqi_for_unit_system,
+    compute_aqi_with_lead_in,
     compute_daqi,
 )
 from API.constants.model_const import RAQDPS, SILAM
@@ -349,3 +351,60 @@ def test_fractional_timezone_30min_offset_matches():
     result = prepare_aq_inputs(n, False, silam, request_hours)
 
     np.testing.assert_array_equal(result["pm25"], np.full(n, 10.0))
+
+
+def _rows_from(model, start, hours, **columns):
+    """Hourly store rows from ``start``, like one model's read at a point."""
+    return _zarr_rows(model, start + np.arange(hours) * 3600.0, **columns)
+
+
+def test_aqi_averages_reach_back_before_local_midnight():
+    """The AQ series starts at local midnight, and the averages stop at the start of
+    the array, so a smoky evening was forgotten overnight: just after midnight the
+    NowCast only saw one clean hour. The earlier hours must count, without changing
+    the concentrations reported for the grid or the length of the result.
+    """
+    midnight = 1752019200.0
+    silam_hours = 72
+    silam = _rows_from(SILAM, midnight - 24 * 3600.0, silam_hours, pm25=5.0, co=100.0)
+    # A smoky day before midnight, in the 48 h SILAM keeps
+    silam[:24, SILAM["pm25"]] = 150.0
+    grid = midnight + np.arange(N_HOURS) * 3600.0
+
+    inputs = prepare_aq_inputs(N_HOURS, False, silam, grid)
+    series = {name: inputs[name] for name in ("pm25", "pm10", "o3", "no2", "so2", "co")}
+
+    assert inputs["pm25"][0] == 5.0
+    assert len(inputs["lead_in"]["pm25"]) == AQ_LEAD_IN_HOURS
+
+    with_lead_in = compute_aqi_with_lead_in("us", inputs["lead_in"], **series)
+    without = compute_aqi_with_lead_in("us", None, **series)
+
+    assert len(with_lead_in) == N_HOURS
+    assert with_lead_in[0] > 2 * without[0]
+    # Once the window has passed the smoke, the history makes no difference
+    np.testing.assert_allclose(with_lead_in[23:], without[23:])
+
+
+def test_aqi_lead_in_prefers_raqdps_then_falls_back_to_silam():
+    """RAQDPS keeps no history, so a window crossing its run time must use SILAM
+    before it, per hour, rather than losing those hours. With no earlier data at all
+    the result matches the old behaviour of averaging what there is.
+    """
+    midnight = 1752019200.0
+    grid = midnight + np.arange(N_HOURS) * 3600.0
+    raqdps = _rows_from(RAQDPS, midnight - 3 * 3600.0, N_HOURS, pm25=40.0)
+    silam = _rows_from(SILAM, midnight - 24 * 3600.0, N_HOURS + 24, pm25=8.0)
+
+    lead_in = prepare_aq_inputs(N_HOURS, raqdps, silam, grid)["lead_in"]
+    np.testing.assert_array_equal(lead_in["pm25"][-3:], [40.0, 40.0, 40.0])
+    np.testing.assert_array_equal(lead_in["pm25"][:21], np.full(21, 8.0))
+
+    no_history = _rows_from(SILAM, midnight, N_HOURS, pm25=8.0)
+    inputs = prepare_aq_inputs(N_HOURS, False, no_history, grid)
+    assert np.isnan(inputs["lead_in"]["pm25"]).all()
+    series = {name: inputs[name] for name in ("pm25", "pm10", "o3", "no2", "so2", "co")}
+    np.testing.assert_allclose(
+        compute_aqi_with_lead_in("us", inputs["lead_in"], **series),
+        compute_aqi_with_lead_in("us", None, **series),
+    )

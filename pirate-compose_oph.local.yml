@@ -230,7 +230,9 @@ services:
       ofelia.job-run.dwd-mosmix.schedule: "0 0 * * * *"
       ofelia.job-run.dwd-mosmix.container: "pirate-ingest-dwd-mosmix"
       ofelia.job-run.dwd-mosmix.no-overlap: "true"
-      ofelia.job-run.silam.schedule: "0 0 7 * * *"
+      # FMI posts each 00Z SILAM cycle about 37 h later: near 12:55 UTC the next day, on
+      # some days near 17:50 (21 days to 2026-11-04). A run with nothing new exits in ~3 s.
+      ofelia.job-run.silam.schedule: "0 0 14,19 * * *"
       ofelia.job-run.silam.container: "pirate-ingest-silam"
       ofelia.job-run.silam.no-overlap: "true"
       ofelia.job-run.wmo-alerts.schedule: "0 15 * * * *"

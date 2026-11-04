@@ -31,8 +31,8 @@ The API uses three source-priority regions:
 
 | Region | Definition |
 | --- | --- |
-| Canada box | Latitude 41.7 to 83.0 and longitude -141.0 to -52.0. This is a coverage box, not a political-border lookup. |
-| North America outside the Canada box | North American coverage outside that box. |
+| Canada | Inside Canada, including its waters: the point's time zone is one of Canada's (`CANADA_TIMEZONES` in `API/utils/geo.py`), so the choice follows the border. Open water takes the country of the nearest city. |
+| North America outside Canada | North American coverage outside that box. |
 | Global / standard | All other locations. |
 
 Models without coverage at the requested point are omitted before priorities are
@@ -98,7 +98,7 @@ ensemble-precipitation fields rather than temperature fields.
 
 | Region | Priority |
 | --- | --- |
-| Canada box | HRDPS → REPS → GDPS → GEPS → NBM → HRRR → ECMWF IFS → GFS → GEFS → DWD MOSMIX → ERA5 |
+| Canada | HRDPS → REPS → GDPS → GEPS → NBM → HRRR → ECMWF IFS → GFS → GEFS → DWD MOSMIX → ERA5 |
 | North America outside Canada | NBM → HRRR → ECMWF IFS → GFS → GEFS → GDPS → GEPS → DWD MOSMIX → ERA5 → HRDPS → REPS |
 | Global / standard | NBM → HRRR → DWD MOSMIX → ECMWF IFS → GFS → GEFS → GDPS → GEPS → ERA5 → HRDPS → REPS |
 
@@ -115,7 +115,7 @@ requested field.
 
 | Region | Priority for compatible surface elements |
 | --- | --- |
-| Canada box | RTMA-RU → HRRR SubH → HRDPS → GDPS → NBM → HRRR → ECMWF IFS → GFS → DWD MOSMIX → ERA5 |
+| Canada | RTMA-RU → HRRR SubH → HRDPS → GDPS → NBM → HRRR → ECMWF IFS → GFS → DWD MOSMIX → ERA5 |
 | North America outside Canada | RTMA-RU → HRRR SubH → NBM → HRRR → ECMWF IFS → GFS → GDPS → DWD MOSMIX → ERA5 → HRDPS |
 | Global / standard | RTMA-RU → HRRR SubH → NBM → HRRR → DWD MOSMIX → ECMWF IFS → GFS → GDPS → ERA5 → HRDPS |
 
@@ -155,7 +155,7 @@ This precedence is deliberate: AI mode overrides HRRR SubH and NBM for
 minutely intensity and type as well as probability and error. CMC sources are
 not eligible in AI mode.
 
-### Conventional mode in the Canada box
+### Conventional mode in Canada
 
 | Element | Priority |
 | --- | --- |
@@ -169,7 +169,7 @@ enabled. NBM is the next conventional intensity/type source. REPS is the
 primary Canadian probability and error source; HRDPS and GDPS do not provide a
 precipitation-probability field.
 
-### Conventional mode outside the Canada box
+### Conventional mode outside Canada
 
 | Element | North America | Global / standard |
 | --- | --- | --- |
@@ -178,7 +178,7 @@ precipitation-probability field.
 | Precipitation probability | NBM → ECMWF IFS → GEFS → GEPS → ERA5 | NBM → ECMWF IFS → GEFS → GEPS → ERA5 |
 | Precipitation intensity error | ECMWF IFS → GEFS → GEPS | ECMWF IFS → GEFS → GEPS |
 
-GDPS and GEPS are deliberately late minutely fallbacks outside the Canada box,
+GDPS and GEPS are deliberately late minutely fallbacks outside Canada,
 after the GFS/GEFS family.
 
 ## Hourly, daily, and day/night precipitation
@@ -187,7 +187,7 @@ Hourly precipitation uses separate source stacks because intensity,
 probability, type, accumulation, and error have different source coverage.
 Daily and day/night outputs aggregate these hourly results.
 
-### Canada box, conventional mode
+### Canada, conventional mode
 
 | Element | Effective priority |
 | --- | --- |
@@ -197,7 +197,7 @@ Daily and day/night outputs aggregate these hourly results.
 | Precipitation accumulation | HRDPS → REPS → GDPS → GEPS → NBM → HRRR → ECMWF IFS → GFS → GEFS → DWD MOSMIX → ERA5 |
 | Precipitation error | ECMWF IFS → GEFS → GEPS → REPS |
 
-### Outside the Canada box, conventional mode
+### Outside the Canada, conventional mode
 
 For North America, NBM and HRRR remain ahead of ECMWF IFS, GFS/GEFS, GDPS/GEPS,
 and global fallbacks. For global locations, DWD MOSMIX is considered before
