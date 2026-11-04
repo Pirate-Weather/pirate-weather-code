@@ -105,24 +105,6 @@ resolution near 1e5 Pa) differ. Every ingest using the helper (10 models) then s
 being bit-identical to its previous output, so do it on its own, not alongside a
 change that needs an old-vs-new bit comparison.
 
-### Daily summaries: precipitation periods ignore the chance of precipitation
-`API/PirateDailyText.py` (`_add_hour_to_period` / the period loop in
-`calculate_day_text`): a period counts as having precipitation from its
-accumulation alone, and the window's chance of precipitation is the highest hourly
-chance in any of those periods. So when a model (often the Canadian models) has
-light accumulation from 11am to 3am but the chance is only above the 25% threshold
-from 1am to 3am, the whole run is described with the 1-3am chance: "Light rain
-throughout the day." instead of "Light rain overnight."
-
-Options:
-- only count hours at or above `PRECIP_PROB_THRESHOLD` towards a period's
-  precipitation, keeping the current behaviour (a "possible ..." summary) when no
-  hour reaches it;
-- require each precipitation period's own highest chance to reach the threshold;
-- weight each hour's accumulation by its chance before comparing to the thresholds.
-
-Check the effect on the day/night and next 24 hour summaries too, which share the code.
-
 ### Switch from pytz to `zoneinfo`
 pytz still gets tz database updates, but its `localize()` / `normalize()` model
 predates the standard library's and is easy to misuse: the "Local midnight is off
