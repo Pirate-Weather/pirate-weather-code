@@ -46,6 +46,10 @@ BUILDER = REPO_ROOT / "scripts" / "build_era5_point_test_store.py"
 # times is reported rather than retried forever.
 ATTEMPTS = 3
 RETRY_DELAY_S = 60
+# A week takes ~2 min. In the 2026-11-04 backfill a Google read stalled for
+# minutes and one week hung on a single request with no end, so an attempt that
+# runs past this is killed and counts as a failed attempt.
+WEEK_TIMEOUT_S = 30 * 60
 
 
 def week_starts(start: dt.date, end: dt.date) -> list[dt.date]:
@@ -74,29 +78,37 @@ def build_week(
         with open(log_path, "a") as log:
             log.write(f"=== attempt {attempt} {dt.datetime.now(dt.UTC).isoformat()}\n")
             log.flush()
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(BUILDER),
-                    "--out",
-                    str(out),
-                    "--week-start",
-                    week.isoformat(),
-                    "--upload",
-                    upload,
-                ],
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                check=False,
-            )
+            try:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(BUILDER),
+                        "--out",
+                        str(out),
+                        "--week-start",
+                        week.isoformat(),
+                        "--upload",
+                        upload,
+                    ],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                    timeout=WEEK_TIMEOUT_S,
+                )
+                outcome = f"exit {result.returncode}"
+                succeeded = result.returncode == 0
+            except subprocess.TimeoutExpired:
+                # subprocess.run has already killed the builder.
+                outcome = f"timed out after {WEEK_TIMEOUT_S} s"
+                succeeded = False
         shutil.rmtree(out, ignore_errors=True)
-        if result.returncode == 0:
+        if succeeded:
             return week, True, time.perf_counter() - t0
         logger.warning(
-            "Week %s attempt %d failed (exit %d); see %s",
+            "Week %s attempt %d failed (%s); see %s",
             week,
             attempt,
-            result.returncode,
+            outcome,
             log_path,
         )
         if attempt < ATTEMPTS:
