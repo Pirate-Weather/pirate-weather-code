@@ -295,14 +295,6 @@ happened for ~5 min (no CPU, no network) before "Starting final URMA merge from
 283 hourly stores" (4,275 s), then 2.5 min opening the stores one at a time. Find
 the wait; the store opens fall under "Open the history stores in parallel".
 
-### SILAM: daily run checks before FMI posts the new cycle
-SILAM runs once a day at 07:00 UTC (the production schedule), but FMI posts the
-00Z file late. On the local stack, the 07:00 run on 2026-10-31 found only the
-2026-10-29 00Z file in the THREDDS catalog and exited "No Update". The
-2026-10-30 00Z file had appeared by 14:36 UTC, so the API serves SILAM about a
-day behind. Find when FMI usually posts each cycle and move the run after it, or
-add a second daily run (e.g. 19:00 UTC); "No Update" exits cost ~3 s.
-
 ### Canadian models: parallel GRIB conversion
 HRDPS, GDPS, REPS and GEPS download one variable at a time (~6 MB/s from the MSC
 datamart), then convert on a single core: GDPS spends 12.6 min downloading and
@@ -378,6 +370,11 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### SILAM runs after FMI posts each cycle (2026-11-04)
+The 07:00 UTC run always missed that morning's file, leaving the API a day behind. Over the
+last 21 cycles, the file timestamps show FMI posting 00Z near 12:55 UTC the next day (run +
+37 h), twice near 17:50. It now runs at 14:00 and 19:00 UTC, in both compose files.
 
 ### AQI averages reach back before local midnight (2026-11-04)
 The AQI series started at local midnight, so hour *h* of today averaged only *h* + 1 hours

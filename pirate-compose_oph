@@ -126,7 +126,9 @@ services:
       ofelia.job-run.raqdps-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/RAQDPS", "forecast_path=/data/Prod/RAQDPS", "historic_path=/data/Hist/RAQDPS", "save_type=Download"]'
       ofelia.job-run.raqdps-ingest.command: "API/RAQDPS_Local_Ingest.py" 
       ofelia.job-run.raqdps-ingest.no-overlap: "true"
-      ofelia.job-run.silam-ingest.schedule: "0 0 7 * * *"
+      # FMI posts each 00Z SILAM cycle about 37 h later: near 12:55 UTC the next day, on
+      # some days near 17:50 (21 days to 2026-11-04). A run with nothing new exits in ~3 s.
+      ofelia.job-run.silam-ingest.schedule: "0 0 14,19 * * *"
       ofelia.job-run.silam-ingest.image: "pirateingest:latest" 
       ofelia.job-run.silam-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
       ofelia.job-run.silam-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/SILAM", "forecast_path=/data/Prod/SILAM", "historic_path=/data/Hist/SILAM", "save_type=Download"]'
