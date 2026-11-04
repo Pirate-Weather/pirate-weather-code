@@ -33,12 +33,6 @@ system's default. Either add Taiwan AQI support or fix the comment.
 (`README.md`, "Option 2") sets `useETOPO=FALSE`. ETOPO is loaded anyway.
 Fix the README (or accept both names).
 
-### `is_in_north_america` exclusion branch is dead; western Aleutians excluded
-`API/utils/geo.py:295-303`: the outer box requires `lon >= -168`, so the inner
-`lon_normalized < -170` "US Minor Outlying Islands" branch can never run. Locations
-west of -168° (western Aleutians) get rest-of-world source priority. Decide the
-intended boundary and simplify.
-
 ### One implausible value blanks every above-max value in `clipLog`
 `API/api_utils.py:142-156`: if any value exceeds 125% of the max, *every* value
 above the max becomes `MISSING_DATA`, including plausible ones that would otherwise
@@ -77,21 +71,6 @@ the earlier hours fall back to SILAM per hour (`_prefer`), so a window that cros
 the RAQDPS run time mixes two models.
 
 ## Improvements
-
-### Improve the Canada vs US model selection
-Canadian-first source priority (HRDPS → REPS → GDPS → GEPS ahead of NBM/HRRR) is
-chosen by `is_in_canada` (`API/utils/geo.py`), a bounding box (lat 41.7-83,
-lon -141 to -52) rather than the border. Large parts of the northern US fall inside
-it and get Canadian-first priority instead of NBM/HRRR, e.g. Seattle, Chicago,
-Detroit, Boston and Minneapolis. Every US priority test uses New York (40.7°N),
-just south of the box, so this is untested. Options:
-- a real border check, such as a precomputed country mask on the model grid;
-- choosing by which model domain covers the point best.
-
-Keep it cheap on the read path: no per-request polygon tests against large
-geometries. Update `docs/forecast-source-selection/README.md` and
-`tests/api/test_regional_source_priority.py` with points on both sides of the border.
-Related: the `is_in_north_america` boundary issue above.
 
 ### `interp_time_take_blend`: blend in the data's dtype
 `API/ingest_utils.py` (`interp_time_take_blend`): the blend weights `w` are float64,
@@ -428,6 +407,16 @@ some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("
 implausible value blanks every above-max value").
 
 ## Done
+
+### Canada vs US source selection follows the border (2026-11-04)
+`is_in_canada` was a lat/lon box holding much of the northern US, so Seattle, Chicago,
+Detroit, Boston and Minneapolis took Canadian models first. It now uses the point's time
+zone (`CANADA_TIMEZONES`), whose polygons follow the border: right where a nearest-city
+lookup is wrong (Windsor, Northwest Angle, Alert) and already looked up on every request
+(about 2 us; the extra TimezoneFinder was avoided by sharing one). Open water, in `Etc/`
+zones, takes the nearest city's country (about 20 us, cached per point). The box still
+skips both elsewhere. `is_in_north_america` now includes the western Aleutians, out to
+Attu across the antimeridian, by their zones, and still excludes Chukotka and Midway.
 
 ### ECMWF IFS 0.1° open data, with humidity stored at ingest
 [pirateweather#697](https://github.com/Pirate-Weather/pirateweather/issues/697). The IFS
