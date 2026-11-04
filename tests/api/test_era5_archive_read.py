@@ -4,6 +4,7 @@ import datetime
 
 import numpy as np
 import xarray as xr
+import zarr
 
 from API.constants.model_const import (
     ERA5,
@@ -16,7 +17,6 @@ from API.constants.model_const import (
     ERA5_ARCHIVE_STORE_DIR,
     ERA5_SOURCE_VARS,
 )
-from API.ingest_utils import encode_era5_archive_field, write_era5_archive_zarr
 from API.io.ZarrHelpers import _era5_archive_cell, init_ERA5_archive
 from API.request.grid_indexing import _load_era5_slice
 
@@ -61,12 +61,33 @@ def _google_fields(rng, times):
     }
 
 
+def _encode(name, values):
+    """The archive's int16 encoding, written out from ERA5_ARCHIVE_ENCODING.
+
+    The API test environment has no ingest dependencies (API.ingest_utils needs
+    cartopy), so this encodes from the published contract rather than calling the
+    builder's encoder; tests/ingest/test_era5_archive.py pins that encoder to the
+    same decoder.
+    """
+    kind, step_or_scale, offset = ERA5_ARCHIVE_ENCODING[name]
+    missing = np.isnan(values)
+    if kind == "lin":
+        scaled = (values - offset) / step_or_scale
+    else:
+        scaled = np.sqrt(np.clip(values, 0, None)) * step_or_scale
+    encoded = np.rint(np.where(missing, 0, scaled)).astype(np.int16)
+    encoded[missing] = ERA5_ARCHIVE_FILL
+    if name in ERA5_ARCHIVE_DELTA_VARS:
+        encoded[1:] = np.diff(encoded, axis=0)
+    return encoded
+
+
 def _write_week(root, week_start, google, hour0):
-    """Write one archive week from the Google-unit fields, as the builder does."""
+    """Write one archive week from the Google-unit fields in the builder's layout:
+    int16 (variable, time, y, x), every variable and hour per chunk, sharded,
+    Blosc zstd bitshuffle, with the encoding in the attributes."""
     variables = sorted(ERA5_ARCHIVE, key=ERA5_ARCHIVE.get)
-    stacked = np.full(
-        (len(variables), WEEK_HOURS, N_LAT, N_LON), ERA5_ARCHIVE_FILL, np.int16
-    )
+    stacked = np.empty((len(variables), WEEK_HOURS, N_LAT, N_LON), np.int16)
     week = slice(hour0, hour0 + WEEK_HOURS)
     for i, name in enumerate(variables):
         if name == "precipitation_probability":
@@ -74,23 +95,28 @@ def _write_week(root, week_start, google, hour0):
         else:
             sources, factor = ERA5_ARCHIVE_SOURCES[name]
             values = sum(google[source][week] for source in sources) * factor
-        stacked[i] = encode_era5_archive_field(name, values.astype(np.float32))
+        stacked[i] = _encode(name, values.astype(np.float32))
     times = (week_start + np.arange(WEEK_HOURS).astype("timedelta64[h]")).astype(
         "datetime64[s]"
     )
     path = root / ERA5_ARCHIVE_STORE_DIR / f"{week_start.astype('datetime64[D]')}.zarr"
-    write_era5_archive_zarr(
-        stacked,
-        str(path),
-        5,
-        10,
-        2,
-        {
+    array = zarr.create_array(
+        store=zarr.storage.LocalStore(str(path)),
+        shape=stacked.shape,
+        chunks=(len(variables), WEEK_HOURS, 5, 5),
+        shards=(len(variables), WEEK_HOURS, 10, 10),
+        dtype="int16",
+        fill_value=ERA5_ARCHIVE_FILL,
+        compressors=zarr.codecs.BloscCodec(
+            cname="zstd", clevel=3, shuffle="bitshuffle", typesize=2
+        ),
+        attributes={
             "time": times.astype(np.int64).tolist(),
             "variables": variables,
             "encoding": {name: list(ERA5_ARCHIVE_ENCODING[name]) for name in variables},
             "delta_variables": list(ERA5_ARCHIVE_DELTA_VARS),
             "nan_variables": list(ERA5_ARCHIVE_NAN_VARS),
+            "fill_value": ERA5_ARCHIVE_FILL,
             "latitude_first": float(LATS[0]),
             "longitude_first": float(LONS[0]),
             "grid_step": STEP,
@@ -98,6 +124,7 @@ def _write_week(root, week_start, google, hour0):
             "n_longitude": N_LON,
         },
     )
+    array[:] = stacked
 
 
 def _era5_data(google, times, archive):
