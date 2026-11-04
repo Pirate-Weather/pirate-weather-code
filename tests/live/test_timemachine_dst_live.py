@@ -9,10 +9,6 @@ NYC_LAT = 40.7128
 NYC_LON = -74.0060
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="TODO.md: local midnight is off by an hour on DST transition days",
-)
 @pytest.mark.parametrize(
     ("date", "local_day_hours"),
     [

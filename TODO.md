@@ -6,88 +6,12 @@ that would have caught it, then remove the entry.
 
 ## Bugs
 
-### Local midnight is off by an hour on DST transition days
-`API/request/preprocess.py:793`: `base_day = base_time.replace(hour=0, ...)` keeps the
-pytz UTC offset in effect at the *request* time rather than at midnight (the line
-above builds `base_hour` correctly with `pytz_tz.localize`). On a DST change day the
-local day therefore starts an hour early or late: a New York time machine request for
-2024-03-10 starts at 23:00 EST the previous evening, and 2024-11-03 starts at 01:00
-EDT, and both return 24 hours instead of 23 / 25. `base_day` comes from the shared
-request preprocessing, so forecast day boundaries on DST days are likely affected too.
-Fix with `pytz_tz.localize(datetime(base_time.year, base_time.month, base_time.day))`.
-Regression test ready: `tests/live/test_timemachine_dst_live.py` (currently xfail).
-
-### `exclude=aigfs` / `exclude=aigefs` also exclude GFS / GEFS
-`API/request/preprocess.py:445-446` uses substring checks (`"gfs" in exclude_params`),
-so `exclude=aigfs` also sets `ex_gfs=1` and `exclude=aigefs` also sets `ex_gefs=1`.
-Excluding an AI model silently drops its conventional counterpart. The model flags
-should match whole comma-separated tokens.
-
 ## Improvements
-
-### `interp_time_take_blend`: blend in the data's dtype
-`API/ingest_utils.py` (`interp_time_take_blend`): the blend weights `w` are float64,
-so `(1 - w) * y0 + w * y1` promotes every float32 value to float64 (double the
-temporary memory) and casts back afterwards. Casting `w` to the array's dtype made a
-GDPS-sized block (21 variables, 136 -> 240 hours, 200 x 200 points) 2.3x faster
-(1.00 s -> 0.43 s, single thread); that is already faster than a hand-written numpy
-loop. Values change only by float32 rounding: after the store's 5-decimal rounding
-about 8% of temperatures (max 3e-5 K) and 14% of pressures (max 0.016 Pa, the float32
-resolution near 1e5 Pa) differ. Every ingest using the helper (10 models) then stops
-being bit-identical to its previous output, so do it on its own, not alongside a
-change that needs an old-vs-new bit comparison.
-
-### Switch from pytz to `zoneinfo`
-pytz still gets tz database updates, but its `localize()` / `normalize()` model
-predates the standard library's and is easy to misuse: the "Local midnight is off
-by an hour on DST transition days" bug above is a pytz `replace()` on an aware
-datetime, which `zoneinfo` gets right. `zoneinfo` is also faster (200k
-localize-and-convert calls: 0.16 s against 1.5 s), though that is negligible next
-to the store reads. Used in `API/alerts.py`, `API/hourly/builder.py`,
-`API/processing/utils.py`, `API/request/preprocess.py`, `API/responseLocal.py`,
-`API/utils/geo.py`, `API/utils/solar.py`, `API/utils/time_indexing.py`,
-`dst_test.py` and two tests. timezonefinder stays: it maps a point to a zone name,
-which `zoneinfo` cannot do.
-
-Things to watch:
-- **Ambiguous times** (the repeated hour when clocks fall back): pytz `localize()`
-  defaults to standard time (01:30 on 2026-11-01 in New York is -05:00), while
-  `zoneinfo` takes the first occurrence (-04:00) unless `fold=1` is set. Decide
-  this wherever a local wall-clock time is built and converted to UTC.
-- **Nonexistent times** (the skipped hour when clocks spring forward): neither
-  library raises, but the offsets they pick differ. The hour and day arrays only
-  use whole hours and midnights, so this mostly affects test fixtures.
-- **API changes:** `tz.localize(dt)` becomes `dt.replace(tzinfo=tz)`, `pytz.utc`
-  becomes `datetime.UTC`, and `.normalize()` is no longer needed. The
-  `timezone_localizer` argument passed to `API/hourly/builder.py` and
-  `API/utils/time_indexing.py` needs reworking.
-- **tz data source:** `zoneinfo` reads the OS tz database, which slim Docker images
-  often lack. Add `tzdata` to `Docker/requirements-api.txt` in place of the pytz pin
-  so updates stay a pinned dependency.
-- **Tests:** port `tests/api/test_dst_time_indexing.py` and
-  `tests/api/test_polar_daynight_logic.py`, and first add regression tests for
-  DST-day midnight and the fall-back hour, so any output change on transition
-  days is deliberate. The production comparison won't show it unless it runs on
-  a transition day.
-
-Fix in the same change:
-- `get_offset` (`API/utils/geo.py`) localizes `utc_time`'s wall-clock time as if
-  it were local, so the reported `offset` can be an hour off for a few hours
-  around each DST transition. With `zoneinfo`:
-  `utc_time.replace(tzinfo=datetime.UTC).astimezone(tz).utcoffset()`.
-- `API/request/preprocess.py:681` calls `tf.timezone_at()` again with the same
-  point `get_offset()` just looked up; reuse the zone it returns to save one
-  point-in-polygon lookup per request.
 
 ## v3 goals
 
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done
 there (forecast/historic split, test refactor, ingest standardization) are not listed.
-
-### Validate wind direction in the regional models
-As done for HRRR, which rotates grid-relative winds with
-`earth_relative_wind_components` (`API/ingest_utils.py`). Check whether HRDPS
-`WIND`/`WDIR` on its rotated lat/lon grid are already earth-relative.
 
 ### LibreWXR for maps, radar coverage and minutely precipitation
 Plan in [pirateweather discussion #414](https://github.com/Pirate-Weather/pirateweather/discussions/414#discussioncomment-18934138):
@@ -399,6 +323,81 @@ lookup is wrong (Windsor, Northwest Angle, Alert) and already looked up on every
 zones, takes the nearest city's country (about 20 us, cached per point). The box still
 skips both elsewhere. `is_in_north_america` now includes the western Aleutians, out to
 Attu across the antimeridian, by their zones, and still excludes Chukotka and Midway.
+### `pytz` replaced with `zoneinfo` (2026-11-04)
+`tzdata` replaces the `pytz` pin, and alone loads all 444 zones. Two behaviours to remember:
+two times in one `ZoneInfo` subtract by wall clock (so `baseTimeOffset` uses timestamps), and
+adding days moves the wall clock. Across 10,617 cases at every 2024-2026 transition in 30
+zones, the time grids and day buckets are unchanged except in two places, both now correct:
+- **Lord Howe's 30 minute DST start:** the current row was an hour behind for one hour.
+- **`offset` in negative-DST zones (Dublin, Casablanca):** 6 cases matched the true offset.
+
+Still open, and the same as before: `offset` reads UTC as local time, so it can be an hour off
+around a change (about 600 of those cases), and Lord Howe's current row can miss the current
+time on its other transition days (63 cases).
+
+### `interp_time_take_blend` blends in the data's dtype (2026-11-04)
+float64 weights promoted every float32 value to float64 and cast back. Casting the weights
+took a GDPS-sized block with random values from 1.99 s to 1.37 s on one thread (the earlier
+measurement on a real-shaped block was 1.00 s to 0.43 s). Values change by float32 rounding
+only (at most 3e-5 K and 0.008 Pa), so ingests using the helper stop being bit-identical to
+their previous output.
+
+### Summary and source decisions (2026-11-04)
+- **Dry weeks mention notable conditions.** A condition on at least two days replaces
+  "No precipitation", ranked as in the daily summary (whole window, then earliest start,
+  then visibility ahead of wind) and read from the days' summaries, because every Dark
+  Sky visibility icon is `fog`. Cairo: "Misty today through Friday, with highs ...". The
+  week keeps one condition, and the icon follows it.
+- **Today's summary covers the rest of the day.** `calculate_day_text(partial_day=True)`
+  starts at the current hour, and a condition filling it lasts "for the rest of the
+  day" (`for-rest-of-day`, new in pirateweather-translations 2.1.0). Today's icon comes
+  from the same call, so it follows too, and today can now join a rainy run in the weekly
+  text. Half-day summaries still cover their whole window.
+- **GEPS and REPS use mixed** when several channels are strong. The accumulation split
+  and the daily text only knew the four types, so these hours count as ice accumulation
+  (as they did when labelled sleet) and read as mixed. The minutely columns have no mixed
+  category, so they stay sleet there, and an "expected" sentence still says sleet.
+- **ECMWF feeds hourly humidity**, in its usual place ahead of GFS. Only seen in the
+  offline test so far: the local ECMWF store predates its humidity column.
+
+### DST-day midnight and overlapping model exclusions (2026-11-04)
+`base_day` kept the UTC offset in force at request time, so after the clocks changed
+the local day started an hour off (New York 2024-03-10 at 23:00 the evening before). It
+now localizes midnight itself, which matches `day_array_grib`. Time machine `days`
+requests also return the day's real hours; against ERA5, New York returns 23 hours on
+2024-03-10 and 25 on 2024-11-03, and an explicit `hours=24` stays 24. Also fixed:
+- **Clocks changing at midnight:** `localize_day_start` takes the first midnight where it
+  happens twice (Havana, which lost its first hour) and the moment of the jump where it
+  never happens (Beirut).
+- **The repeated hour:** `base_hour` keeps the current UTC offset, so the first 01:30 of
+  a fall-back day no longer starts the forecast an hour ahead.
+- **Single-day time machine dailies** counted the grid rows past the end of the day:
+  next midnight on a normal day, so lows and gusts could land on the next day. This
+  changes daily values on every such request (New York 2024-06-15: wind 3.33 -> 3.30,
+  precipIntensity 0.1153 -> 0.1201), and leaves the hourly block unchanged.
+
+`exclude=aigfs` / `aigefs` no longer drop GFS / GEFS. Only those two flags moved to
+whole tokens: the others have no overlap, and source names such as `hrrr_0-18` still
+exclude HRRR through the substring check.
+
+### Wind direction checked across the models (2026-11-04)
+Checked against real GRIBs (2026-11-04 12z/18z) and through the API per model. HRDPS
+`WDIR` is earth-relative even though its GRIB flag says grid-relative (median 0.08 deg
+from rotated U/V, 24 deg from raw U/V), so it must not be rotated. GDPS, NBM, HRRR and
+RRFS were right. Three bugs fixed:
+- **RTMA, RTMA-RU, URMA were effectively unrotated.** `earth_relative_wind_components`
+  read Herbie's index x/y as metres, so every point used the convergence at 25 N, 95 W:
+  median 7 deg off, up to 21 deg, with correct speeds. It now uses the closed-form
+  Lambert rotation: a real RTMA-RU ingest's store is 0.04 deg (median) from wgrib2's
+  `-new_grid_winds earth`. Published RTMA and URMA history stores keep the old winds
+  until they age out or are rebuilt.
+- **Daily `windBearing` was an arithmetic mean**, up to 177 deg off when winds sat either
+  side of north. Now a circular mean of unit vectors (57 us per request). Against the
+  same commit and stores across 16 locations, it is the only field that changed.
+- **NBM and GDPS 3-hourly leads, and HRDPS/GDPS `currently`, blended direction through
+  south** (340, 227, 114, 0). Both now take the shorter arc, which leaves directions that
+  do not cross north unchanged but for float rounding (3e-5 deg). Not yet run through a
+  full NBM or GDPS ingest; the fix reaches their stores at their next cycles.
 
 ### ECMWF IFS 0.1° open data, with humidity stored at ingest
 [pirateweather#697](https://github.com/Pirate-Weather/pirateweather/issues/697). The IFS
@@ -559,44 +558,3 @@ tables. Flagged from memory during the test review, not checked against the offi
 documents. `tests/api/test_aqi_calculations.py` only pins values where both readings
 agree. Comment-only issues in the same file: the EPA O3/CO tables are labelled µg/m³
 but are in ppb, and the module docstring says "three AQI systems" (there are eleven).
-
-## Needs a decision
-
-### ECMWF in the hourly humidity stack
-The hourly humidity stack (`prepare_data_inputs` in `API/data_inputs.py`) leaves ECMWF
-out, while the current-conditions block uses it. Now that the store has a humidity
-column, decide whether it should feed hourly humidity too; that changes output for
-locations where ECMWF is the top humidity source.
-
-### GEPS/REPS ensemble precip type: sleet or mixed?
-`API/api_utils.py:541` (`map_ensemble_precip_rates_to_ptype`): the docstring says
-"if more than one channel exceeds the threshold we fall back to mixed precipitation",
-but the code assigns `PRECIP_IDX["sleet"]` (`api_utils.py:606-607`). One of them is wrong.
-
-### Weekly summary: what to say about a dry week
-A week without precipitation always reads "No precipitation throughout the week"
-(plus the temperature trend). Options:
-- mention notable non-precipitation conditions when they occur on at least two days,
-  from the daily icons: fog, smoke, haze, or wind ("Fog Monday through Wednesday,
-  with highs ..."), keeping "no precipitation" otherwise. The day phrasing
-  (`_day_run_text`, "over-weekend") and condition keys already exist, so no new
-  translation keys are needed;
-- replace "no precipitation" with the week's cloud cover ("Partly cloudy throughout
-  the week"). A week-long average of cloud cover is rarely informative and loses the
-  most useful fact about the week, so the first option is the suggested one.
-
-### Daily summary for the current day: past hours
-For today (and the current day/night half), the summary still covers 6am onwards.
-Past hours have their precipitation and chance of precipitation zeroed
-(`API/hourly/block.py`, before `int(baseTimeOffset)`), but fog, cloud and wind are
-kept. So in the evening rain that has fallen all day reads "Rain starting in the
-evening", while morning fog is still in the afternoon's summary. Options:
-- start today's window at the current hour (`build_daily_section` would need the
-  current hour, e.g. `hour_array_grib[int(baseTimeOffset)]`), so past periods are
-  dropped. As past precipitation is unknown, avoid "throughout the day" for a
-  shortened window and list the remaining periods instead ("Rain in the evening and
-  overnight"); the existing time phrases already allow this. Apply the same to the
-  current day/night half, keeping its full-window summary once it is entirely past;
-- keep the full day but use the observed/analysed precipitation for past hours
-  (e.g. the RTMA/URMA history) instead of zeros, which keeps "throughout the day"
-  accurate but adds reads to the request path.

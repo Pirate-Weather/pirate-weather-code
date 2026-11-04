@@ -571,6 +571,10 @@ def expected_nan_aware_value(
         return left_value
 
     weight = (hour - left_hour) / (right_hour - left_hour)
+    # The ingest blends wind direction the short way round the circle
+    if spec.zarr_name == "WDIR_10maboveground":
+        shortest_arc = (right_value - left_value + 180.0) % 360.0 - 180.0
+        return float((left_value + weight * shortest_arc) % 360.0)
     return float((1 - weight) * left_value + weight * right_value)
 
 

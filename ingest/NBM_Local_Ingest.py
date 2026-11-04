@@ -602,6 +602,8 @@ def main() -> None:
         hourly_timesUnix=hourly_timesUnix,
         dtype="float32",
         fill_value=np.nan,
+        # Leads past the hourly range are 3-hourly; WDIR must not blend through south
+        direction_vars=zarr_vars.index("WDIR_10maboveground"),
     )
     daskVarArrayStackDiskInterpPad = pad_to_chunk_size(
         daskVarArrayStackDiskInterp, final_chunk

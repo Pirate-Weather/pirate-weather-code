@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from API.constants.api_const import PRECIP_IDX
-from API.constants.model_const import ERA5, GDPS, GEPS, GFS, HRDPS, REPS, URMA
+from API.constants.model_const import ECMWF, ERA5, GDPS, GEPS, GFS, HRDPS, REPS, URMA
 from API.data_inputs import prepare_data_inputs
 
 # Importing responseLocal only touches the network when STAGE is TESTING/TM_TESTING.
@@ -255,3 +255,33 @@ def test_convert_data_to_celsius_converts_model(argument, model_idx):
 
     np.testing.assert_allclose(data[:, model_idx["temp"]], 15.0)
     np.testing.assert_allclose(data[:, model_idx["dew"]], 10.0)
+
+
+def test_hourly_humidity_uses_ecmwf_ahead_of_gfs():
+    """The IFS store has a humidity column, but the hourly stack left ECMWF out, so
+    hourly humidity came from GFS beside an ECMWF temperature and dew point. It must
+    take ECMWF's place in the usual order, in percent like the other sources.
+    """
+    num_hours = 3
+    ecmwf_merged = np.zeros((num_hours, max(ECMWF.values()) + 1))
+    ecmwf_merged[:, ECMWF["humidity"]] = 61.0
+    gfs_merged = np.zeros((num_hours, max(GFS.values()) + 1))
+    gfs_merged[:, GFS["humidity"]] = 42.0
+
+    inputs = prepare_data_inputs(
+        source_list=["ecmwf_ifs", "gfs"],
+        nbm_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=None,
+        ecmwf_merged=ecmwf_merged,
+        gefs_merged=None,
+        gfs_merged=gfs_merged,
+        era5_merged=None,
+        extra_vars=[],
+        num_hours=num_hours,
+        lat=-33.9,
+        lon=151.2,
+    )
+
+    assert inputs["humidity_inputs"][:, 0].tolist() == [61.0] * num_hours
+    assert 42.0 in inputs["humidity_inputs"][0]

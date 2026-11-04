@@ -8,6 +8,8 @@ import math
 
 import reverse_geocode
 from timezonefinder import TimezoneFinder
+from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from API.constants.api_const import (
     DEFAULT_ROUNDING_INTERVAL,
@@ -105,18 +107,20 @@ def get_offset(*, lat, lng, utc_time, tf: TimezoneFinder):
         tf (TimezoneFinder): TimezoneFinder instance.
 
     Returns:
-        tuple: (offset_minutes (float), tz_target (pytz.timezone))
+        tuple: (offset_minutes (float), tz_target (ZoneInfo))
             offset_minutes: The time zone offset from UTC in minutes.
-            tz_target: The pytz timezone object for the location.
+            tz_target: The ZoneInfo of the location.
     """
 
-    from pytz import timezone, utc
-
     today = utc_time
-    tz_target = timezone(tf.timezone_at(lng=lng, lat=lat))
-    today_target = tz_target.localize(today)
-    today_utc = utc.localize(today)
-    return (today_utc - today_target).total_seconds() / UNIT_CONVERSION_CONST[
+    tz_target = ZoneInfo(tf.timezone_at(lng=lng, lat=lat))
+    # The wall clock is read as local time. Where that time happens twice or never
+    # the two readings differ, and the smaller offset is the standard-time one.
+    offset = min(
+        today.replace(tzinfo=tz_target, fold=0).utcoffset(),
+        today.replace(tzinfo=tz_target, fold=1).utcoffset(),
+    )
+    return offset.total_seconds() / UNIT_CONVERSION_CONST[
         "seconds_to_minutes"
     ], tz_target
 

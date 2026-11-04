@@ -8,7 +8,6 @@ import re
 from typing import Any
 
 import numpy as np
-from pytz import utc
 
 NWS_ALERT_LONS = np.arange(-127, -65, 0.025)
 NWS_ALERT_LATS = np.arange(24, 50, 0.025)
@@ -33,7 +32,7 @@ def build_alerts(
     if time_machine or ex_alerts != 0:
         return []
 
-    now_utc = datetime.datetime.now(datetime.UTC).astimezone(utc)
+    now_utc = datetime.datetime.now(datetime.UTC)
     alerts: list[dict] = []
 
     try:
@@ -223,7 +222,9 @@ def _parse_alert_time(value: str) -> datetime.datetime | None:
     if not value:
         return None
     try:
-        return datetime.datetime.strptime(value, ALERT_TIME_FORMAT).astimezone(utc)
+        return datetime.datetime.strptime(value, ALERT_TIME_FORMAT).astimezone(
+            datetime.UTC
+        )
     except (TypeError, ValueError):
         return None
 

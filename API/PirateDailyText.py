@@ -7,8 +7,9 @@
 #        afternoon  12:00-18:00
 #        evening    18:00-24:00
 #        night      00:00-06:00 (translated as "overnight")
-#      Every summary window starts at 6am or 6pm, so it covers whole periods:
-#        - daily (mode "day"/"daily"): 6am to 6am, morning to night
+#      Summary windows normally start at 6am or 6pm, so they cover whole periods:
+#        - daily (mode "day"/"daily"): 6am to 6am, morning to night. Today's
+#          summary only covers what is left of that window (partial_day=True).
 #        - day/night (half_day=True): 6am-6pm (morning, afternoon) or
 #          6pm-6am (evening, night)
 #        - next 24 hours (mode "hour"): from the current hour, with today-/
@@ -23,6 +24,7 @@
 #      sentence, followed by the expected precipitation amount when it is
 #      significant.
 import datetime
+import functools
 import itertools
 import math
 import statistics
@@ -247,14 +249,14 @@ def _join_with_and(items):
     return joined
 
 
-def _get_time_phrase(period_indices, all_periods):
+def _get_time_phrase(period_indices, all_periods, partial_day=False):
     """
     Describes when a condition happens, given the periods it occurs in.
 
     The periods are split into runs of consecutive periods. Each run is then
     described relative to the start and end of the window:
 
-        whole window                       ["for-day"]
+        whole window                       ["for-day"], or ["for-rest-of-day"]
         run from the start and a run to    ["until-starting-again", first dry, first wet again]
         the end (dry in between)
         only single, separate periods      ["during", P] / ["during", ["and", P1, P2]]
@@ -271,6 +273,9 @@ def _get_time_phrase(period_indices, all_periods):
     Parameters:
     - period_indices (list): Sorted indices of the periods with the condition.
     - all_periods (list): The period names of the window, in order.
+    - partial_day (bool): The window is what is left of today, so a condition
+      filling it lasts "for the rest of the day": the hours before it are not
+      looked at, so it can't be "throughout the day".
 
     Returns:
     - list | None: The time phrase, or None if the condition never happens.
@@ -280,7 +285,7 @@ def _get_time_phrase(period_indices, all_periods):
 
     num_periods = len(all_periods)
     if len(period_indices) == num_periods:
-        return ["for-day"]
+        return ["for-rest-of-day"] if partial_day else ["for-day"]
 
     # Runs of consecutive periods, e.g. [0, 1, 3] -> [[0, 1], [3]]
     runs = [[period_indices[0]]]
@@ -350,6 +355,7 @@ def calculate_period_summary_text(
     overall_cloud_idx=None,
     for_night=False,
     time_phrase=None,
+    partial_day=False,
 ):
     """
     Calculates the textual summary for a specific condition (precip, cloud, wind, vis)
@@ -376,6 +382,7 @@ def calculate_period_summary_text(
       "for-night" instead of the bare condition (night half-days).
     - time_phrase (list, optional): Use this time phrase instead of the one
       for period_indices (e.g. ["during", P] for precipitation tapering off).
+    - partial_day (bool): The window is what is left of today (see _get_time_phrase).
 
     Returns:
     - tuple: A tuple containing:
@@ -403,11 +410,11 @@ def calculate_period_summary_text(
             condition_text = ["and", overall_cloud_text, condition_text]
 
     if time_phrase is None:
-        time_phrase = _get_time_phrase(period_indices, all_periods)
+        time_phrase = _get_time_phrase(period_indices, all_periods, partial_day)
 
     if time_phrase is None:
         summary_text = None
-    elif time_phrase == ["for-day"]:
+    elif time_phrase in (["for-day"], ["for-rest-of-day"]):
         # Half-day summaries describe the whole half-day with the bare condition
         # (#385), except a night half-day can say "throughout the night"
         if for_night:
@@ -415,7 +422,7 @@ def calculate_period_summary_text(
         elif half_day:
             summary_text = condition_text
         else:
-            summary_text = ["for-day", condition_text]
+            summary_text = [time_phrase[0], condition_text]
     else:
         summary_text = _insert_condition_text(time_phrase, condition_text)
 
@@ -823,6 +830,8 @@ def _aggregate_periods(window, zone, mode, min_pop):
     dew = cols.dew
     light_wind = WIND_THRESHOLDS["light"]
     sleet_type = PRECIP_TYPES["sleet"]
+    # A mixed hour's accumulation is stored as ice (see the hourly block)
+    mixed_type = PRECIP_TYPES["mixed"]
     freezing_rain_type = PRECIP_TYPES["ice"]
 
     if min_pop > 0:
@@ -879,7 +888,9 @@ def _aggregate_periods(window, zone, mode, min_pop):
             ice[row] for row in precip_rows if precip_type[row] == freezing_rain_type
         )
         data["sleet_accum"] = _sequential_sum(
-            ice[row] for row in precip_rows if precip_type[row] == sleet_type
+            ice[row]
+            for row in precip_rows
+            if precip_type[row] in (sleet_type, mixed_type)
         )
 
         accum_rows = [
@@ -992,7 +1003,7 @@ def _hour_accum_error(cols, row):
     if hour_type == PRECIP_TYPES["rain"] and cols.liquid[row] > 0.0:
         return "rain", liquid_error_mm
     if (
-        hour_type in (PRECIP_TYPES["sleet"], PRECIP_TYPES["ice"])
+        hour_type in (PRECIP_TYPES["sleet"], PRECIP_TYPES["ice"], PRECIP_TYPES["mixed"])
         and cols.ice[row] > 0.0
     ):
         return "ice", liquid_error_mm
@@ -1029,7 +1040,9 @@ def _window_accumulation(window):
         cols.ice[row] for row in rows if cols.precip_type[row] == PRECIP_TYPES["ice"]
     )
     sleet_accum = _sequential_sum(
-        cols.ice[row] for row in rows if cols.precip_type[row] == PRECIP_TYPES["sleet"]
+        cols.ice[row]
+        for row in rows
+        if cols.precip_type[row] in (PRECIP_TYPES["sleet"], PRECIP_TYPES["mixed"])
     )
     return totals, errors, has_error_data, frzrain_accum, sleet_accum
 
@@ -1324,6 +1337,7 @@ def calculate_day_text(
     icon_set="darksky",
     unit_system="si",
     half_day=False,
+    partial_day=False,
 ):
     """
     Calculates the daily, next 24-hour or half-day weather summary text.
@@ -1343,6 +1357,7 @@ def calculate_day_text(
     - icon_set (str): Which icon set to use - Dark Sky or Pirate Weather
     - unit_system (str): Unit system for display ("us", "si", "ca", "uk")
     - half_day (bool): Summarise a day/night (half-day) window instead of a full day.
+    - partial_day (bool): The hours are what is left of today's daily window.
 
     Returns:
     - tuple: A tuple containing:
@@ -1740,6 +1755,9 @@ def calculate_day_text(
 
     # --- 5. Time phrase summary for each condition ---
     num_periods = len(period_stats)
+    period_summary_text = functools.partial(
+        calculate_period_summary_text, partial_day=partial_day
+    )
 
     # 5a. How the precipitation falls. Precipitation reaching every period
     # only lasts "throughout the day" when each period is wet for at least half
@@ -1857,7 +1875,7 @@ def calculate_day_text(
             precip_only_summary,
             combined_wind_flag,
             combined_vis_flag,
-        ) = calculate_period_summary_text(
+        ) = period_summary_text(
             precip_periods,
             precip_summary_text,
             "precip",
@@ -1872,7 +1890,7 @@ def calculate_day_text(
         )
 
     if storms_accompany_precip:
-        thunderstorm_with_precip, _, _ = calculate_period_summary_text(
+        thunderstorm_with_precip, _, _ = period_summary_text(
             thunderstorm_periods,
             thunderstorm_summary_text,
             "precip",
@@ -1898,7 +1916,7 @@ def calculate_day_text(
             thunderstorm_only_summary,
             combined_wind_flag,
             combined_vis_flag,
-        ) = calculate_period_summary_text(
+        ) = period_summary_text(
             thunderstorm_periods,
             thunderstorm_summary_text,
             "precip",  # Use precip type since thunderstorms have same priority
@@ -1912,7 +1930,7 @@ def calculate_day_text(
         )
 
     if has_wind:
-        wind_only_summary, _, _ = calculate_period_summary_text(
+        wind_only_summary, _, _ = period_summary_text(
             wind_periods,
             calculate_wind_text(overall_max_wind, icon_set, "summary"),
             "wind",
@@ -1927,7 +1945,7 @@ def calculate_day_text(
         )
 
     if has_vis:
-        vis_only_summary, _, _ = calculate_period_summary_text(
+        vis_only_summary, _, _ = period_summary_text(
             vis_periods,
             calculate_vis_text(
                 overall_min_visibility,
@@ -2040,7 +2058,7 @@ def calculate_day_text(
             cloud_text = cloud_range
             cloud_idx = list(range(num_periods))
 
-        cloud_full_summary, _, _ = calculate_period_summary_text(
+        cloud_full_summary, _, _ = period_summary_text(
             cloud_idx,
             cloud_text,
             "cloud",

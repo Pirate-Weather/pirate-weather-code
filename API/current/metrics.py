@@ -286,6 +286,25 @@ def _interp_scalar(merged, key, state: InterpolationState):
     return merged[state.idx1, key] * state.fac1 + merged[state.idx2, key] * state.fac2
 
 
+def _interp_direction(merged, key, state: InterpolationState):
+    """
+    Interpolate a direction in degrees the short way round the circle.
+
+    A linear blend of 350 and 10 degrees passes through south instead of north.
+
+    Args:
+        merged: Merged data array.
+        key: Key for the direction in the array.
+        state: Interpolation state; fac1 and fac2 sum to 1.
+
+    Returns:
+        Interpolated direction in degrees.
+    """
+    start = merged[state.idx1, key]
+    shortest_arc = (merged[state.idx2, key] - start + 180.0) % 360.0 - 180.0
+    return (start + state.fac2 * shortest_arc) % 360.0
+
+
 def _interp_uv_magnitude(merged, u_key, v_key, state: InterpolationState):
     """
     Interpolate UV vector magnitude between two time points.
@@ -1018,13 +1037,15 @@ def _get_bearing(
         ),
         "hrdps": (
             lambda: "hrdps" in sourceList,
-            lambda: _interp_scalar(
+            lambda: _interp_direction(
                 model_data["HRDPS_Merged"], HRDPS["wind_dir"], state
             ),
         ),
         "gdps": (
             lambda: "gdps" in sourceList,
-            lambda: _interp_scalar(model_data["GDPS_Merged"], GDPS["wind_dir"], state),
+            lambda: _interp_direction(
+                model_data["GDPS_Merged"], GDPS["wind_dir"], state
+            ),
         ),
         "nbm": (
             lambda: "nbm" in sourceList,

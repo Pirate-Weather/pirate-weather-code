@@ -28,6 +28,21 @@ MIN_THUNDERSTORM_DAYS = 2
 # Highs that all fall within this range (°C) are "steady around" their mean
 # rather than rising, falling, peaking or valleying.
 STEADY_TEMPERATURE_RANGE_C = 2
+# A week without precipitation mentions a condition lasting at least this many days
+MIN_CONDITION_DAYS = 2
+# Summary text keys, most severe first, in the order calculate_vis_text and
+# calculate_wind_text choose them
+VISIBILITY_TEXTS = ("fog", "smoke", "mist", "haze")
+WIND_TEXTS = ("heavy-wind", "medium-wind", "light-wind")
+PIRATE_CONDITION_ICONS = {
+    "fog": "fog",
+    "smoke": "smoke",
+    "mist": "mist",
+    "haze": "haze",
+    "heavy-wind": "dangerous-wind",
+    "medium-wind": "wind",
+    "light-wind": "breezy",
+}
 
 
 def _combined_precip_type(precipitation_days):
@@ -71,6 +86,110 @@ def _day_run_items(run):
     return [day[1] for day in run]
 
 
+def _day_range_phrase(days):
+    """
+    Describes two or more days of the week.
+
+    Parameters:
+    - days (arr): Entries of the week ([index, day name, day]), in order.
+
+    Returns:
+    - wText (str | list): The days, e.g. ["through", "today", "friday"].
+    - wWeekend (bool): If wText is the over-weekend text.
+    """
+    if len(days) == 2:
+        if (days[0][1] == "saturday" and days[1][1] == "sunday") or (
+            days[0][1] == "tomorrow" and days[1][1] == "sunday"
+        ):
+            # Days on the weekend use the over weekend text
+            return "over-weekend", True
+        # Join the days together with an and
+        return ["and", days[0][1], days[1][1]], False
+
+    if days[-1][0] - days[0][0] == len(days) - 1:
+        return ["through", days[0][1], days[-1][1]], False
+
+    # Describe each run of consecutive days. Two items are joined with "and";
+    # three or more use "list" rather than nested "and"s ("today through Sunday,
+    # Tuesday and Thursday").
+    day_items = []
+    for _, run in groupby(enumerate(days), lambda item: item[1][0] - item[0]):
+        day_items.extend(_day_run_items([day for _, day in run]))
+
+    if len(day_items) == 2:
+        return ["and", day_items[0], day_items[1]], False
+    return ["list", *day_items], False
+
+
+def _text_keys(text):
+    """The translation keys in a summary's text tree."""
+    if isinstance(text, str):
+        return {text}
+    if isinstance(text, list):
+        return set().union(*(_text_keys(item) for item in text))
+    return set()
+
+
+def _dry_week_condition(week_days, icon):
+    """
+    Describes the most notable condition of a week without precipitation.
+
+    Conditions are read from each day's summary rather than its icon, which in
+    the Dark Sky set is "fog" for mist, haze and smoke as well. They are ranked as
+    in the daily summary (calculate_day_text): lasting the whole window, then the
+    earliest start, then visibility ahead of wind. A week only keeps one, as its
+    temperature sentence follows.
+
+    Parameters:
+    - week_days (arr): Entries of the week ([index, day name, day]).
+    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
+
+    Returns:
+    - tuple | None: (summary, icon) of the condition, or None if no condition
+      reaches MIN_CONDITION_DAYS.
+    """
+    day_keys = [_text_keys(day[2].get("summaryText")) for day in week_days]
+
+    candidates = []
+    for priority, condition_texts in enumerate((VISIBILITY_TEXTS, WIND_TEXTS)):
+        condition_set = set(condition_texts)
+        days = [
+            day
+            for day, keys in zip(week_days, day_keys, strict=True)
+            if keys & condition_set
+        ]
+        if len(days) >= MIN_CONDITION_DAYS:
+            seen = set().union(*day_keys) & condition_set
+            candidates.append(
+                {
+                    "all_week": len(days) == len(week_days),
+                    "start_idx": days[0][0],
+                    "priority": priority,
+                    "days": days,
+                    "text": next(text for text in condition_texts if text in seen),
+                }
+            )
+    if not candidates:
+        return None
+
+    best = min(
+        candidates, key=lambda c: (not c["all_week"], c["start_idx"], c["priority"])
+    )
+    if best["all_week"]:
+        summary = ["for-week", best["text"]]
+    else:
+        days_text, is_weekend = _day_range_phrase(best["days"])
+        summary = (
+            [days_text, best["text"]]
+            if is_weekend
+            else ["during", best["text"], days_text]
+        )
+
+    if icon == "pirate":
+        return summary, PIRATE_CONDITION_ICONS[best["text"]]
+    return summary, "fog" if best["text"] in VISIBILITY_TEXTS else "wind"
+
+
 def calculate_summary_text(
     precipitation,
     rain_accum,
@@ -104,10 +223,7 @@ def calculate_summary_text(
     - c_icon (str): The icon representing the conditions for the week.
     """
 
-    wIcon = wText = c_icon = thuText = None
-    wWeekend = False
-    dayIndexes = []
-    days = []
+    wIcon = c_icon = thuText = None
     maxCape = MISSING_DATA
     minLi = None
     maxCin = None
@@ -119,9 +235,6 @@ def calculate_summary_text(
 
     # Loop through each index in the precipitation array
     for day in precipitation:
-        # Create an array of day indexes
-        dayIndexes.append(day[0])
-
         if "cape" in day[2]:
             # Calculate the maximum cape for the week
             # Track maximum CAPE across precipitation days
@@ -177,10 +290,6 @@ def calculate_summary_text(
 
     wIcon = _combined_precip_type(precipitation)
 
-    # Create a list of consecutive days so we can use the through text instead of multiple ands
-    for _, g in groupby(enumerate(dayIndexes), lambda ix: ix[0] - ix[1]):
-        days.append([day_index for _, day_index in g])
-
     # If the icon is not mixed precipitation change it to translations format
     if wIcon != "mixed-precipitation":
         wIcon, c_icon = calculate_precip_text(
@@ -222,45 +331,7 @@ def calculate_summary_text(
     elif thuText is not None:
         wIcon = ["and", wIcon, "possible-thunderstorm"]
 
-    if len(precipitation) == 2:
-        if (precipitation[0][1] == "saturday" and precipitation[1][1] == "sunday") or (
-            precipitation[0][1] == "tomorrow" and precipitation[1][1] == "sunday"
-        ):
-            # If the precipitation occurs on the weekend then use the over weekend text
-            wText = "over-weekend"
-            wWeekend = True
-        else:
-            # Join the days together with an and
-            wText = [
-                "and",
-                precipitation[0][1],
-                precipitation[len(precipitation) - 1][1],
-            ]
-    elif (
-        precipitation[len(precipitation) - 1][0] - precipitation[0][0]
-        == len(precipitation) - 1
-    ):
-        wText = [
-            "through",
-            precipitation[0][1],
-            precipitation[len(precipitation) - 1][1],
-        ]
-    else:
-        # Describe each run of consecutive precipitation days. Two items are
-        # joined with "and"; three or more use "list" rather than nested "and"s
-        # ("today through Sunday, Tuesday and Thursday").
-        day_items = []
-        run_start = 0
-        for run in days:
-            day_items.extend(
-                _day_run_items(precipitation[run_start : run_start + len(run)])
-            )
-            run_start += len(run)
-
-        if len(day_items) == 2:
-            wText = ["and", day_items[0], day_items[1]]
-        else:
-            wText = ["list", *day_items]
+    wText, wWeekend = _day_range_phrase(precipitation)
 
     return wIcon, wText, wWeekend, c_icon
 
@@ -277,6 +348,7 @@ def calculate_precip_summary(
     max_snow_intensity,
     max_ice_intensity,
     icon="darksky",
+    week_days=(),
 ):
     """
     Calculates the weekly precipitation summary.
@@ -294,6 +366,7 @@ def calculate_precip_summary(
     - max_snow_intensity (float): The maximum snow intensity for the week in mm/h
     - max_ice_intensity (float): The maximum ice intensity for the week in mm/h
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
+    - week_days (arr): Every day of the week ([index, day name, day]), for a dry week's conditions
 
     Returns:
     - precipSummary (arr): A summary of the precipitation for the week.
@@ -317,6 +390,11 @@ def calculate_precip_summary(
             c_icon = "breezy"
         else:
             c_icon = most_common(icons)
+
+        # A notable condition says more than the absence of precipitation
+        condition = _dry_week_condition(week_days, icon)
+        if condition is not None:
+            precipSummary, c_icon = condition
     elif len(precipitationDays) == 1:
         # If one day has any precipitation then set the icon to the precipitation type and use the medium precipitation text in the precipitation summary
         text, c_icon = calculate_precip_text(
@@ -488,6 +566,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     highTemp = []
     lowTemp = []
     icons = []
+    week_days = []
     tempSummary = ""
     max_pop = max_rain_intensity = max_snow_intensity = max_ice_intensity = 0
     zone = tz.gettz(timeZone)
@@ -511,6 +590,8 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
             weekday = "tomorrow"
         elif idx == len(weekArr) - 1:
             weekday = "next-" + weekday
+
+        week_days.append([idx, weekday, day])
 
         # A day has precipitation if its daily summary chose a precipitation
         # icon, or if it reaches the daily accumulation thresholds. The daily
@@ -574,6 +655,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         max_snow_intensity,
         max_ice_intensity,
         icon,
+        week_days,
     )
 
     # If the icon is None then set the icon
@@ -608,7 +690,7 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         c_text = ["with", precipSummary, tempSummary]
     else:
         # If there is no precipitation show the no precipitation text instead of no precipitation for the week.
-        if len(precipitationDays) == 0:
+        if precipSummary == ["for-week", "no-precipitation"]:
             precipSummary = ["no-precipitation"]
         c_text = precipSummary
 

@@ -716,7 +716,6 @@ def prepare_data_inputs(
     )
 
     # --- humidity_inputs ---
-    # Note: ECMWF doesn't provide humidity directly
     # In North America, DWD MOSMIX should be below GFS for this variable
     era5_humidity = None
     if era5_valid:
@@ -745,6 +744,9 @@ def prepare_data_inputs(
             "gdps": gdps_merged[:, GDPS["rh"]] if gdps_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["humidity"]]
             if dwd_valid
+            else None,
+            "ecmwf": ecmwf_merged[:, ECMWF["humidity"]]
+            if ecmwf_merged is not None
             else None,
             "gfs": gfs_merged[:, GFS["humidity"]] if gfs_merged is not None else None,
             "era5": era5_humidity,

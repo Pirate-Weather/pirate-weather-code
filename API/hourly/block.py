@@ -462,22 +462,16 @@ def _calculate_derived_metrics(
         snow_mm_values = estimate_snow_height(liquid_mm, temp_c, wind_mps)
         InterPhour[snow_indices, DATA_HOURLY["snow"]] = snow_mm_values
 
-    InterPhour[
-        (
-            (InterPhour[:, DATA_HOURLY["type"]] == 2)
-            | (InterPhour[:, DATA_HOURLY["type"]] == 3)
-        ),
-        DATA_HOURLY["ice"],
-    ] = (
-        InterPhour[
-            (
-                (InterPhour[:, DATA_HOURLY["type"]] == 2)
-                | (InterPhour[:, DATA_HOURLY["type"]] == 3)
-            ),
-            DATA_HOURLY["accum"],
-        ]
-        * 1
+    # GEPS and REPS hours with several strong precipitation channels arrive as
+    # mixed. Their one accumulation can't be split between the types, so it counts
+    # as ice with sleet and freezing rain rather than being dropped.
+    ice_type_mask = np.isin(
+        InterPhour[:, DATA_HOURLY["type"]],
+        (PRECIP_IDX["ice"], PRECIP_IDX["sleet"], PRECIP_IDX["mixed"]),
     )
+    InterPhour[ice_type_mask, DATA_HOURLY["ice"]] = InterPhour[
+        ice_type_mask, DATA_HOURLY["accum"]
+    ]
 
     InterPhour[:, DATA_HOURLY["intensity"]] = np.maximum(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
@@ -535,8 +529,9 @@ def _calculate_derived_metrics(
         InterPhour[snow_mask, DATA_HOURLY["intensity"]] * 10
     )
 
-    sleet_mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["ice"]) | (
-        InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["sleet"]
+    sleet_mask = np.isin(
+        InterPhour[:, DATA_HOURLY["type"]],
+        (PRECIP_IDX["ice"], PRECIP_IDX["sleet"], PRECIP_IDX["mixed"]),
     )
     InterPhour[sleet_mask, DATA_HOURLY["ice_intensity"]] = InterPhour[
         sleet_mask, DATA_HOURLY["intensity"]
