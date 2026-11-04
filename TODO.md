@@ -33,13 +33,6 @@ system's default. Either add Taiwan AQI support or fix the comment.
 (`README.md`, "Option 2") sets `useETOPO=FALSE`. ETOPO is loaded anyway.
 Fix the README (or accept both names).
 
-### Daily sleet type is never preserved
-`API/api_utils.py:360-389` (`select_daily_precip_type`): the argmax step overwrites
-`maxPchanceDay` with rain/snow/ice on every day with precipitation (unless all three
-types are present) *before* the "preserve ice/sleet from the hourly data" check runs,
-so that check can never see sleet. Ice-pellet days are always reported as freezing
-rain ("ice").
-
 ### `interpolate_temporal_gaps_efficiently` fills gaps longer than `max_gap_hours`
 `API/ingest_utils.py` (~1400-1458): `interpolate_na(limit=max_gap_hours)` fills the
 first `limit` NaNs of *any* gap, and the unconditional `ffill`/`bfill` that follows
@@ -399,6 +392,10 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### Daily sleet is reported as sleet (2026-11-04)
+`select_daily_precip_type` overwrote the day's hourly type with the dominant accumulation
+before its "preserve sleet" check ran, so every ice-pellet day read as freezing rain.
 
 ### `clipLog` only blanks the implausible values (2026-11-04)
 One value past the implausible limit (125 % of the maximum) blanked every value above the

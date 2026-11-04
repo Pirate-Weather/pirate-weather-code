@@ -111,3 +111,31 @@ def test_ice_sleet_and_mixed_precip_text(precip_type, other_accum, icon_set, exp
         )
         == expected
     )
+
+
+@pytest.mark.parametrize(
+    ("hourly_type", "accumulation", "expected"),
+    [
+        pytest.param("sleet", (0.0, 0.0, 3.0), "sleet", id="ice-pellets-stay-sleet"),
+        pytest.param("ice", (0.0, 0.0, 3.0), "ice", id="freezing-rain-stays-ice"),
+        # Ice is the most accumulation, but the hours weren't sleet
+        pytest.param("rain", (1.0, 0.0, 3.0), "ice", id="other-hours-default-to-ice"),
+        # A little sleet doesn't outrank the rain that fell
+        pytest.param("sleet", (5.0, 0.0, 1.0), "rain", id="dominant-rain-wins"),
+    ],
+)
+def test_daily_sleet_is_kept_apart_from_freezing_rain(
+    hourly_type, accumulation, expected
+):
+    """Sleet and freezing rain share one accumulation column, so only the hourly
+    type tells them apart. It was overwritten before the check that keeps it, and
+    every ice-pellet day was reported as freezing rain, a more hazardous forecast.
+    """
+    day_sums = np.zeros((1, max(DATA_DAY.values()) + 1))
+    day_sums[0, [DATA_DAY["rain"], DATA_DAY["snow"], DATA_DAY["ice"]]] = accumulation
+
+    result = select_daily_precip_type(
+        day_sums, DATA_DAY, np.array([PRECIP_IDX[hourly_type]]), PRECIP_IDX, 1.0
+    )
+
+    assert result.tolist() == [PRECIP_IDX[expected]]
