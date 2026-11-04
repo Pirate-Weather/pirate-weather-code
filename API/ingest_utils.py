@@ -1889,7 +1889,9 @@ def interp_time_take_blend(
     y1 = da.take(arr_t, idx1, axis=TAX)
 
     # Weighted blend
-    w_r = da.asarray(w, chunks=(T_new,))[None, :, None, None]
+    # In the data's dtype: float64 weights would promote every float32 value to
+    # float64, doubling the temporary memory, only to cast back afterwards.
+    w_r = da.asarray(w.astype(arr.dtype), chunks=(T_new,))[None, :, None, None]
     out = (1 - w_r) * y0 + w_r * y1
     out = out.astype(dtype, copy=False)
 

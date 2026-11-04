@@ -76,18 +76,6 @@ geometries. Update `docs/forecast-source-selection/README.md` and
 `tests/api/test_regional_source_priority.py` with points on both sides of the border.
 Related: the `is_in_north_america` boundary issue above.
 
-### `interp_time_take_blend`: blend in the data's dtype
-`API/ingest_utils.py` (`interp_time_take_blend`): the blend weights `w` are float64,
-so `(1 - w) * y0 + w * y1` promotes every float32 value to float64 (double the
-temporary memory) and casts back afterwards. Casting `w` to the array's dtype made a
-GDPS-sized block (21 variables, 136 -> 240 hours, 200 x 200 points) 2.3x faster
-(1.00 s -> 0.43 s, single thread); that is already faster than a hand-written numpy
-loop. Values change only by float32 rounding: after the store's 5-decimal rounding
-about 8% of temperatures (max 3e-5 K) and 14% of pressures (max 0.016 Pa, the float32
-resolution near 1e5 Pa) differ. Every ingest using the helper (10 models) then stops
-being bit-identical to its previous output, so do it on its own, not alongside a
-change that needs an old-vs-new bit comparison.
-
 ### Switch from pytz to `zoneinfo`
 pytz still gets tz database updates, but its `localize()` / `normalize()` model
 predates the standard library's and is easy to misuse: the local midnight bug fixed on
@@ -399,6 +387,13 @@ some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("
 implausible value blanks every above-max value").
 
 ## Done
+
+### `interp_time_take_blend` blends in the data's dtype (2026-11-04)
+float64 weights promoted every float32 value to float64 and cast back. Casting the weights
+took a GDPS-sized block with random values from 1.99 s to 1.37 s on one thread (the earlier
+measurement on a real-shaped block was 1.00 s to 0.43 s). Values change by float32 rounding
+only (at most 3e-5 K and 0.008 Pa), so ingests using the helper stop being bit-identical to
+their previous output.
 
 ### Summary and source decisions (2026-11-04)
 - **Dry weeks mention notable conditions.** A condition on at least two days replaces
