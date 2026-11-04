@@ -123,11 +123,6 @@ Things to watch:
   days will show. The production comparison won't show it unless it runs on
   a transition day.
 
-Fix in the same change:
-- `API/request/preprocess.py:681` calls `tf.timezone_at()` again with the same
-  point `get_offset()` just looked up; reuse the zone it returns to save one
-  point-in-polygon lookup per request.
-
 ## v3 goals
 
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done

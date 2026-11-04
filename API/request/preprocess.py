@@ -698,7 +698,7 @@ async def prepare_initial_request(
 
     tz_offset_loc = {"lat": lat, "lng": az_lon, "utc_time": utc_time, "tf": tf}
     tz_offset, tz_name = get_offset(**tz_offset_loc)
-    tz_req = tf.timezone_at(lat=lat, lng=az_lon)
+    tz_req = tz_name.zone
     loc_name = reverse_geocode.get((lat, az_lon))
     timemachine_days, timemachine_hours, timemachine_grid_days = (
         _parse_timemachine_range(request, time_machine)
