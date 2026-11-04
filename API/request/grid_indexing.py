@@ -628,8 +628,12 @@ def _cache_stats_delta(
 # once: a request only needs the nearest index on each of them.
 GFS_LATS = np.arange(-90, 90, 0.25)
 GFS_LONS = np.arange(0, 360, 0.25)
-ECMWF_LATS = np.arange(90, -90, -0.25)
-ECMWF_LONS = np.arange(-180, 180, 0.25)
+# ECMWF IFS: 3600 x 1801 at 0.1 degrees (linspace, as np.arange at 0.1 accumulates
+# float error). AIFS has no 0.1 degree feed and stays at 0.25 degrees.
+ECMWF_LATS = np.linspace(90.0, -90.0, 1801)
+ECMWF_LONS = np.linspace(-180.0, 179.9, 3600)
+AIFS_LATS = np.arange(90, -90, -0.25)
+AIFS_LONS = np.arange(-180, 180, 0.25)
 # GDPS: 2400 x 1201 at 0.15 degrees, GEPS: 720 x 361 at 0.5 degrees
 GDPS_LATS = np.linspace(-90.0, 90.0, 1201)
 GDPS_LONS = np.linspace(0, 360.0 - 0.15, 2400)
@@ -968,7 +972,15 @@ async def calculate_grid_indexing(
     lons_ecmwf = None
     x_p_eur = None
     y_p_eur = None
-    if ex_ecmwf == 1 or time_machine or zarr_sources.ecmwf is None:
+    # A store still on the 0.25 degree grid (published before the 0.1 degree ingest
+    # first ran) would be read at the wrong location. Skip it: GFS and the other
+    # global sources cover these hours until the next ECMWF run is published.
+    if (
+        ex_ecmwf == 1
+        or time_machine
+        or zarr_sources.ecmwf is None
+        or zarr_sources.ecmwf.shape[2] < len(ECMWF_LATS)
+    ):
         dataOut_ecmwf = False
     else:
         readECMWF = True
@@ -1110,13 +1122,8 @@ async def calculate_grid_indexing(
             readAIGEFS = True
     elif ai_models_requested and not is_na:
         if ex_aifs != 1 and zarr_sources.ecmwf_aifs is not None:
-            if x_p_eur is None or y_p_eur is None:
-                lats_ecmwf = ECMWF_LATS
-                lons_ecmwf = ECMWF_LONS
-                abslat_ecmwf = np.abs(lats_ecmwf - lat)
-                abslon_ecmwf = np.abs(lons_ecmwf - az_lon)
-                y_p_eur = np.argmin(abslat_ecmwf)
-                x_p_eur = np.argmin(abslon_ecmwf)
+            y_p_aifs = np.argmin(np.abs(AIFS_LATS - lat))
+            x_p_aifs = np.argmin(np.abs(AIFS_LONS - az_lon))
             readAIFS = True
 
     timer.log("### AI Models Detail END ###")
@@ -1293,7 +1300,7 @@ async def calculate_grid_indexing(
         zarrTasks["AIGEFS"] = weather.zarr_read("AIGEFS", zarr_sources.aigefs, x_p, y_p)
     if readAIFS:
         zarrTasks["ECMWF_AIFS"] = weather.zarr_read(
-            "ECMWF_AIFS", zarr_sources.ecmwf_aifs, x_p_eur, y_p_eur
+            "ECMWF_AIFS", zarr_sources.ecmwf_aifs, x_p_aifs, y_p_aifs
         )
     if readRAQDPS:
         zarrTasks["RAQDPS"] = weather.zarr_read_max_square(

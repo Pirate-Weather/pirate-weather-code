@@ -327,28 +327,6 @@ def _bearing_from_components(u_val, v_val):
     return np.rad2deg(np.mod(np.arctan2(u_val, v_val) + np.pi, 2 * np.pi))
 
 
-def _calculate_ecmwf_relative_humidity(
-    ECMWF_Merged, state: InterpolationState, humidUnit
-):
-    """
-    Calculate relative humidity from ECMWF data.
-
-    Args:
-        ECMWF_Merged: ECMWF merged data.
-        state: Interpolation state.
-        humidUnit: Humidity unit.
-
-    Returns:
-        Interpolated relative humidity.
-    """
-    hours = [state.idx1, state.idx2]
-    humid_fac1, humid_fac2 = relative_humidity_from_dewpoint_c(
-        ECMWF_Merged[hours, ECMWF["temp"]], ECMWF_Merged[hours, ECMWF["dew"]]
-    )
-
-    return (humid_fac1 * state.fac1 + humid_fac2 * state.fac2) * 100 * humidUnit
-
-
 def _calculate_era5_relative_humidity(
     ERA5_MERGED, state: InterpolationState, humidUnit
 ):
@@ -619,8 +597,9 @@ def _get_humidity(
         ),
         "ecmwf_ifs": (
             lambda: "ecmwf_ifs" in sourceList,
-            lambda: _calculate_ecmwf_relative_humidity(
-                model_data["ECMWF_Merged"], state, humidUnit
+            lambda: (
+                _interp_scalar(model_data["ECMWF_Merged"], ECMWF["humidity"], state)
+                * humidUnit
             ),
         ),
         "era5": (

@@ -44,6 +44,9 @@ CHUNK_SIZES = {
     "GFS": 100,
     "GEFS": 200,
     "ECMWF": 200,
+    # IFS at 0.1 degrees: twice the 99-cell final shard, so a tile splits into whole
+    # shards and the final write never holds a row of part-used tiles in memory.
+    "ECMWF_IFS": 198,
     "NBM_Fire": 200,
     "RTMA": 200,
     "DWD": 200,
