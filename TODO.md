@@ -6,23 +6,6 @@ that would have caught it, then remove the entry.
 
 ## Bugs
 
-### Local midnight is off by an hour on DST transition days
-`API/request/preprocess.py:793`: `base_day = base_time.replace(hour=0, ...)` keeps the
-pytz UTC offset in effect at the *request* time rather than at midnight (the line
-above builds `base_hour` correctly with `pytz_tz.localize`). On a DST change day the
-local day therefore starts an hour early or late: a New York time machine request for
-2024-03-10 starts at 23:00 EST the previous evening, and 2024-11-03 starts at 01:00
-EDT, and both return 24 hours instead of 23 / 25. `base_day` comes from the shared
-request preprocessing, so forecast day boundaries on DST days are likely affected too.
-Fix with `pytz_tz.localize(datetime(base_time.year, base_time.month, base_time.day))`.
-Regression test ready: `tests/live/test_timemachine_dst_live.py` (currently xfail).
-
-### `exclude=aigfs` / `exclude=aigefs` also exclude GFS / GEFS
-`API/request/preprocess.py:445-446` uses substring checks (`"gfs" in exclude_params`),
-so `exclude=aigfs` also sets `ex_gfs=1` and `exclude=aigefs` also sets `ex_gefs=1`.
-Excluding an AI model silently drops its conventional counterpart. The model flags
-should match whole comma-separated tokens.
-
 ### `aqiunits=tw` is silently ignored
 `API/request/preprocess.py:731` documents `tw → Taiwan AQI`, but `tw` is missing from
 `_VALID_AQI_UNITS` and `_AQI_UNITS_MAP`, so the parameter falls back to the unit
@@ -107,9 +90,9 @@ change that needs an old-vs-new bit comparison.
 
 ### Switch from pytz to `zoneinfo`
 pytz still gets tz database updates, but its `localize()` / `normalize()` model
-predates the standard library's and is easy to misuse: the "Local midnight is off
-by an hour on DST transition days" bug above is a pytz `replace()` on an aware
-datetime, which `zoneinfo` gets right. `zoneinfo` is also faster (200k
+predates the standard library's and is easy to misuse: the local midnight bug fixed on
+2026-11-04 was a pytz `replace()` on an aware datetime, which `zoneinfo` gets right.
+`zoneinfo` is also faster (200k
 localize-and-convert calls: 0.16 s against 1.5 s), though that is negligible next
 to the store reads. Used in `API/alerts.py`, `API/hourly/builder.py`,
 `API/processing/utils.py`, `API/request/preprocess.py`, `API/responseLocal.py`,
@@ -122,6 +105,9 @@ Things to watch:
   defaults to standard time (01:30 on 2026-11-01 in New York is -05:00), while
   `zoneinfo` takes the first occurrence (-04:00) unless `fold=1` is set. Decide
   this wherever a local wall-clock time is built and converted to UTC.
+  `base_hour` (`API/request/preprocess.py`) has this today: during the first 01:xx on
+  a fall-back day the forecast starts at the second 01:00, an hour ahead. Zones whose
+  clocks fall back onto midnight (Havana) also start that day at the second midnight.
 - **Nonexistent times** (the skipped hour when clocks spring forward): neither
   library raises, but the offsets they pick differ. The hour and day arrays only
   use whole hours and midnights, so this mostly affects test fixtures.
@@ -133,9 +119,9 @@ Things to watch:
   often lack. Add `tzdata` to `Docker/requirements-api.txt` in place of the pytz pin
   so updates stay a pinned dependency.
 - **Tests:** port `tests/api/test_dst_time_indexing.py` and
-  `tests/api/test_polar_daynight_logic.py`, and first add regression tests for
-  DST-day midnight and the fall-back hour, so any output change on transition
-  days is deliberate. The production comparison won't show it unless it runs on
+  `tests/api/test_polar_daynight_logic.py`, and first add a regression test for the
+  fall-back hour (DST-day midnight is covered in `tests/api/test_request_parsing.py`),
+  so any output change on transition days is deliberate. The production comparison won't show it unless it runs on
   a transition day.
 
 Fix in the same change:
@@ -423,6 +409,18 @@ some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("
 implausible value blanks every above-max value").
 
 ## Done
+
+### DST-day midnight and overlapping model exclusions (2026-11-04)
+`base_day` kept the UTC offset in force at request time, so after the clocks changed
+the local day started an hour off (New York 2024-03-10 at 23:00 the evening before). It
+now localizes midnight itself, which matches `day_array_grib`. Time machine `days`
+requests also return the day's real hours; against ERA5, New York returns 23 hours on
+2024-03-10 and 25 on 2024-11-03, an explicit `hours=24` stays 24, and a normal day is
+unchanged. Single-day time machine dailies still aggregate every row of the grid
+(`calculate_time_indexing`), one hour past the day normally and two on a 23-hour day.
+`exclude=aigfs` / `aigefs` no longer drop GFS / GEFS. Only those two flags moved to
+whole tokens: the others have no overlap, and source names such as `hrrr_0-18` still
+exclude HRRR through the substring check.
 
 ### Wind direction checked across the models (2026-11-04)
 Checked against real GRIBs (2026-11-04 12z/18z) and through the API per model. HRDPS

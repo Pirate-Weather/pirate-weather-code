@@ -24,6 +24,7 @@ from API.utils.geo import get_offset
 from API.utils.offline_geocode import geocode_city_country
 from API.utils.timing import TimingTracker
 
+SECONDS_PER_HOUR = 3600
 RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
 
 # reverse_geocode builds its city KD-tree on the first lookup (~0.4 s). Build it
@@ -448,8 +449,9 @@ def _parse_parameters(
     ex_alerts = int("alerts" in exclude_params)
     ex_nbm = int("nbm" in exclude_params)
     ex_hrrr = int("hrrr" in exclude_params)
-    ex_gefs = int("gefs" in exclude_params)
-    ex_gfs = int("gfs" in exclude_params)
+    # Whole tokens: "aigefs" and "aigfs" contain these names but are other models
+    ex_gefs = int("gefs" in excluded)
+    ex_gfs = int("gfs" in excluded)
     ex_urma = int("urma" in excluded)
     ex_rtma_ru = int("rtma_ru" in exclude_params)
     ex_ecmwf = int("ecmwf_ifs" in exclude_params)
@@ -813,7 +815,15 @@ async def prepare_initial_request(
             hour=base_time.hour,
         )
     )
-    base_day = base_time.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Localize midnight itself: replacing the hour on base_time would keep the UTC
+    # offset in force now, which on a DST change day is not the one at midnight.
+    base_day = pytz_tz.localize(
+        datetime.datetime(
+            year=base_time.year,
+            month=base_time.month,
+            day=base_time.day,
+        )
+    )
     base_day_utc = base_day.astimezone(utc)
     base_day_utc_grib = (
         (
@@ -849,6 +859,12 @@ async def prepare_initial_request(
 
     if time_machine:
         output_days = timemachine_days
+        # A requested range of days covers their local hours, 23 or 25 on a DST
+        # change day; an explicit hours parameter stays that many hours.
+        if request.query_params.get("hours") is None:
+            output_hours = int(
+                (day_array_grib[output_days] - day_array_grib[0]) // SECONDS_PER_HOUR
+            )
 
     num_hours = len(hour_array)
 

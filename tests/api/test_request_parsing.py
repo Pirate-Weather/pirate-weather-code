@@ -22,7 +22,9 @@ FORCE_NOW = int(NOW.replace(tzinfo=datetime.UTC).timestamp())
 NEW_YORK = "40.7128,-74.0060"
 
 
-async def _prepare(location, *, query_params=None, exclude=None, include=None):
+async def _prepare(
+    location, *, query_params=None, exclude=None, include=None, force_now=FORCE_NOW
+):
     """Run prepare_initial_request offline with a fixed "now"."""
     request = MagicMock()
     request.url = f"http://localhost/forecast/apikey/{location}"
@@ -42,7 +44,7 @@ async def _prepare(location, *, query_params=None, exclude=None, include=None):
         tf=TF,
         translations={"en": {}},
         timing_enabled=False,
-        force_now=str(FORCE_NOW),
+        force_now=str(force_now),
         logger=MagicMock(),
         start_time=NOW,
     )
@@ -133,6 +135,74 @@ async def test_ai_mode_excludes_cmc_and_honours_ai_model_exclusion():
         1,
         1,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("include", [None, "aimodels"])
+@pytest.mark.parametrize(
+    ("exclude", "flags"),
+    [
+        pytest.param("aigfs", (1, 0, 0, 0), id="aigfs"),
+        pytest.param("aigefs", (0, 1, 0, 0), id="aigefs"),
+        pytest.param("gfs", (0, 0, 1, 0), id="gfs"),
+        pytest.param("gefs", (0, 0, 0, 1), id="gefs"),
+    ],
+)
+async def test_excluding_a_model_keeps_its_counterpart(exclude, flags, include):
+    """The names overlap ("aigfs" contains "gfs"), and a substring check made
+    excluding an AI model silently drop the conventional model that the forecast
+    falls back on.
+    """
+    result = await _prepare(NEW_YORK, exclude=exclude, include=include)
+
+    assert (result.ex_aigfs, result.ex_aigefs, result.ex_gfs, result.ex_gefs) == flags
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("request_time", "midnight_utc", "day_hours"),
+    [
+        pytest.param(
+            datetime.datetime(2024, 3, 10, 12, tzinfo=datetime.UTC),
+            datetime.datetime(2024, 3, 10, 5, tzinfo=datetime.UTC),
+            23,
+            id="spring-forward",
+        ),
+        pytest.param(
+            datetime.datetime(2024, 11, 3, 12, tzinfo=datetime.UTC),
+            datetime.datetime(2024, 11, 3, 4, tzinfo=datetime.UTC),
+            25,
+            id="fall-back",
+        ),
+    ],
+)
+async def test_dst_day_starts_at_local_midnight(request_time, midnight_utc, day_hours):
+    """After the clocks change, keeping the current UTC offset put midnight an hour
+    off: every hourly row and the daily buckets slid against the true local day,
+    and time machine returned 24 hours for a 23 or 25 hour day. Cover both the
+    forecast and time machine paths, which share this setup, and check that an
+    explicit hours request still returns what it asked for.
+    """
+    timestamp = int(request_time.timestamp())
+    midnight = int(midnight_utc.timestamp())
+
+    forecast = await _prepare(NEW_YORK, force_now=timestamp)
+    assert forecast.hour_array_grib[0] == midnight
+    assert forecast.day_array_grib[0] == midnight
+    # The current hour is found from these two, and must be the row for "now"
+    current_hour = (forecast.base_hour - forecast.base_day).seconds // 3600
+    assert forecast.hour_array_grib[current_hour] == timestamp
+
+    time_machine = await _prepare(f"{NEW_YORK},{timestamp}")
+    assert time_machine.hour_array_grib[0] == midnight
+    assert time_machine.output_hours == day_hours
+    assert (
+        time_machine.hour_array_grib[day_hours - 1] == midnight + (day_hours - 1) * 3600
+    )
+    assert len(time_machine.hour_array) >= day_hours
+
+    explicit = await _prepare(f"{NEW_YORK},{timestamp}", query_params={"hours": "24"})
+    assert explicit.output_hours == 24
 
 
 @pytest.mark.asyncio
