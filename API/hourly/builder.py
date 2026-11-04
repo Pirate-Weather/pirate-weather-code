@@ -9,6 +9,7 @@ from pytz import utc
 
 from API.constants.forecast_const import DATA_HOURLY, DATA_MINUTELY
 from API.constants.shared_const import MISSING_DATA
+from API.utils.time_indexing import localize_day_start
 
 
 def initialize_time_grids(
@@ -63,13 +64,14 @@ def initialize_time_grids(
     # Pre-compute day arrays to avoid repeating in callers
     day_array_grib = np.array(
         [
-            timezone_localizer.localize(
+            localize_day_start(
+                timezone_localizer,
                 datetime.datetime(
                     year=base_time.year,
                     month=base_time.month,
                     day=base_time.day,
                 )
-                + datetime.timedelta(days=i)
+                + datetime.timedelta(days=i),
             )
             .astimezone(utc)
             .timestamp()

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from pytz import utc
+from pytz.exceptions import AmbiguousTimeError, NonExistentTimeError
 
 from API.constants.shared_const import MISSING_DATA
 
@@ -29,6 +30,23 @@ class TimeIndexing:
     hourly_half_night_index: np.ndarray
 
 
+def localize_day_start(timezone_localizer, midnight: datetime.datetime):
+    """Return the first instant of a local day from its naive midnight.
+
+    Most zones change their clocks overnight, but some do it at midnight. Where
+    clocks fall back onto midnight (Havana) it happens twice and the day starts at
+    the first. Where they spring forward from it (Beirut, Santiago) it never
+    happens: the standard-time reading of 00:00 is the instant the clocks jump to
+    01:00, when the day starts.
+    """
+    try:
+        return timezone_localizer.localize(midnight, is_dst=None)
+    except AmbiguousTimeError:
+        return timezone_localizer.localize(midnight, is_dst=True)
+    except NonExistentTimeError:
+        return timezone_localizer.localize(midnight, is_dst=False)
+
+
 def _build_day_array(
     *,
     base_time: datetime.datetime,
@@ -44,10 +62,14 @@ def _build_day_array(
     )
     return np.array(
         [
-            timezone_localizer.localize(base + datetime.timedelta(days=i))
+            (
+                localize_day_start(timezone_localizer, day)
+                if hour == 0
+                else timezone_localizer.localize(day)
+            )
             .astimezone(utc)
             .timestamp()
-            for i in range(days)
+            for day in (base + datetime.timedelta(days=i) for i in range(days))
         ]
     ).astype(np.int32)
 
@@ -96,7 +118,10 @@ def calculate_time_indexing(
     )
 
     if time_machine and daily_days == 1:
-        zero_index = np.full(len(hour_array_grib), 0)
+        # Every daily statistic covers the whole requested local day (the grid has
+        # no 6am-6am window to offer). Grid rows past its end belong to the next
+        # day, an hour on a normal day and two on a 23-hour one.
+        zero_index = (hour_array_grib >= day_array_grib[1]).astype(int)
         return TimeIndexing(
             day_array_grib=day_array_grib,
             day_array_6am_grib=day_array_6am_grib,

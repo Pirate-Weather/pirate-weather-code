@@ -105,9 +105,8 @@ Things to watch:
   defaults to standard time (01:30 on 2026-11-01 in New York is -05:00), while
   `zoneinfo` takes the first occurrence (-04:00) unless `fold=1` is set. Decide
   this wherever a local wall-clock time is built and converted to UTC.
-  `base_hour` (`API/request/preprocess.py`) has this today: during the first 01:xx on
-  a fall-back day the forecast starts at the second 01:00, an hour ahead. Zones whose
-  clocks fall back onto midnight (Havana) also start that day at the second midnight.
+  `localize_day_start` (`API/utils/time_indexing.py`) already makes this choice for
+  midnights, and can become much simpler.
 - **Nonexistent times** (the skipped hour when clocks spring forward): neither
   library raises, but the offsets they pick differ. The hour and day arrays only
   use whole hours and midnights, so this mostly affects test fixtures.
@@ -119,16 +118,12 @@ Things to watch:
   often lack. Add `tzdata` to `Docker/requirements-api.txt` in place of the pytz pin
   so updates stay a pinned dependency.
 - **Tests:** port `tests/api/test_dst_time_indexing.py` and
-  `tests/api/test_polar_daynight_logic.py`, and first add a regression test for the
-  fall-back hour (DST-day midnight is covered in `tests/api/test_request_parsing.py`),
-  so any output change on transition days is deliberate. The production comparison won't show it unless it runs on
+  `tests/api/test_polar_daynight_logic.py`; DST-day midnight and the fall-back hour are
+  covered in `tests/api/test_request_parsing.py`, so any output change on transition
+  days will show. The production comparison won't show it unless it runs on
   a transition day.
 
 Fix in the same change:
-- `get_offset` (`API/utils/geo.py`) localizes `utc_time`'s wall-clock time as if
-  it were local, so the reported `offset` can be an hour off for a few hours
-  around each DST transition. With `zoneinfo`:
-  `utc_time.replace(tzinfo=datetime.UTC).astimezone(tz).utcoffset()`.
 - `API/request/preprocess.py:681` calls `tf.timezone_at()` again with the same
   point `get_offset()` just looked up; reuse the zone it returns to save one
   point-in-polygon lookup per request.
@@ -415,9 +410,17 @@ implausible value blanks every above-max value").
 the local day started an hour off (New York 2024-03-10 at 23:00 the evening before). It
 now localizes midnight itself, which matches `day_array_grib`. Time machine `days`
 requests also return the day's real hours; against ERA5, New York returns 23 hours on
-2024-03-10 and 25 on 2024-11-03, an explicit `hours=24` stays 24, and a normal day is
-unchanged. Single-day time machine dailies still aggregate every row of the grid
-(`calculate_time_indexing`), one hour past the day normally and two on a 23-hour day.
+2024-03-10 and 25 on 2024-11-03, and an explicit `hours=24` stays 24. Also fixed:
+- **Clocks changing at midnight:** `localize_day_start` takes the first midnight where it
+  happens twice (Havana, which lost its first hour) and the moment of the jump where it
+  never happens (Beirut).
+- **The repeated hour:** `base_hour` keeps the current UTC offset, so the first 01:30 of
+  a fall-back day no longer starts the forecast an hour ahead.
+- **Single-day time machine dailies** counted the grid rows past the end of the day:
+  next midnight on a normal day, so lows and gusts could land on the next day. This
+  changes daily values on every such request (New York 2024-06-15: wind 3.33 -> 3.30,
+  precipIntensity 0.1153 -> 0.1201), and leaves the hourly block unchanged.
+
 `exclude=aigfs` / `aigefs` no longer drop GFS / GEFS. Only those two flags moved to
 whole tokens: the others have no overlap, and source names such as `hrrr_0-18` still
 exclude HRRR through the substring check.

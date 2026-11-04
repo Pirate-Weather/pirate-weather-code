@@ -20,6 +20,8 @@ TF = TimezoneFinder(in_memory=True)
 NOW = datetime.datetime(2025, 1, 1, 12, 0, 0)
 FORCE_NOW = int(NOW.replace(tzinfo=datetime.UTC).timestamp())
 NEW_YORK = "40.7128,-74.0060"
+HAVANA = "23.1136,-82.3666"
+BEIRUT = "33.8938,35.5018"
 
 
 async def _prepare(
@@ -203,6 +205,83 @@ async def test_dst_day_starts_at_local_midnight(request_time, midnight_utc, day_
 
     explicit = await _prepare(f"{NEW_YORK},{timestamp}", query_params={"hours": "24"})
     assert explicit.output_hours == 24
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("location", "day_start_utc", "day_hours"),
+    [
+        pytest.param(
+            HAVANA,
+            datetime.datetime(2024, 11, 3, 4, tzinfo=datetime.UTC),
+            25,
+            id="midnight-happens-twice",
+        ),
+        pytest.param(
+            BEIRUT,
+            datetime.datetime(2024, 3, 30, 22, tzinfo=datetime.UTC),
+            23,
+            id="midnight-never-happens",
+        ),
+    ],
+)
+async def test_day_starts_correctly_where_clocks_change_at_midnight(
+    location, day_start_utc, day_hours
+):
+    """Most zones change their clocks overnight, but some do it at midnight. Where
+    midnight happens twice the day must start at the first, or its first hour is
+    lost from the day and from every daily statistic. Where it never happens the
+    day starts when the clocks jump. The hour grid and day buckets must agree.
+    """
+    noon = int((day_start_utc + datetime.timedelta(hours=14)).timestamp())
+    day_start = int(day_start_utc.timestamp())
+
+    time_machine = await _prepare(f"{location},{noon}")
+
+    assert time_machine.hour_array_grib[0] == day_start
+    assert time_machine.day_array_grib[0] == day_start
+    assert time_machine.output_hours == day_hours
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("location", "request_time", "row_start"),
+    [
+        pytest.param(
+            NEW_YORK,
+            datetime.datetime(2024, 11, 3, 5, 30, tzinfo=datetime.UTC),
+            datetime.datetime(2024, 11, 3, 5, tzinfo=datetime.UTC),
+            id="new-york-first-0130",
+        ),
+        pytest.param(
+            NEW_YORK,
+            datetime.datetime(2024, 11, 3, 6, 30, tzinfo=datetime.UTC),
+            datetime.datetime(2024, 11, 3, 6, tzinfo=datetime.UTC),
+            id="new-york-second-0130",
+        ),
+        pytest.param(
+            HAVANA,
+            datetime.datetime(2024, 11, 3, 4, 30, tzinfo=datetime.UTC),
+            datetime.datetime(2024, 11, 3, 4, tzinfo=datetime.UTC),
+            id="havana-first-0030",
+        ),
+        pytest.param(
+            HAVANA,
+            datetime.datetime(2024, 11, 3, 5, 30, tzinfo=datetime.UTC),
+            datetime.datetime(2024, 11, 3, 5, tzinfo=datetime.UTC),
+            id="havana-second-0030",
+        ),
+    ],
+)
+async def test_current_hour_during_the_repeated_hour(location, request_time, row_start):
+    """The same wall-clock hour happens twice when clocks fall back. Reading the
+    first as the second started the forecast an hour ahead of now, and zeroed an
+    hour of today's precipitation as if it had passed.
+    """
+    result = await _prepare(location, force_now=int(request_time.timestamp()))
+
+    current_row = (result.base_hour - result.base_day).seconds // 3600
+    assert result.hour_array_grib[current_row] == int(row_start.timestamp())
 
 
 @pytest.mark.asyncio

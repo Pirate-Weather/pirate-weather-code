@@ -22,6 +22,7 @@ from API.hourly.builder import initialize_time_grids
 from API.io.store_reader import WeatherParallel
 from API.utils.geo import get_offset
 from API.utils.offline_geocode import geocode_city_country
+from API.utils.time_indexing import localize_day_start
 from API.utils.timing import TimingTracker
 
 SECONDS_PER_HOUR = 3600
@@ -807,22 +808,18 @@ async def prepare_initial_request(
             minute=utc_time.minute,
         )
     ).astimezone(pytz_tz)
-    base_hour = pytz_tz.localize(
+    # Keep base_time's UTC offset: localizing the wall clock would read the first
+    # 01:30 of a fall-back day as the second, an hour ahead.
+    base_hour = base_time.replace(minute=0, second=0, microsecond=0)
+    # Localize the day's start itself: replacing the hour on base_time would keep
+    # the UTC offset in force now, which on a DST change day is not midnight's.
+    base_day = localize_day_start(
+        pytz_tz,
         datetime.datetime(
             year=base_time.year,
             month=base_time.month,
             day=base_time.day,
-            hour=base_time.hour,
-        )
-    )
-    # Localize midnight itself: replacing the hour on base_time would keep the UTC
-    # offset in force now, which on a DST change day is not the one at midnight.
-    base_day = pytz_tz.localize(
-        datetime.datetime(
-            year=base_time.year,
-            month=base_time.month,
-            day=base_time.day,
-        )
+        ),
     )
     base_day_utc = base_day.astimezone(utc)
     base_day_utc_grib = (
