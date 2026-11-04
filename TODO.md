@@ -33,13 +33,6 @@ system's default. Either add Taiwan AQI support or fix the comment.
 (`README.md`, "Option 2") sets `useETOPO=FALSE`. ETOPO is loaded anyway.
 Fix the README (or accept both names).
 
-### One implausible value blanks every above-max value in `clipLog`
-`API/api_utils.py:142-156`: if any value exceeds 125% of the max, *every* value
-above the max becomes `MISSING_DATA`, including plausible ones that would otherwise
-be clamped (one 1000 °C hour also wipes out 61 °C hours instead of clamping them to
-60). The same pattern applies to the min side. Only the out-of-range values should
-be replaced; the rest should still be clipped.
-
 ### Daily sleet type is never preserved
 `API/api_utils.py:360-389` (`select_daily_precip_type`): the argmax step overwrites
 `maxPchanceDay` with rain/snow/ice on every day with precipitation (unless all three
@@ -403,10 +396,15 @@ schedules already hold what is needed.
 
 ### Consistent clipping
 [pirate-weather-code#760](https://github.com/Pirate-Weather/pirate-weather-code/issues/760):
-some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("One
-implausible value blanks every above-max value").
+some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### `clipLog` only blanks the implausible values (2026-11-04)
+One value past the implausible limit (125 % of the maximum) blanked every value above the
+maximum, including ones that should clamp; the minimum side did the same. A NaN anywhere
+in the array also turned the whole check off, so 1000 C would clamp to 60 C. Each value is
+now judged alone.
 
 ### Canada vs US source selection follows the border (2026-11-04)
 `is_in_canada` was a lat/lon box holding much of the northern US, so Seattle, Chicago,
