@@ -398,15 +398,15 @@ def fill_station_gaps(
     DWD MOSMIX station data has two common sources of NaN gaps:
 
     * ``APCP_surface`` (RR1c): DWD MOSMIX omits this parameter for some hours,
-      leaving gaps of up to 5–6 consecutive NaNs.  These are filled by **linear
-      interpolation** — between two dry periods (0 → 0) this naturally gives 0;
-      between non-zero values (e.g. 0.5 → 0.1) it provides a physically reasonable
-      estimate rather than incorrectly reporting no precipitation.  After
-      interpolation any remaining NaNs (gaps longer than ``max_gap_hours``) are
-      filled with **0**, since an isolated missing report surrounded by no-rain
-      hours almost certainly means no precipitation was forecast.
-    * ``PTYPE_surface`` (ww): categorical precipitation-type code filled by
-      forward- then backward-propagation so that the nearest valid code is used.
+      most often in runs of 6.  Gaps of up to ``max_gap_hours`` are filled by
+      **linear interpolation** — between two dry periods (0 → 0) this naturally
+      gives 0; between non-zero values (e.g. 0.5 → 0.1) it provides a physically
+      reasonable estimate.  Longer gaps are genuinely missing and stay NaN, so the
+      API takes those hours from another model rather than reporting no rain.
+    * ``PTYPE_surface`` (ww): categorical precipitation-type code, whose gaps of up
+      to ``max_gap_hours`` take the nearest valid code.  Longer gaps stay NaN.  Many
+      stations' ww stops days before the end of the forecast (70 hours early at 499
+      of 5,648 stations on 2026-11-04), and holding the last code would be invented.
     * All other continuous variables (temperature, humidity, wind U/V, etc.):
             gaps of up to ``max_gap_hours`` consecutive NaN *timesteps* are filled by
             **linear interpolation** within each station's own time series. If any
@@ -428,9 +428,9 @@ def fill_station_gaps(
     station entirely if all NaN columns fall into that category.
 
     This function is called on the processed DataFrame (after ``process_dwd_df``)
-    but *before* spatial gridding, so that ``interpolate_dwd_to_grid_knearest_dask``
-    always receives hole-free station series and the nearest-station-wins strategy
-    never leaves a grid cell NaN due to a single missing report.
+    but *before* spatial gridding, so that the nearest-station-wins strategy in
+    ``interpolate_dwd_to_grid_knearest_dask`` doesn't leave a grid cell NaN because
+    of a short run of missing reports.
 
     Parameters
     ----------
@@ -474,6 +474,20 @@ def fill_station_gaps(
         gap_ends = np.flatnonzero(transitions == -1)
         return np.any((gap_ends - gap_starts) > max_gap_hours)
 
+    def _short_gap_rows(series):
+        """Rows in a NaN run of at most max_gap_hours. A longer run is genuinely
+        missing data, and none of it is filled."""
+        nan_mask = series.isna().to_numpy()
+        transitions = np.diff(np.pad(nan_mask.astype(np.int8), (1, 1)))
+        short = np.zeros(len(series), dtype=bool)
+        for start, end in zip(
+            np.flatnonzero(transitions == 1),
+            np.flatnonzero(transitions == -1),
+            strict=True,
+        ):
+            short[start:end] = end - start <= max_gap_hours
+        return short
+
     df = df.copy()
 
     # Pre-compute the subset of columns that need gap-filling so that the
@@ -514,20 +528,17 @@ def fill_station_gaps(
             s = grp[col]
 
             if col in PRECIP_VARS:
-                # Interpolate short gaps; zero-fill any remaining NaNs (isolated
-                # missing reports in an otherwise dry period).
-                filled = s.interpolate(
-                    method="linear",
-                    limit=max_gap_hours,
-                    limit_direction="both",
-                ).fillna(0.0)
-                df.loc[sorted_idx, col] = filled.values
+                # Interpolate short gaps only; ends take the nearest value.
+                filled = s.interpolate(method="linear", limit_direction="both")
+                df.loc[sorted_idx, col] = s.where(
+                    ~_short_gap_rows(s), filled
+                ).to_numpy()
             elif col in CATEGORICAL_VARS:
-                # Forward-fill then backward-fill within the station series.
-                # limit= counts consecutive NaN rows; assumes uniform hourly spacing.
-                df.loc[sorted_idx, col] = (
-                    s.ffill(limit=max_gap_hours).bfill(limit=max_gap_hours).values
-                )
+                # Forward-fill then backward-fill short gaps within the station series.
+                # Counts consecutive NaN rows; assumes uniform hourly spacing.
+                df.loc[sorted_idx, col] = s.where(
+                    ~_short_gap_rows(s), s.ffill().bfill()
+                ).to_numpy()
             else:
                 if _has_oversized_nan_gap(s):
                     df.loc[sorted_idx, col] = np.nan

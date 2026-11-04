@@ -2029,15 +2029,17 @@ def interpolate_temporal_gaps_efficiently(
     1. Re-chunks data to be contiguous in time ('pencils').
     2. Short-circuits empty (all-NaN) spatial chunks.
     3. Interpolates internal gaps (Linear by default, Nearest for specific vars).
-    4. Extrapolates edges (Nearest neighbor / Forward & Back fill) for ALL vars.
+    4. Extends short edges (Nearest neighbor / Forward & Back fill) for ALL vars.
+
+    Gaps longer than max_gap_hours are genuinely missing and stay NaN, wherever they
+    are, so the API takes those hours from another model.
 
     Args:
         ds_chunked (xr.Dataset): Input dataset. Must be chunked with time as a single chunk.
         nearest_vars (list): List of variable names to use 'nearest' interpolation for
                              (e.g., flags, codes). Default is 'linear' for others.
-        max_gap_hours (int): Longest run of missing hours to interpolate internally;
-                             longer gaps stay missing. Extrapolation is applied to the
-                             ends regardless of gap size.
+        max_gap_hours (int): Longest run of missing hours to fill, inside the series
+                             or at either end; longer gaps stay missing.
         time_dim (str): Name of the time dimension.
 
     Returns:
@@ -2070,20 +2072,18 @@ def interpolate_temporal_gaps_efficiently(
             dim=time_dim, method=method, max_gap=max_gap, use_coordinate=True
         )
 
-        # 2. Extrapolate Edges (Nearest Neighbour)
-        # Extend the first and last known values to the ends of the series, and no
-        # further: a long gap between valid values stays missing so that another
-        # model can fill it, rather than holding a stale value across it.
+        # 2. Extend Short Edges (Nearest Neighbour)
+        # The first and last known values reach the ends of the series if the gap
+        # there is short. Gaps between valid values were dealt with above.
         valid = da_temp.notnull()
-        has_earlier_value = valid.cumsum(time_dim) > 0
-        has_later_value = (
-            valid.isel({time_dim: slice(None, None, -1)})
-            .cumsum(time_dim)
-            .isel({time_dim: slice(None, None, -1)})
-            > 0
+        before_first = valid.cumsum(time_dim) == 0
+        after_last = (
+            valid.isel({time_dim: slice(None, None, -1)}).cumsum(time_dim) == 0
+        ).isel({time_dim: slice(None, None, -1)})
+        short_edge = (before_first & (before_first.sum(time_dim) <= max_gap_hours)) | (
+            after_last & (after_last.sum(time_dim) <= max_gap_hours)
         )
-        is_edge = ~(has_earlier_value & has_later_value)
-        filled = filled.where(~is_edge, filled.ffill(time_dim).bfill(time_dim))
+        filled = filled.where(~short_edge, filled.ffill(time_dim).bfill(time_dim))
 
         return filled.values
 

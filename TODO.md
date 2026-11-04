@@ -352,12 +352,14 @@ some fields use `clipLog`, others `np.clip`.
 
 ## Done
 
-### DWD gap filling leaves long gaps alone (2026-11-04)
-`interpolate_temporal_gaps_efficiently` used `limit=`, which fills the start of a gap of any
-length, then a `ffill`/`bfill` that filled the rest: `[1, nan x 5, 7]` with a 3 hour limit
-became `[1, 2, 3, 4, 4, 4, 7]`. Gaps past the limit now stay missing, so another model fills
-them, and only the two ends of a series are extended. `fill_station_gaps` already blanks
-most such series first, so this is rare in practice.
+### DWD doesn't fill over long gaps (2026-11-04)
+Long gaps are genuinely missing data, and now stay missing so another model fills those
+hours. Before, `interpolate_temporal_gaps_efficiently` turned `[1, nan x 5, 7]` into
+`[1, 2, 3, 4, 4, 4, 7]` with a 3 hour limit and held the end values to the ends of the
+series, and `fill_station_gaps` zero-filled long precipitation gaps and carried the type
+code across them. In the 2026-11-04 file, `ww` ends 70 hours early at 499 of 5,648 stations
+and 235 hours early at 87, and those hours held the last code. RR1c's routine 6 hour gaps
+are within the 6 hour station limit, so they are still filled.
 
 ### `useETOPO` docs and the stale `aqiunits=tw` entry (2026-11-04)
 The README's Docker example and a compose comment set `useETOPO`, but the API reads
