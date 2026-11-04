@@ -597,9 +597,13 @@ def _process_gefs_ptype(gefsMinuteInterpolation, InterTminute):
 
 
 def _set_ptype_categories(mapped_ptype, InterTminute):
-    """Populate categorical precipitation columns from mapped type codes."""
+    """Populate categorical precipitation columns from mapped type codes.
+
+    The minutely columns have no mixed category, so a mixed hour counts as sleet.
+    """
     for precip_type in range(1, 5):
         InterTminute[:, precip_type] = (mapped_ptype == precip_type).astype(int)
+    InterTminute[mapped_ptype == PRECIP_IDX["mixed"], PRECIP_IDX["sleet"]] = 1
 
 
 def _process_gdps_ptype(gdpsMinuteInterpolation, InterTminute):

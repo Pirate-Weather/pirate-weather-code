@@ -1184,6 +1184,9 @@ async def PW_Forecast(
             inc_airqualitydetails=incAirQualityDetails,
             include_day_night=inc_day_night == 1 and not timeMachine,
             hour_columns=hour_columns,
+            current_hour_time=None
+            if timeMachine
+            else int(hour_array_grib[int(baseTimeOffset)]),
         )
     dayList = daily_section.day_list
     dayList_si = daily_section.day_list_si

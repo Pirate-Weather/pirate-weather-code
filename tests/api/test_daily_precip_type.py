@@ -5,9 +5,12 @@ import pytest
 
 from API.api_utils import map_ensemble_precip_rates_to_ptype, select_daily_precip_type
 from API.constants.api_const import PRECIP_IDX
-from API.constants.forecast_const import DATA_DAY
+from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.constants.shared_const import MISSING_DATA
+from API.hourly.block import _calculate_derived_metrics
+from API.PirateDailyText import calculate_day_text
 from API.PirateTextHelper import calculate_precip_text
+from tests.helpers.text import make_hours
 
 
 def test_daily_precip_type_follows_dominant_accumulation():
@@ -45,15 +48,14 @@ def test_ensemble_rates_map_to_precip_type():
     rain -> ice), nothing above it to "none", and all-NaN to MISSING_DATA so
     missing data is not reported as dry.
 
-    Rows with several strong channels are not pinned: whether they should be
-    sleet or mixed is an open question (TODO.md).
+    Several strong channels are mixed, not any one of them.
     """
     nan = np.nan
     result = map_ensemble_precip_rates_to_ptype(
-        snow=np.array([4.0, 0.0, 0.0, 0.0, 0.05, nan]),
-        ice=np.array([0.0, 3.0, 0.0, 0.0, 0.0, nan]),
-        freezing_rain=np.array([0.0, 0.0, 1.0, 0.0, 0.0, nan]),
-        rain=np.array([0.0, 0.0, 0.0, 2.0, 0.05, nan]),
+        snow=np.array([4.0, 0.0, 0.0, 0.0, 0.05, nan, 2.0]),
+        ice=np.array([0.0, 3.0, 0.0, 0.0, 0.0, nan, 0.0]),
+        freezing_rain=np.array([0.0, 0.0, 1.0, 0.0, 0.0, nan, 0.0]),
+        rain=np.array([0.0, 0.0, 0.0, 2.0, 0.05, nan, 3.0]),
         threshold=0.1,
     )
 
@@ -66,6 +68,7 @@ def test_ensemble_rates_map_to_precip_type():
             PRECIP_IDX["rain"],
             PRECIP_IDX["none"],
             MISSING_DATA,
+            PRECIP_IDX["mixed"],
         ],
     )
 
@@ -111,3 +114,45 @@ def test_ice_sleet_and_mixed_precip_text(precip_type, other_accum, icon_set, exp
         )
         == expected
     )
+
+
+def test_mixed_ensemble_hours_keep_their_precipitation():
+    """GEPS and REPS mark an hour with several strong channels as mixed before the
+    accumulation is split by type, which only knew rain, snow, ice and sleet: the
+    hour's precipitation vanished from the accumulation, intensity, and the daily
+    text and type. It must count as ice and still read as mixed.
+    """
+    hours = 24
+    InterPhour = np.zeros((hours, max(DATA_HOURLY.values()) + 1))
+    InterPhour[:, DATA_HOURLY["type"]] = PRECIP_IDX["mixed"]
+    InterPhour[:, DATA_HOURLY["accum"]] = 2.0
+    InterPhour[:, DATA_HOURLY["intensity"]] = 2.0
+    InterPhour[:, DATA_HOURLY["prob"]] = 0.9
+    InterPhour[:, DATA_HOURLY["temp"]] = 0.0
+
+    _calculate_derived_metrics(
+        InterPhour,
+        hourlyDayIndex=np.zeros(hours, dtype=int),
+        baseTimeOffset=0,
+        timeMachine=True,
+    )
+
+    assert np.all(InterPhour[:, DATA_HOURLY["ice"]] == 2.0)
+    assert np.all(InterPhour[:, DATA_HOURLY["ice_intensity"]] == 2.0)
+
+    day_sum = np.zeros((1, max(DATA_DAY.values()) + 1))
+    day_sum[0, DATA_DAY["ice"]] = InterPhour[:, DATA_HOURLY["ice"]].sum()
+    daily_type = select_daily_precip_type(
+        day_sum, DATA_DAY, np.array([PRECIP_IDX["mixed"]]), PRECIP_IDX, 1.0
+    )
+    assert daily_type.tolist() == [PRECIP_IDX["mixed"]]
+
+    hour_list = make_hours(
+        hours,
+        precipType="mixed",
+        iceAccumulation=2.0,
+        iceIntensity=2.0,
+        precipProbability=0.9,
+    )
+    _, text = calculate_day_text(hour_list, True, "UTC", "day")
+    assert "mixed-precipitation" in str(text)

@@ -785,6 +785,7 @@ def build_daily_section(
     inc_airqualitydetails: int = 0,
     include_day_night: bool = True,
     hour_columns: HourColumns | None = None,
+    current_hour_time: int | None = None,
 ) -> DailySection:
     """
     Build all daily- and half-day-level objects.
@@ -830,6 +831,8 @@ def build_daily_section(
         log_timing: Optional timing logger.
         include_day_night: Build the day/night (half-day) items; when False
             ``day_night_list`` is empty.
+        current_hour_time: Unix time of the current hour, where today's summary
+            starts. None (Time Machine) keeps the whole 6am to 6am window.
         hour_columns: The forecast's HourColumns (the same hours as
             ``hourList_si``), built once per request; built here from
             ``hourList_si`` when not given.
@@ -1380,13 +1383,24 @@ def build_daily_section(
                 idx, DATA_DAY["station_pressure"]
             ]
 
+        day_summary_text = None
         try:
             if idx < 8 and summaryText:
-                # The daily summary describes 6am to 6am the next day
+                # The daily summary describes 6am to 6am the next day. Today's
+                # describes what is left of that: past hours have no precipitation
+                # (zeroed in the hourly block), which would misdescribe the day.
+                text_start = int(day_array_6am_grib[idx])
+                partial_day = (
+                    idx == 0
+                    and current_hour_time is not None
+                    and current_hour_time > text_start
+                )
+                if partial_day:
+                    text_start = int(current_hour_time)
                 dayIcon, dayText = calculate_day_text(
                     select_hour_window(
                         window_source,
-                        start_time=int(day_array_6am_grib[idx]),
+                        start_time=text_start,
                         end_time=int(day_array_6am_grib[idx + 1]),
                         hour_times=hour_times_si,
                     ),
@@ -1395,7 +1409,9 @@ def build_daily_section(
                     "day",
                     icon,
                     unitSystem,
+                    partial_day=partial_day,
                 )
+                day_summary_text = dayText
 
                 dayObject["summary"] = translation.translate(["sentence", dayText])
                 dayObject["icon"] = dayIcon
@@ -1433,6 +1449,8 @@ def build_daily_section(
                 idx, DATA_DAY["convective_inhibition"]
             ],
             "kIndexMax": InterPdayMax[idx, DATA_DAY["k_index"]],
+            # The untranslated summary, for the weekly summary's conditions
+            "summaryText": day_summary_text,
         }
         dayList_si.append(dayObject_si)
 
