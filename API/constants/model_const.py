@@ -276,6 +276,58 @@ ERA5_ARCHIVE_FILL = -32768
 # The only archive variable where NaN is a value rather than missing data.
 ERA5_ARCHIVE_NAN_VARS = ("cloud_base_height",)
 
+# One store per week, ERA5_archive/<week start>.zarr, weeks counted from ERA5's
+# first day (1940-01-01, a Monday) so every week keeps the same chunk boundaries.
+ERA5_ARCHIVE_STORE_DIR = "ERA5_archive"
+ERA5_ARCHIVE_WEEK_EPOCH = "1940-01-01"
+ERA5_ARCHIVE_WEEK_HOURS = 7 * 24
+
+# Google ARCO source variables of each archive variable (summed by the builder)
+# and the factor from Google's units to the archive's API units. The reader divides
+# by the factor to give the API Google's units back, and puts a merged rate in the
+# first source column with 0 in the second: the API only uses the large-scale plus
+# convective sums, and interpolates linearly, so the result is the same.
+ERA5_ARCHIVE_SOURCES = {
+    "instantaneous_10m_wind_gust": (("instantaneous_10m_wind_gust",), 1.0),
+    "mean_sea_level_pressure": (("mean_sea_level_pressure",), 0.01),  # Pa -> hPa
+    "2m_temperature": (("2m_temperature",), 1.0),
+    "2m_dewpoint_temperature": (("2m_dewpoint_temperature",), 1.0),
+    "10m_u_component_of_wind": (("10m_u_component_of_wind",), 1.0),
+    "10m_v_component_of_wind": (("10m_v_component_of_wind",), 1.0),
+    "precipitation_type": (("precipitation_type",), 1.0),
+    "total_precipitation": (("total_precipitation",), 1000.0),  # m -> mm
+    # kg m-2 s-1 -> mm/h
+    "rain_rate": (("large_scale_rain_rate", "convective_rain_rate"), 3600.0),
+    "snowfall_rate_water_equivalent": (
+        (
+            "large_scale_snowfall_rate_water_equivalent",
+            "convective_snowfall_rate_water_equivalent",
+        ),
+        3600.0,
+    ),
+    "total_column_ozone": (("total_column_ozone",), 46696.0),  # kg m-2 -> DU
+    "total_cloud_cover": (("total_cloud_cover",), 100.0),  # 0-1 -> %
+    # Hourly accumulations in J m-2 -> mean W m-2 over the hour.
+    "downward_uv_radiation_at_the_surface": (
+        ("downward_uv_radiation_at_the_surface",),
+        1 / 3600,
+    ),
+    "surface_solar_radiation_downwards": (
+        ("surface_solar_radiation_downwards",),
+        1 / 3600,
+    ),
+    "convective_available_potential_energy": (
+        ("convective_available_potential_energy",),
+        1.0,
+    ),
+    "surface_pressure": (("surface_pressure",), 0.01),  # Pa -> hPa
+    "total_sky_direct_solar_radiation_at_surface": (
+        ("total_sky_direct_solar_radiation_at_surface",),
+        1 / 3600,
+    ),
+    "cloud_base_height": (("cloud_base_height",), 1.0),  # m, NaN where there is none
+}
+
 # DWD MOSMIX variable indices
 # These match the zarr_vars order in DWD_Mosmix_Local_Ingest.py:
 # time, TMP_2maboveground, DPT_2maboveground, RH_2maboveground,

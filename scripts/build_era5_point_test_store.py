@@ -30,9 +30,14 @@ Memory: each variable is converted to int16 as soon as it is downloaded, so the
 week is held as ~6.7 GB of int16 rather than ~14 GB of float32, and the store
 is written one band of 100x100 shards at a time.
 
+The API reads these weeks first when ``ERA5_ARCHIVE`` points at the published
+location (``API.io.ZarrHelpers.read_era5_archive_point``) and falls back to Google
+for any week that is missing.
+
 Usage:
     python scripts/build_era5_point_test_store.py --out <dir> [--week-start 2015-06-29]
-        [--upload bucket/prefix]   # S3 settings from s3_endpoint/s3_region, AWS_KEY/AWS_SECRET
+        [--upload bucket/prefix]   # publishes <prefix>/ERA5_archive/<week start>.zarr;
+                                   # S3 settings from s3_endpoint/s3_region, AWS_KEY/AWS_SECRET
 """
 
 from __future__ import annotations
@@ -60,11 +65,15 @@ from API.constants.model_const import (  # noqa: E402
     ERA5_ARCHIVE_ENCODING,
     ERA5_ARCHIVE_FILL,
     ERA5_ARCHIVE_NAN_VARS,
+    ERA5_ARCHIVE_SOURCES,
+    ERA5_ARCHIVE_STORE_DIR,
+    ERA5_ARCHIVE_WEEK_EPOCH,
+    ERA5_ARCHIVE_WEEK_HOURS,
 )
 from API.ingest_utils import (  # noqa: E402
     encode_era5_archive_field,
     open_remote,
-    publish_store,
+    upload_store,
     write_era5_archive_zarr,
 )
 from API.io.ZarrHelpers import decode_era5_archive  # noqa: E402
@@ -72,8 +81,8 @@ from API.io.ZarrHelpers import decode_era5_archive  # noqa: E402
 logger = logging.getLogger("era5_point_test_store")
 
 GOOGLE_ERA5_URL = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
-ERA5_WEEK_EPOCH = dt.date(1940, 1, 1)
-WEEK_HOURS = 7 * 24
+ERA5_WEEK_EPOCH = dt.date.fromisoformat(ERA5_ARCHIVE_WEEK_EPOCH)
+WEEK_HOURS = ERA5_ARCHIVE_WEEK_HOURS
 ERA5_N_LAT = 721
 ERA5_N_LON = 1440
 FINAL_CHUNK = 10  # 10x10 cells (2.5 x 2.5 deg) per inner chunk
@@ -81,53 +90,10 @@ SHARD = 100  # 100x100 cells per shard: 19 x 168 x 100 x 100 x 2 B = 64 MB
 # Google answers each hourly global chunk in ~0.1-0.3 s; many in flight keeps
 # the 168-object-per-variable load bandwidth bound rather than latency bound.
 SOURCE_READ_THREADS = 64
-STORE_NAME = "ERA5_archive_test.zarr"
 # Matches ERA5_PRECIP_PROB_THRESHOLD_M in API/request/grid_indexing.py, which the
 # API used to apply to Google's total_precipitation (m) at read time.
 PRECIP_PROB_THRESHOLD_M = 0.0001
 
-# Google ARCO source variables for each stored variable, summed, and the factor
-# from Google's units to the stored API units.
-ARCHIVE_SOURCES = {
-    "instantaneous_10m_wind_gust": (("instantaneous_10m_wind_gust",), 1.0),
-    "mean_sea_level_pressure": (("mean_sea_level_pressure",), 0.01),  # Pa -> hPa
-    "2m_temperature": (("2m_temperature",), 1.0),
-    "2m_dewpoint_temperature": (("2m_dewpoint_temperature",), 1.0),
-    "10m_u_component_of_wind": (("10m_u_component_of_wind",), 1.0),
-    "10m_v_component_of_wind": (("10m_v_component_of_wind",), 1.0),
-    "precipitation_type": (("precipitation_type",), 1.0),
-    "total_precipitation": (("total_precipitation",), 1000.0),  # m -> mm
-    # kg m-2 s-1 -> mm/h
-    "rain_rate": (("large_scale_rain_rate", "convective_rain_rate"), 3600.0),
-    "snowfall_rate_water_equivalent": (
-        (
-            "large_scale_snowfall_rate_water_equivalent",
-            "convective_snowfall_rate_water_equivalent",
-        ),
-        3600.0,
-    ),
-    "total_column_ozone": (("total_column_ozone",), 46696.0),  # kg m-2 -> DU
-    "total_cloud_cover": (("total_cloud_cover",), 100.0),  # 0-1 -> %
-    # Hourly accumulations in J m-2 -> mean W m-2 over the hour.
-    "downward_uv_radiation_at_the_surface": (
-        ("downward_uv_radiation_at_the_surface",),
-        1 / 3600,
-    ),
-    "surface_solar_radiation_downwards": (
-        ("surface_solar_radiation_downwards",),
-        1 / 3600,
-    ),
-    "convective_available_potential_energy": (
-        ("convective_available_potential_energy",),
-        1.0,
-    ),
-    "surface_pressure": (("surface_pressure",), 0.01),  # Pa -> hPa
-    "total_sky_direct_solar_radiation_at_surface": (
-        ("total_sky_direct_solar_radiation_at_surface",),
-        1 / 3600,
-    ),
-    "cloud_base_height": (("cloud_base_height",), 1.0),  # m, NaN where there is none
-}
 DERIVED_VARS = ("precipitation_probability",)
 ARCHIVE_UNITS = {
     "instantaneous_10m_wind_gust": "m/s",
@@ -187,8 +153,8 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
     variables = sorted(ERA5_ARCHIVE, key=ERA5_ARCHIVE.get)
-    if set(variables) != set(ARCHIVE_SOURCES) | set(DERIVED_VARS):
-        raise KeyError("ARCHIVE_SOURCES does not cover ERA5_ARCHIVE")
+    if set(variables) != set(ERA5_ARCHIVE_SOURCES) | set(DERIVED_VARS):
+        raise KeyError("ERA5_ARCHIVE_SOURCES does not cover ERA5_ARCHIVE")
 
     requested = dt.date.fromisoformat(args.week_start)
     week_start = week_start_for(requested)
@@ -203,7 +169,9 @@ def main() -> None:
     # chunks, and building dask chunks for all of them took 16.5 GB before any
     # data was read. Only the selected week is turned into dask chunks.
     ds = xr.open_zarr(GOOGLE_ERA5_URL, storage_options={"token": "anon"}, chunks=None)
-    source_vars = sorted({v for names, _ in ARCHIVE_SOURCES.values() for v in names})
+    source_vars = sorted(
+        {v for names, _ in ERA5_ARCHIVE_SOURCES.values() for v in names}
+    )
     missing = [var for var in source_vars if var not in ds]
     if missing:
         raise KeyError(f"Google ERA5 is missing {missing}")
@@ -250,7 +218,7 @@ def main() -> None:
     # da.store writes each hourly source chunk straight into its slice: loading
     # with .values first held every chunk plus a concatenated copy per variable.
     with dask.config.set(scheduler="threads", num_workers=SOURCE_READ_THREADS):
-        for name, (sources, factor) in ARCHIVE_SOURCES.items():
+        for name, (sources, factor) in ERA5_ARCHIVE_SOURCES.items():
             t_var = time.perf_counter()
             for buffer, var in zip(buffers, sources):
                 da.store(
@@ -279,7 +247,7 @@ def main() -> None:
     logger.info("Source read %.0f s", time.perf_counter() - t0)
 
     # Write the store.
-    store_path = os.path.join(args.out, STORE_NAME)
+    store_path = os.path.join(args.out, f"{week_start.isoformat()}.zarr")
     unix_times = (times - np.datetime64("1970-01-01T00:00:00")) / np.timedelta64(1, "s")
     t_write = time.perf_counter()
     write_era5_archive_zarr(
@@ -348,18 +316,19 @@ def main() -> None:
         sum(p.stat().st_size for p in files) / 2**20,
     )
 
-    # Publish
+    # Publish: ERA5_archive/<week start>.zarr. upload_store writes the chunks,
+    # then the array metadata, then the root zarr.json, and the API treats a week
+    # without its root metadata as missing (it falls back to Google), so a
+    # half-uploaded week is never read. Rebuilding a week overwrites it in place.
     if args.upload:
         remote = open_remote(
             args.upload, "S3", os.getenv("AWS_KEY", ""), os.getenv("AWS_SECRET", "")
         )
         t_up = time.perf_counter()
-        version = publish_store(store_path, remote, STORE_NAME, week_start.isoformat())
+        name = f"{ERA5_ARCHIVE_STORE_DIR}/{week_start.isoformat()}.zarr"
+        upload_store(store_path, remote, name)
         logger.info(
-            "Published %s/%s in %.0f s",
-            args.upload,
-            version,
-            time.perf_counter() - t_up,
+            "Published %s/%s in %.0f s", args.upload, name, time.perf_counter() - t_up
         )
 
 

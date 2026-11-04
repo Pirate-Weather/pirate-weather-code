@@ -235,10 +235,16 @@ Replaces `init_ERA5` (`API/io/ZarrHelpers.py`) and `_load_era5_slice`
 variables including direct solar (`fdir`) and cloud base height (`cbh`, NaN where there
 is none). Real 2015-06-29 week (2026-11-04): 1125 MiB, 121 objects, 11.4 GB peak
 memory (27 GB for the float32 builder), 15 s write, 2:22 wall; 16 spot cells x 19
-variables decode within one quantization step of Google's values. Still to do for the
-API: read it in `_load_era5_slice` (columns in `ERA5_ARCHIVE`; values are in API units,
-so the Google unit conversions in `API/data_inputs.py` go, and the 3x3 precipitation
-window read becomes the stored probability), then decide ERA5T appends.
+variables decode within one quantization step of Google's values.
+The API reads it first when `ERA5_ARCHIVE` is set (`s3://bucket/prefix` or a local
+directory; `ERA5_ARCHIVE_S3_ENDPOINT` / `_REGION` for the BHS private endpoint):
+`_load_era5_slice` -> `read_era5_archive_point`, which returns Google's layout and
+units, so nothing downstream changed. A request touching any week the archive lacks
+is read entirely from Google. Live, BHS private endpoint (2026-11-04): 15 ms warm,
+~1 s for the first read in a process (connection setup, week metadata and shard
+index), 37 ms to find a week missing; values within half a step of Google's.
+Still to do: daily ERA5T appends (recent weeks fall back to Google until then), and
+open a week with one metadata read instead of two (KvStore read + `ts.open`).
 
 Backfill estimate: ~4,500 weeks from 1940; each pulls 7.2 GiB from Google (20 source
 variables x 168 hourly 2.2 MiB chunks), so ~32 TiB in total. The read took 35 s

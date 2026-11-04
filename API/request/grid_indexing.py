@@ -53,8 +53,11 @@ from API.constants.shared_const import (
     LIBREWXR_GRID_WIDTH,
     LIBREWXR_MAX_NOWCAST_AGE_SECONDS,
 )
+from API.io.ZarrHelpers import read_era5_archive_point
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
+
+logger = logging.getLogger(__name__)
 
 ERA5_PRECIP_PROB_THRESHOLD_M = 0.0001  # m, matching ERA5 total_precipitation units
 SILAM_LAT_START = -89.6
@@ -516,7 +519,24 @@ class GridIndexingResult:
 
 
 def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
-    """Load the ERA5 point slice needed for the requested hourly grid."""
+    """Load the ERA5 point slice needed for the requested hourly grid.
+
+    The own ERA5 archive is read first when it is configured (one chunk per week,
+    tens of ms); any week it does not have yet (recent ERA5T weeks, a gap, a failed
+    read) sends the whole request to Google ERA5, so a response never mixes the two.
+    """
+    archive = era5_data.get("ERA5_archive")
+    if archive is not None:
+        base_time = np.datetime64(base_day_utc.replace(tzinfo=None))
+        archive_rows = read_era5_archive_point(archive, lat, lon, base_time, num_hours)
+        if archive_rows is not None:
+            return archive_rows
+        logger.info(
+            "ERA5 archive does not cover %s + %d h; reading Google ERA5",
+            base_time,
+            num_hours,
+        )
+
     abslat_era5 = np.abs(era5_data["ERA5_lats"] - lat)
     abslon_era5 = np.abs(era5_data["ERA5_lons"] - lon)
     y_p = np.argmin(abslat_era5)
