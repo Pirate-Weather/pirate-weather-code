@@ -1718,34 +1718,45 @@ def pad_to_chunk_size(dask_array: da.Array, final_chunk: int) -> da.Array:
 
 def earth_relative_wind_components(
     ugrd: xr.DataArray, vgrd: xr.DataArray
-) -> tuple[
-    np.ndarray, np.ndarray
-]:  # Based off: https://unidata.github.io/python-gallery/examples/500hPa_Absolute_Vorticity_winds.html#function-to-compute-earth-relative-winds
-    """Calculate north-relative wind components from grid-relative components.
+) -> tuple[np.ndarray, np.ndarray]:
+    """Rotate grid-relative winds on a Lambert conformal grid to earth-relative.
 
-    Uses Cartopy to transform vectors from the model's grid-relative projection
-    to a standard Plate Carree projection (earth-relative).
+    Grid north leans away from true north by the meridian convergence, which on
+    a tangent Lambert cone is ``sin(latin) * (lon - LoV)``. Each point's rotation
+    comes from its own GRIB latitude/longitude because Herbie's cfgrib datasets
+    have index-only x/y dimensions (0, 1, 2...), not projection metres. A
+    projected vector transform is avoided as well: going through PlateCarree
+    measures angles in degree space, which skews diagonal winds with latitude.
 
     Args:
-        ugrd: Xarray DataArray of the grid-relative u-component of the wind.
-        vgrd: Xarray DataArray of the grid-relative v-component of the wind.
+        ugrd: Grid-relative u-component, with ``metpy_crs``, ``latitude`` and
+            ``longitude`` coordinates.
+        vgrd: Grid-relative v-component on the same grid.
 
     Returns:
-        A tuple containing two numpy arrays: the earth-relative u-component (ut)
-        and v-component (vt) of the wind.
+        The earth-relative u- and v-components.
+
+    Raises:
+        ValueError: If the projection is a secant cone (two different standard
+            parallels), which this formula does not cover.
     """
-    data_crs = ugrd.metpy_crs.metpy.cartopy_crs
+    crs_params = ugrd.metpy_crs.metpy.cartopy_crs.proj4_params
+    if crs_params["lat_1"] != crs_params["lat_2"]:
+        raise ValueError(
+            "Expected a tangent Lambert cone, got standard parallels "
+            f"{crs_params['lat_1']} and {crs_params['lat_2']}"
+        )
 
-    x = ugrd.x.values
-    y = ugrd.y.values
+    cone_factor = np.sin(np.radians(crs_params["lat_1"]))
+    degrees_from_lov = (ugrd.longitude.values - crs_params["lon_0"] + 180.0) % 360.0
+    degrees_from_lov -= 180.0
+    convergence = cone_factor * np.radians(degrees_from_lov)
+    cos_convergence = np.cos(convergence)
+    sin_convergence = np.sin(convergence)
 
-    xx, yy = np.meshgrid(x, y)
-
-    ut, vt = ccrs.PlateCarree().transform_vectors(
-        data_crs, xx, yy, ugrd.values, vgrd.values
-    )
-
-    return ut, vt
+    u_earth = ugrd.values * cos_convergence + vgrd.values * sin_convergence
+    v_earth = vgrd.values * cos_convergence - ugrd.values * sin_convergence
+    return u_earth, v_earth
 
 
 def rotated_latlon_grid_geometry(
@@ -1806,6 +1817,7 @@ def interp_time_take_blend(
     dtype: str = "float32",
     fill_value: float = np.nan,
     time_axis: int = 1,
+    direction_vars: int | Iterable[int] | None = None,  # var indices in degrees
 ) -> da.Array:
     r"""Interpolate model data along the time dimension via gather-and-blend.
 
@@ -1831,6 +1843,10 @@ def interp_time_take_blend(
         dtype: Output dtype for the interpolated array.
         fill_value: Value used for times outside the available range.
         time_axis: Axis index for time (must be 1 in this helper).
+        direction_vars: Optional variable indices holding directions in degrees,
+            blended along the shorter way round the circle: halfway between 350
+            and 10 is 0, where a linear blend gives 180. Directions that do not
+            cross north blend as before. Output is in 0 to 360.
 
     Returns:
         A dask array shaped \(V, T_new, Y, X\) with interpolated (or overridden)
@@ -1882,32 +1898,46 @@ def interp_time_take_blend(
         valid_r = da.asarray(valid, chunks=(T_new,))[None, :, None, None]
         out = da.where(valid_r, out, fill_value)
 
+    # Variables replaced after the blend: {variable index: (1, T_new, Y, X) array}
+    overrides = {}
+
+    if direction_vars is not None:
+        if isinstance(direction_vars, int):
+            direction_vars = [direction_vars]
+        for i in {int(i) for i in direction_vars}:
+            start = y0[i : i + 1]
+            shortest_arc = ((y1[i : i + 1] - start + 180.0) % 360.0) - 180.0
+            direction = (start + w_r * shortest_arc) % 360.0
+            if (~valid).any():
+                direction = da.where(valid_r, direction, fill_value)
+            overrides[i] = direction.astype(dtype, copy=False)
+
     # Optional nearest-neighbor override for specified variable indices
     if nearest_vars is not None:
         # Precompute nearest indices once: closer of idx0 / idx1
         nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
 
-        # Normalize indices as a sorted, unique list
         if isinstance(nearest_vars, int):
             nearest_vars = [nearest_vars]
-        nv = sorted({int(i) for i in nearest_vars})
 
         # Compute nearest only for needed variables (cheap if few vars)
         # Shape of each nearest slice: (1, T_new, Y, X)
         take_nn = da.take(arr_t, nearest_idx, axis=TAX)
-        # Replace in 'out' per variable index
+        for i in {int(i) for i in nearest_vars}:
+            overrides[i] = take_nn[i : i + 1].astype(dtype, copy=False)
+
+    # Replace the overridden variables in 'out'
+    if overrides:
         pieces = []
         prev = 0
-        for i in nv:
+        for i in sorted(overrides):
             if i < 0 or i >= arr.shape[VAX]:
                 raise IndexError(
-                    f"nearest_vars index {i} out of range for V={arr.shape[VAX]}"
+                    f"Override variable index {i} out of range for V={arr.shape[VAX]}"
                 )
             if i > prev:
                 pieces.append(out[prev:i])  # unchanged segment
-            pieces.append(
-                take_nn[i : i + 1].astype(dtype, copy=False)
-            )  # nearest segment
+            pieces.append(overrides[i])
             prev = i + 1
         if prev < arr.shape[VAX]:
             pieces.append(out[prev:])

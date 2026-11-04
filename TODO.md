@@ -152,11 +152,6 @@ Fix in the same change:
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done
 there (forecast/historic split, test refactor, ingest standardization) are not listed.
 
-### Validate wind direction in the regional models
-As done for HRRR, which rotates grid-relative winds with
-`earth_relative_wind_components` (`API/ingest_utils.py`). Check whether HRDPS
-`WIND`/`WDIR` on its rotated lat/lon grid are already earth-relative.
-
 ### LibreWXR for maps, radar coverage and minutely precipitation
 Plan in [pirateweather discussion #414](https://github.com/Pirate-Weather/pirateweather/discussions/414#discussioncomment-18934138):
 use LibreWXR's global radar nowcast for minutely precipitation worldwide (likely
@@ -428,6 +423,25 @@ some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("
 implausible value blanks every above-max value").
 
 ## Done
+
+### Wind direction checked across the models (2026-11-04)
+Checked against real GRIBs (2026-11-04 12z/18z) and through the API per model. HRDPS
+`WDIR` is earth-relative even though its GRIB flag says grid-relative (median 0.08 deg
+from rotated U/V, 24 deg from raw U/V), so it must not be rotated. GDPS, NBM, HRRR and
+RRFS were right. Three bugs fixed:
+- **RTMA, RTMA-RU, URMA were effectively unrotated.** `earth_relative_wind_components`
+  read Herbie's index x/y as metres, so every point used the convergence at 25 N, 95 W:
+  median 7 deg off, up to 21 deg, with correct speeds. It now uses the closed-form
+  Lambert rotation: a real RTMA-RU ingest's store is 0.04 deg (median) from wgrib2's
+  `-new_grid_winds earth`. Published RTMA and URMA history stores keep the old winds
+  until they age out or are rebuilt.
+- **Daily `windBearing` was an arithmetic mean**, up to 177 deg off when winds sat either
+  side of north. Now a circular mean of unit vectors (57 us per request). Against the
+  same commit and stores across 16 locations, it is the only field that changed.
+- **NBM and GDPS 3-hourly leads, and HRDPS/GDPS `currently`, blended direction through
+  south** (340, 227, 114, 0). Both now take the shorter arc, which leaves directions that
+  do not cross north unchanged but for float rounding (3e-5 deg). Not yet run through a
+  full NBM or GDPS ingest; the fix reaches their stores at their next cycles.
 
 ### ECMWF IFS 0.1° open data, with humidity stored at ingest
 [pirateweather#697](https://github.com/Pirate-Weather/pirateweather/issues/697). The IFS
