@@ -42,20 +42,6 @@ xarray's `max_gap` semantics (leave long gaps alone). Used by the DWD ingest wit
 `max_gap_hours=3`; `fill_station_gaps` runs first and already blanks whole series
 with long gaps, so the impact is limited to gaps it doesn't catch.
 
-### AQI averaging windows are cut off at local midnight
-The AQ series (`prepare_aq_inputs`, `API/data_inputs.py`) follows `hour_array_grib`,
-which starts at local midnight (`base_day_utc`). `rolling_mean` / `nowcast_pm`
-(`API/constants/aqi_const.py`) clip their window at the start of the array, so
-hour *h* of today averages only *h* + 1 hours: the 24 h PM and SO2 averages, the
-12 h NowCast and the 8 h O3/CO averages are short for most of today, and the
-`currently` AQI just after midnight is a 1-2 h average. Hours from tomorrow on have
-full windows. SILAM already keeps 48 h of history for this
-(`HISTORY_PERIODS["SILAM"]`), but the API never reads before midnight.
-Fix: build the AQ series from 24 h before local midnight, average, then trim to the
-response window. RAQDPS only reaches back to its latest run (4-16 h before now);
-the earlier hours fall back to SILAM per hour (`_prefer`), so a window that crosses
-the RAQDPS run time mixes two models.
-
 ## Improvements
 
 ### `interp_time_take_blend`: blend in the data's dtype
@@ -392,6 +378,13 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### AQI averages reach back before local midnight (2026-11-04)
+The AQI series started at local midnight, so hour *h* of today averaged only *h* + 1 hours
+(a `currently` AQI just after midnight was a 1-2 h average). `prepare_aq_inputs` now also
+gives the 24 hours before midnight, for the averages only. No extra reads: the stores are
+read whole and SILAM keeps 48 h of history. RAQDPS only reaches back to its latest run, so
+a window crossing the run time uses SILAM before it, per hour.
 
 ### Daily sleet is reported as sleet (2026-11-04)
 `select_daily_precip_type` overwrote the day's hourly type with the dominant accumulation

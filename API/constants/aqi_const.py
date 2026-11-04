@@ -49,6 +49,9 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 # NowCast averages over the latest 12 hours
 NOWCAST_HOURS = 12
+# Hours before the requested series that the AQI's averages can look back on: the
+# longest averaging window is 24 h.
+AQ_LEAD_IN_HOURS = 24
 
 
 def nowcast_pm(conc: np.ndarray) -> np.ndarray:
@@ -1133,6 +1136,33 @@ def compute_aqi_for_unit_system(
         )
     else:  # EAQI
         return compute_caqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb)
+
+
+def compute_aqi_with_lead_in(
+    unit_system: str, lead_in: dict | None, **series: np.ndarray | None
+) -> np.ndarray:
+    """compute_aqi_array over the hours before ``series`` too, returning ``series``' AQI.
+
+    The averages only look backwards and stop at the start of the array, so without
+    the earlier hours the first hour of today would be a one-hour average.
+
+    Args:
+        unit_system: The unit system or AQI system to compute.
+        lead_in: The hours before the series for each pollutant (see
+            prepare_aq_inputs). Missing or empty uses only the series.
+        **series: pm25, pm10, o3, no2, so2, co, as for compute_aqi_array.
+    """
+    if not lead_in:
+        return compute_aqi_array(unit_system=unit_system, **series)
+
+    lead_hours = len(next(iter(lead_in.values())))
+    extended = {}
+    for pollutant, values in series.items():
+        if values is None:
+            extended[pollutant] = None
+        else:
+            extended[pollutant] = np.concatenate((lead_in[pollutant], values))
+    return compute_aqi_array(unit_system=unit_system, **extended)[lead_hours:]
 
 
 def compute_aqi_array(

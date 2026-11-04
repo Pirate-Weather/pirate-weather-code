@@ -14,7 +14,7 @@ from API.api_utils import (
     estimate_visibility_gultepe_rh_pr_numpy,
     relative_humidity_from_dewpoint_c,
 )
-from API.constants.aqi_const import compute_aqi_array
+from API.constants.aqi_const import compute_aqi_with_lead_in
 from API.constants.clip_const import (
     CLIP_AQI,
     CLIP_CAPE,
@@ -2210,8 +2210,9 @@ def build_current_section(
             def _through_current(arr):
                 return arr[:current_hours] if arr is not None else None
 
-            aqi_arr = compute_aqi_array(
-                unit_system=aqiSystem if aqiSystem is not None else unitSystem,
+            aqi_arr = compute_aqi_with_lead_in(
+                aqiSystem if aqiSystem is not None else unitSystem,
+                aq_inputs.get("lead_in"),
                 pm25=_through_current(aq_inputs.get("pm25")),
                 pm10=_through_current(aq_inputs.get("pm10")),
                 o3=_through_current(aq_inputs.get("o3")),

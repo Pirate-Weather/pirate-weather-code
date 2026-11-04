@@ -24,7 +24,7 @@ from API.constants.api_const import (
     TEMP_THRESHOLD_RAIN_C,
     TEMP_THRESHOLD_SNOW_C,
 )
-from API.constants.aqi_const import compute_aqi_array
+from API.constants.aqi_const import compute_aqi_with_lead_in
 from API.constants.clip_const import (
     CLIP_AQI,
     CLIP_CAPE,
@@ -893,8 +893,9 @@ def build_hourly_block(
             _fill_aq_col("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
 
             # Compute AQI from pollutant concentrations
-            aqi_arr = compute_aqi_array(
-                unit_system=aqiSystem if aqiSystem is not None else unitSystem,
+            aqi_arr = compute_aqi_with_lead_in(
+                aqiSystem if aqiSystem is not None else unitSystem,
+                aq_inputs.get("lead_in"),
                 pm25=InterPhour[:, DATA_HOURLY["pm25"]],
                 pm10=InterPhour[:, DATA_HOURLY["pm10"]],
                 o3=InterPhour[:, DATA_HOURLY["o3"]],
