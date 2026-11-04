@@ -192,7 +192,9 @@ async def test_dst_day_starts_at_local_midnight(request_time, midnight_utc, day_
     assert forecast.hour_array_grib[0] == midnight
     assert forecast.day_array_grib[0] == midnight
     # The current hour is found from these two, and must be the row for "now"
-    current_hour = (forecast.base_hour - forecast.base_day).seconds // 3600
+    current_hour = (
+        int(forecast.base_hour.timestamp() - forecast.base_day.timestamp()) // 3600
+    )
     assert forecast.hour_array_grib[current_hour] == timestamp
 
     time_machine = await _prepare(f"{NEW_YORK},{timestamp}")
@@ -280,7 +282,9 @@ async def test_current_hour_during_the_repeated_hour(location, request_time, row
     """
     result = await _prepare(location, force_now=int(request_time.timestamp()))
 
-    current_row = (result.base_hour - result.base_day).seconds // 3600
+    current_row = (
+        int(result.base_hour.timestamp() - result.base_day.timestamp()) // 3600
+    )
     assert result.hour_array_grib[current_row] == int(row_start.timestamp())
 
 

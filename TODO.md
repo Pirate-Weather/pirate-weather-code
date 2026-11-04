@@ -76,41 +76,6 @@ geometries. Update `docs/forecast-source-selection/README.md` and
 `tests/api/test_regional_source_priority.py` with points on both sides of the border.
 Related: the `is_in_north_america` boundary issue above.
 
-### Switch from pytz to `zoneinfo`
-pytz still gets tz database updates, but its `localize()` / `normalize()` model
-predates the standard library's and is easy to misuse: the local midnight bug fixed on
-2026-11-04 was a pytz `replace()` on an aware datetime, which `zoneinfo` gets right.
-`zoneinfo` is also faster (200k
-localize-and-convert calls: 0.16 s against 1.5 s), though that is negligible next
-to the store reads. Used in `API/alerts.py`, `API/hourly/builder.py`,
-`API/processing/utils.py`, `API/request/preprocess.py`, `API/responseLocal.py`,
-`API/utils/geo.py`, `API/utils/solar.py`, `API/utils/time_indexing.py`,
-`dst_test.py` and two tests. timezonefinder stays: it maps a point to a zone name,
-which `zoneinfo` cannot do.
-
-Things to watch:
-- **Ambiguous times** (the repeated hour when clocks fall back): pytz `localize()`
-  defaults to standard time (01:30 on 2026-11-01 in New York is -05:00), while
-  `zoneinfo` takes the first occurrence (-04:00) unless `fold=1` is set. Decide
-  this wherever a local wall-clock time is built and converted to UTC.
-  `localize_day_start` (`API/utils/time_indexing.py`) already makes this choice for
-  midnights, and can become much simpler.
-- **Nonexistent times** (the skipped hour when clocks spring forward): neither
-  library raises, but the offsets they pick differ. The hour and day arrays only
-  use whole hours and midnights, so this mostly affects test fixtures.
-- **API changes:** `tz.localize(dt)` becomes `dt.replace(tzinfo=tz)`, `pytz.utc`
-  becomes `datetime.UTC`, and `.normalize()` is no longer needed. The
-  `timezone_localizer` argument passed to `API/hourly/builder.py` and
-  `API/utils/time_indexing.py` needs reworking.
-- **tz data source:** `zoneinfo` reads the OS tz database, which slim Docker images
-  often lack. Add `tzdata` to `Docker/requirements-api.txt` in place of the pytz pin
-  so updates stay a pinned dependency.
-- **Tests:** port `tests/api/test_dst_time_indexing.py` and
-  `tests/api/test_polar_daynight_logic.py`; DST-day midnight and the fall-back hour are
-  covered in `tests/api/test_request_parsing.py`, so any output change on transition
-  days will show. The production comparison won't show it unless it runs on
-  a transition day.
-
 ## v3 goals
 
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done
@@ -387,6 +352,18 @@ some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("
 implausible value blanks every above-max value").
 
 ## Done
+
+### `pytz` replaced with `zoneinfo` (2026-11-04)
+`tzdata` replaces the `pytz` pin, and alone loads all 444 zones. Two behaviours to remember:
+two times in one `ZoneInfo` subtract by wall clock (so `baseTimeOffset` uses timestamps), and
+adding days moves the wall clock. Across 10,617 cases at every 2024-2026 transition in 30
+zones, the time grids and day buckets are unchanged except in two places, both now correct:
+- **Lord Howe's 30 minute DST start:** the current row was an hour behind for one hour.
+- **`offset` in negative-DST zones (Dublin, Casablanca):** 6 cases matched the true offset.
+
+Still open, and the same as before: `offset` reads UTC as local time, so it can be an hour off
+around a change (about 600 of those cases), and Lord Howe's current row can miss the current
+time on its other transition days (63 cases).
 
 ### `interp_time_take_blend` blends in the data's dtype (2026-11-04)
 float64 weights promoted every float32 value to float64 and cast back. Casting the weights

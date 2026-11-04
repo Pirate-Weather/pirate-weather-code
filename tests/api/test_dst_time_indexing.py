@@ -6,14 +6,14 @@ hours shifts daily highs, lows, and precipitation totals into the wrong day.
 """
 
 import datetime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pytest
-import pytz
 
 from API.utils.time_indexing import calculate_time_indexing
 
-EASTERN = pytz.timezone("America/New_York")
+EASTERN = ZoneInfo("America/New_York")
 HOUR = 3600
 
 
@@ -38,7 +38,7 @@ def test_dst_day_has_correct_local_length(date, first_day_hours):
     """
     result = calculate_time_indexing(
         base_time=date,
-        timezone_localizer=EASTERN,
+        local_tz=EASTERN,
         hour_array_grib=_hour_array_grib(date, hours=200),
         time_machine=False,
     )
@@ -64,13 +64,13 @@ def test_single_day_timemachine_daily_covers_only_that_day(date, day_hours):
     """The grid runs past the requested day, and those rows were counted in its
     daily statistics, adding next day's hours to totals such as accumulation.
     """
-    day_start = EASTERN.localize(date).astimezone(pytz.utc)
+    day_start = date.replace(tzinfo=EASTERN).astimezone(datetime.UTC)
     start = int(day_start.timestamp())
     hour_array_grib = np.arange(start, start + 25 * HOUR, HOUR, dtype=np.int32)
 
     result = calculate_time_indexing(
         base_time=date,
-        timezone_localizer=EASTERN,
+        local_tz=EASTERN,
         hour_array_grib=hour_array_grib,
         time_machine=True,
         daily_days=1,
@@ -96,7 +96,7 @@ def test_multi_day_timemachine_request_uses_one_bucket_per_day():
     date = datetime.datetime(2024, 3, 10)
     result = calculate_time_indexing(
         base_time=date,
-        timezone_localizer=EASTERN,
+        local_tz=EASTERN,
         hour_array_grib=_hour_array_grib(date, hours=73),
         time_machine=True,
         daily_days=3,

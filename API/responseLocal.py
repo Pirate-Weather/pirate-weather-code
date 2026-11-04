@@ -541,7 +541,7 @@ async def PW_Forecast(
     humidUnit = initial.humid_unit
     elevUnit = initial.elev_unit
     weather = initial.weather
-    pytzTZ = initial.pytz_tz
+    localTZ = initial.local_tz
     baseTime = initial.base_time
     baseHour = initial.base_hour
     baseDay = initial.base_day
@@ -742,7 +742,9 @@ async def PW_Forecast(
     if timeMachine:
         baseTimeOffset = 0
     else:
-        baseTimeOffset = (baseHour - baseDay).seconds / 3600
+        # From timestamps: subtracting two times in one ZoneInfo would compare their
+        # wall clocks, an hour out on a DST change day.
+        baseTimeOffset = (baseHour.timestamp() - baseDay.timestamp()) / 3600
 
     # 7. Merge hourly models onto a consistent time grid, starting from midnight on the requested day
     # Note that baseTime is the requested time, in TZ aware datetime format
@@ -917,7 +919,7 @@ async def PW_Forecast(
     # This ensures that the forecast data corresponds to the correct local time for the user
     time_indexing = calculate_time_indexing(
         base_time=baseTime,
-        timezone_localizer=pytzTZ,
+        local_tz=localTZ,
         hour_array_grib=hour_array_grib,
         time_machine=timeMachine,
         daily_days=daily_days,

@@ -5,11 +5,9 @@ from __future__ import annotations
 import datetime
 
 import numpy as np
-from pytz import utc
 
 from API.constants.forecast_const import DATA_HOURLY, DATA_MINUTELY
 from API.constants.shared_const import MISSING_DATA
-from API.utils.time_indexing import localize_day_start
 
 
 def initialize_time_grids(
@@ -18,7 +16,7 @@ def initialize_time_grids(
     base_day: datetime.datetime,
     daily_days: int,
     daily_day_hours: int,
-    timezone_localizer,
+    local_tz,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -31,8 +29,9 @@ def initialize_time_grids(
 ]:
     """Create minute/hour arrays and initialize interpolation buffers."""
     minute_array = np.arange(
-        base_time.astimezone(utc).replace(tzinfo=None),
-        base_time.astimezone(utc).replace(tzinfo=None) + datetime.timedelta(minutes=61),
+        base_time.astimezone(datetime.UTC).replace(tzinfo=None),
+        base_time.astimezone(datetime.UTC).replace(tzinfo=None)
+        + datetime.timedelta(minutes=61),
         datetime.timedelta(minutes=1),
     )
 
@@ -46,8 +45,8 @@ def initialize_time_grids(
     InterPminute = np.full((61, max(DATA_MINUTELY.values()) + 1), MISSING_DATA)
 
     hour_array = np.arange(
-        base_day.astimezone(utc).replace(tzinfo=None),
-        base_day.astimezone(utc).replace(tzinfo=None)
+        base_day.astimezone(datetime.UTC).replace(tzinfo=None),
+        base_day.astimezone(datetime.UTC).replace(tzinfo=None)
         + datetime.timedelta(days=daily_days)
         + datetime.timedelta(hours=daily_day_hours),
         datetime.timedelta(hours=1),
@@ -64,16 +63,16 @@ def initialize_time_grids(
     # Pre-compute day arrays to avoid repeating in callers
     day_array_grib = np.array(
         [
-            localize_day_start(
-                timezone_localizer,
+            (
                 datetime.datetime(
                     year=base_time.year,
                     month=base_time.month,
                     day=base_time.day,
+                    tzinfo=local_tz,
                 )
-                + datetime.timedelta(days=i),
+                + datetime.timedelta(days=i)
             )
-            .astimezone(utc)
+            .astimezone(datetime.UTC)
             .timestamp()
             for i in range(10)
         ]

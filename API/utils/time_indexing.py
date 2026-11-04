@@ -6,8 +6,6 @@ import datetime
 from dataclasses import dataclass
 
 import numpy as np
-from pytz import utc
-from pytz.exceptions import AmbiguousTimeError, NonExistentTimeError
 
 from API.constants.shared_const import MISSING_DATA
 
@@ -30,46 +28,27 @@ class TimeIndexing:
     hourly_half_night_index: np.ndarray
 
 
-def localize_day_start(timezone_localizer, midnight: datetime.datetime):
-    """Return the first instant of a local day from its naive midnight.
-
-    Most zones change their clocks overnight, but some do it at midnight. Where
-    clocks fall back onto midnight (Havana) it happens twice and the day starts at
-    the first. Where they spring forward from it (Beirut, Santiago) it never
-    happens: the standard-time reading of 00:00 is the instant the clocks jump to
-    01:00, when the day starts.
-    """
-    try:
-        return timezone_localizer.localize(midnight, is_dst=None)
-    except AmbiguousTimeError:
-        return timezone_localizer.localize(midnight, is_dst=True)
-    except NonExistentTimeError:
-        return timezone_localizer.localize(midnight, is_dst=False)
-
-
 def _build_day_array(
     *,
     base_time: datetime.datetime,
-    timezone_localizer,
+    local_tz,
     hour: int,
     days: int = 10,
 ) -> np.ndarray:
+    # Adding days to a zone-aware time moves the wall clock, so each stays at this
+    # local hour across a DST change. Fold 0 is the start of a day where clocks change
+    # at midnight: see prepare_initial_request.
     base = datetime.datetime(
         year=base_time.year,
         month=base_time.month,
         day=base_time.day,
         hour=hour,
+        tzinfo=local_tz,
     )
     return np.array(
         [
-            (
-                localize_day_start(timezone_localizer, day)
-                if hour == 0
-                else timezone_localizer.localize(day)
-            )
-            .astimezone(utc)
-            .timestamp()
-            for day in (base + datetime.timedelta(days=i) for i in range(days))
+            (base + datetime.timedelta(days=i)).astimezone(datetime.UTC).timestamp()
+            for i in range(days)
         ]
     ).astype(np.int32)
 
@@ -96,7 +75,7 @@ def _finalize_index(values: np.ndarray) -> np.ndarray:
 def calculate_time_indexing(
     *,
     base_time: datetime.datetime,
-    timezone_localizer,
+    local_tz,
     hour_array_grib: np.ndarray,
     time_machine: bool,
     daily_days: int = 1,
@@ -106,15 +85,13 @@ def calculate_time_indexing(
     day_array_grib = (
         existing_day_array_grib.astype(np.int32)
         if existing_day_array_grib is not None
-        else _build_day_array(
-            base_time=base_time, timezone_localizer=timezone_localizer, hour=0
-        )
+        else _build_day_array(base_time=base_time, local_tz=local_tz, hour=0)
     )
     day_array_6am_grib = _build_day_array(
-        base_time=base_time, timezone_localizer=timezone_localizer, hour=6
+        base_time=base_time, local_tz=local_tz, hour=6
     )
     day_array_6pm_grib = _build_day_array(
-        base_time=base_time, timezone_localizer=timezone_localizer, hour=18
+        base_time=base_time, local_tz=local_tz, hour=18
     )
 
     if time_machine and daily_days == 1:

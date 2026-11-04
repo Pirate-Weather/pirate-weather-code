@@ -1,11 +1,11 @@
 """Sunrise/sunset fallback for polar day and polar night."""
 
 import datetime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pytest
 from astral import LocationInfo
-from pytz import timezone
 
 from API.utils.solar import calculate_solar_times
 
@@ -26,8 +26,8 @@ def test_polar_fallback_flags_and_sun_times(month, all_day, all_night):
     day correctly and place sunrise/sunset inside it, otherwise daily icons and
     day/night splits are wrong for every high-Arctic location for months.
     """
-    base_day = timezone(LONGYEARBYEN.timezone).localize(
-        datetime.datetime(2024, month, 15)
+    base_day = datetime.datetime(
+        2024, month, 15, tzinfo=ZoneInfo(LONGYEARBYEN.timezone)
     )
     day_start = int(base_day.timestamp())
 
