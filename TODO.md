@@ -105,24 +105,6 @@ resolution near 1e5 Pa) differ. Every ingest using the helper (10 models) then s
 being bit-identical to its previous output, so do it on its own, not alongside a
 change that needs an old-vs-new bit comparison.
 
-### Daily summaries: precipitation periods ignore the chance of precipitation
-`API/PirateDailyText.py` (`_add_hour_to_period` / the period loop in
-`calculate_day_text`): a period counts as having precipitation from its
-accumulation alone, and the window's chance of precipitation is the highest hourly
-chance in any of those periods. So when a model (often the Canadian models) has
-light accumulation from 11am to 3am but the chance is only above the 25% threshold
-from 1am to 3am, the whole run is described with the 1-3am chance: "Light rain
-throughout the day." instead of "Light rain overnight."
-
-Options:
-- only count hours at or above `PRECIP_PROB_THRESHOLD` towards a period's
-  precipitation, keeping the current behaviour (a "possible ..." summary) when no
-  hour reaches it;
-- require each precipitation period's own highest chance to reach the threshold;
-- weight each hour's accumulation by its chance before comparing to the thresholds.
-
-Check the effect on the day/night and next 24 hour summaries too, which share the code.
-
 ### Switch from pytz to `zoneinfo`
 pytz still gets tz database updates, but its `localize()` / `normalize()` model
 predates the standard library's and is easy to misuse: the "Local midnight is off
@@ -465,6 +447,31 @@ some fields use `clipLog`, others `np.clip`. See also the `clipLog` bug above ("
 implausible value blanks every above-max value").
 
 ## Done
+
+### Daily summaries: precipitation periods follow the chance of precipitation (2026-11-04)
+`API/PirateDailyText.py`: a period counted as having precipitation from its
+accumulation alone, and the window's chance was the highest hourly chance in any of
+those periods. A model (often the Canadian ones) with light accumulation from 11am to
+3am but a chance above `PRECIP_PROB_THRESHOLD` only from 1am read "Light rain
+throughout the day" instead of "Light rain overnight".
+- `_aggregate_periods` now takes `min_pop`: only hours at or above it count towards a
+  period's precipitation (accumulations, precipitation intensities and types, wet
+  hours, errors). Fog, wind and cloud still use every hour.
+- `calculate_day_text` aggregates with `PRECIP_PROB_THRESHOLD` first; only when no
+  period has enough likely precipitation (and some hour has unlikely precipitation) does
+  it aggregate again with every hour, keeping the "possible ..." summary as before.
+  Applies to the daily, day/night and next 24 hour summaries alike.
+- The expected-amount sentence still adds up every hour of the window
+  (`_window_accumulation`), as the model's mean includes the unlikely hours, but only
+  for the types that fall in the likely hours, so unlikely snow can't add "12 cm of
+  snow expected" to "Light rain overnight".
+- Precipitation that is only possible is no longer "tapering off" ("Possible light rain
+  tapering off in the afternoon") or occasional, periods of or intermittent; it keeps
+  the "until" or "throughout the day" wording.
+- Cost: +0.6 ms per request (24 windows, 2.8 -> 3.4 ms) with a chance that varies every
+  hour; less in practice.
+- Weighting each hour's accumulation by its chance was considered and not used: it
+  shrinks the amounts used for the light/heavy wording.
 
 ### LibreWXR radar nowcast for the minutely block (2026-11-02)
 `ingest/LibreWXR_Local_Ingest.py`, run by LibreWXR's nowcast hook, composites LibreWXR's latest radar frame (T+0) and

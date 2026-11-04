@@ -431,19 +431,17 @@ def _new_period_data():
         "num_hours_precip": 0,
         "rain_accum": 0.0,
         "snow_accum": 0.0,
-        # Accumulation errors (mm), and whether any hour had error data
-        "rain_error": 0.0,
-        "has_rain_error_data": False,
-        "snow_error": 0.0,
-        "has_snow_error_data": False,
-        "ice_error": 0.0,
-        "has_ice_error_data": False,
         "sleet_accum": 0.0,
         "frzrain_accum": 0.0,
         "max_pop": 0.0,
+        # Over all hours, for the fog check
         "max_rain_intensity": 0.0,
         "max_snow_intensity": 0.0,
         "max_ice_intensity": 0.0,
+        # Over the hours counted as precipitation, for the precipitation text
+        "precip_rain_intensity": 0.0,
+        "precip_snow_intensity": 0.0,
+        "precip_ice_intensity": 0.0,
         "cloud_covers": [],
         "max_wind_speed": 0.0,
         "period_length": 0,
@@ -777,9 +775,13 @@ class HourWindow:
         return max(0, self.end - self.start)
 
 
-def _aggregate_periods(window, zone, mode):
+def _aggregate_periods(window, zone, mode, min_pop):
     """Steps 1 and 2 of calculate_day_text: split the hours of a window into
     periods and aggregate each one from the forecast's HourColumns.
+
+    Only hours whose chance of precipitation is at least min_pop count as
+    precipitation (accumulations, precipitation intensities and types, wet
+    hours); every other condition uses all hours.
 
     A period is a slice of the columns reduced with max(), min() and a sum of
     flags. The accumulations are still added hour by hour (see
@@ -817,14 +819,16 @@ def _aggregate_periods(window, zone, mode):
     ice = cols.ice
     pop = cols.pop
     precip_type = cols.precip_type
-    error = cols.error
     temp = cols.temp
     dew = cols.dew
     light_wind = WIND_THRESHOLDS["light"]
-    snow_type = PRECIP_TYPES["snow"]
-    rain_type = PRECIP_TYPES["rain"]
     sleet_type = PRECIP_TYPES["sleet"]
     freezing_rain_type = PRECIP_TYPES["ice"]
+
+    if min_pop > 0:
+        hour_counts_as_precip = [pop[row] >= min_pop for row in range(start, end)]
+    else:
+        hour_counts_as_precip = [True] * (end - start)
 
     period_stats = []
     for rows in rows_of_period:
@@ -855,42 +859,33 @@ def _aggregate_periods(window, zone, mode):
         data["max_smoke"] = max([0.0, *[cols.smoke[row] for row in fog_rows]])
         # NaN wind never counts
         data["num_hours_wind"] = sum(value >= light_wind for value in pick(cols.wind))
-        data["rain_accum"] = _sequential_sum(pick(liquid))
-        data["snow_accum"] = _sequential_sum(pick(snow))
-        data["num_hours_precip"] = sum(pick(cols.wet))
 
-        # Only the error of the hour's own precipitation type counts
-        for row in rows:
-            liquid_error_mm = error[row]
-            if math.isnan(liquid_error_mm):
-                continue
-            hour_type = precip_type[row]
-            if hour_type == snow_type and snow[row] > 0.0:
-                # Convert to snow depth (mm) via estimate_snow_height. If
-                # the temperature is missing, fall back to the error directly.
-                if math.isnan(temp[row]):
-                    data["snow_error"] += liquid_error_mm
-                else:
-                    data["snow_error"] += estimate_snow_height(
-                        liquid_error_mm, temp[row], cols.wind[row]
-                    )
-                data["has_snow_error_data"] = True
-            elif hour_type == rain_type and liquid[row] > 0.0:
-                data["rain_error"] += liquid_error_mm
-                data["has_rain_error_data"] = True
-            elif hour_type in (sleet_type, freezing_rain_type) and ice[row] > 0.0:
-                data["ice_error"] += liquid_error_mm
-                data["has_ice_error_data"] = True
+        precip_rows = [row for row in rows if hour_counts_as_precip[row - start]]
+        if len(precip_rows) == len(rows):
+            pick_precip = pick
+        else:
+
+            def pick_precip(values, rows=precip_rows):
+                return [values[row] for row in rows]
+
+        data["precip_rain_intensity"] = max([0.0, *pick_precip(cols.rain_intensity)])
+        data["precip_snow_intensity"] = max([0.0, *pick_precip(cols.snow_intensity)])
+        data["precip_ice_intensity"] = max([0.0, *pick_precip(cols.ice_intensity)])
+        data["rain_accum"] = _sequential_sum(pick_precip(liquid))
+        data["snow_accum"] = _sequential_sum(pick_precip(snow))
+        data["num_hours_precip"] = sum(pick_precip(cols.wet))
 
         data["frzrain_accum"] = _sequential_sum(
-            ice[row] for row in rows if precip_type[row] == freezing_rain_type
+            ice[row] for row in precip_rows if precip_type[row] == freezing_rain_type
         )
         data["sleet_accum"] = _sequential_sum(
-            ice[row] for row in rows if precip_type[row] == sleet_type
+            ice[row] for row in precip_rows if precip_type[row] == sleet_type
         )
 
         accum_rows = [
-            row for row in rows if liquid[row] > 0 or snow[row] > 0 or ice[row] > 0
+            row
+            for row in precip_rows
+            if liquid[row] > 0 or snow[row] > 0 or ice[row] > 0
         ]
         data["precip_types_in_period"] = [precip_type[row] for row in accum_rows]
         data["max_pop"] = max([0.0, *[pop[row] for row in accum_rows]])
@@ -950,16 +945,110 @@ def _aggregate_periods(window, zone, mode):
         )
         period_stats.append(data)
 
+    hourly_precip_accum = cols.precip_accum[start:end]
+    hourly_wet = cols.wet[start:end]
+    if not all(hour_counts_as_precip):
+        hourly_precip_accum = [
+            accum if counts else 0.0
+            for accum, counts in zip(
+                hourly_precip_accum, hour_counts_as_precip, strict=True
+            )
+        ]
+        hourly_wet = [
+            wet and counts
+            for wet, counts in zip(hourly_wet, hour_counts_as_precip, strict=True)
+        ]
+
     return (
         period_names,
         period_stats,
         cols.cloud[start:end],
-        cols.precip_accum[start:end],
-        cols.wet[start:end],
+        hourly_precip_accum,
+        hourly_wet,
         period_of_hour,
         temp_at_min_spread,
         dewpoint_at_min_spread,
     )
+
+
+def _hour_accum_error(cols, row):
+    """
+    The accumulation error of one hour as (kind, mm), kind being "rain",
+    "snow" (as depth) or "ice", or None without error data. Only the error of
+    the hour's own precipitation type counts.
+    """
+    liquid_error_mm = cols.error[row]
+    if math.isnan(liquid_error_mm):
+        return None
+    hour_type = cols.precip_type[row]
+    if hour_type == PRECIP_TYPES["snow"] and cols.snow[row] > 0.0:
+        # Convert to snow depth (mm) via estimate_snow_height. If the
+        # temperature is missing, fall back to the error directly.
+        if math.isnan(cols.temp[row]):
+            return "snow", liquid_error_mm
+        return "snow", estimate_snow_height(
+            liquid_error_mm, cols.temp[row], cols.wind[row]
+        )
+    if hour_type == PRECIP_TYPES["rain"] and cols.liquid[row] > 0.0:
+        return "rain", liquid_error_mm
+    if (
+        hour_type in (PRECIP_TYPES["sleet"], PRECIP_TYPES["ice"])
+        and cols.ice[row] > 0.0
+    ):
+        return "ice", liquid_error_mm
+    return None
+
+
+def _window_accumulation(window):
+    """
+    Accumulation over every hour of a window, likely or not, for the
+    expected-amount sentence: (totals, errors, has_error_data, freezing rain
+    total, sleet total), the first three keyed by "rain", "snow" (depth) and
+    "ice".
+
+    The summary text only describes the hours where precipitation is likely,
+    but the forecast amount is the model's mean, which the unlikely hours
+    still add to.
+    """
+    cols = window.columns
+    rows = range(window.start, window.end)
+    totals = {
+        "rain": _sequential_sum(cols.liquid[row] for row in rows),
+        "snow": _sequential_sum(cols.snow[row] for row in rows),
+        "ice": _sequential_sum(cols.ice[row] for row in rows),
+    }
+    errors = {"rain": 0.0, "snow": 0.0, "ice": 0.0}
+    has_error_data = {"rain": False, "snow": False, "ice": False}
+    for row in rows:
+        hour_error = _hour_accum_error(cols, row)
+        if hour_error is not None:
+            kind, error_mm = hour_error
+            errors[kind] += error_mm
+            has_error_data[kind] = True
+    frzrain_accum = _sequential_sum(
+        cols.ice[row] for row in rows if cols.precip_type[row] == PRECIP_TYPES["ice"]
+    )
+    sleet_accum = _sequential_sum(
+        cols.ice[row] for row in rows if cols.precip_type[row] == PRECIP_TYPES["sleet"]
+    )
+    return totals, errors, has_error_data, frzrain_accum, sleet_accum
+
+
+def _is_precip_in_period(p_data, precip_text_threshold):
+    """Whether a period has enough precipitation to be mentioned (mm)."""
+    return (
+        p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
+        or p_data["rain_accum"] > precip_text_threshold
+        or p_data["sleet_accum"] > precip_text_threshold
+        or p_data["frzrain_accum"] > precip_text_threshold
+    )
+
+
+def _is_possible_text(summary_text):
+    """Whether a condition (or an "and" of conditions) is only possible."""
+    if isinstance(summary_text, list):
+        return any(_is_possible_text(part) for part in summary_text[1:])
+    return isinstance(summary_text, str) and summary_text.startswith("possible-")
 
 
 def _wet_spells(hourly_wet):
@@ -1276,6 +1365,24 @@ def calculate_day_text(
     )
 
     # --- 1. Split the hours into periods and 2. aggregate each period ---
+    # Precipitation is described from the hours where it is likely (chance at
+    # least PRECIP_PROB_THRESHOLD), so a model with a long tail of light,
+    # unlikely precipitation and a short likely spell reads "Light rain
+    # overnight", not "Light rain throughout the day" with the overnight
+    # chance. Only when no period has enough likely precipitation are the
+    # unlikely hours described instead, as "possible" precipitation.
+    zone = _get_zone(time_zone)
+    aggregated = _aggregate_periods(hours, zone, mode, PRECIP_PROB_THRESHOLD)
+    if not any(
+        _is_precip_in_period(p_data, precip_text_threshold) for p_data in aggregated[1]
+    ):
+        cols = hours.columns
+        has_unlikely_precip = any(
+            cols.pop[row] < PRECIP_PROB_THRESHOLD and cols.precip_accum[row] > 0
+            for row in range(hours.start, hours.end)
+        )
+        if has_unlikely_precip:
+            aggregated = _aggregate_periods(hours, zone, mode, 0.0)
     (
         all_period_names,
         period_stats,
@@ -1285,7 +1392,7 @@ def calculate_day_text(
         hour_period_idx,
         overall_temp_at_min_spread,
         overall_dewpoint_at_min_spread,
-    ) = _aggregate_periods(hours, _get_zone(time_zone), mode)
+    ) = aggregated
 
     # --- 3. Which periods have each condition, and totals for the whole window ---
     precip_periods = []
@@ -1298,12 +1405,6 @@ def calculate_day_text(
     total_snow_accum = 0.0
     total_sleet_accum = 0.0
     total_frzrain_accum = 0.0
-    total_rain_error = 0.0
-    total_snow_error = 0.0
-    total_ice_error = 0.0
-    has_any_rain_error_data = False
-    has_any_snow_error_data = False
-    has_any_ice_error_data = False
     total_hours_precip = 0
     overall_max_rain_intensity = 0.0
     overall_max_snow_intensity = 0.0
@@ -1329,34 +1430,22 @@ def calculate_day_text(
         total_snow_accum += p_data["snow_accum"]
         total_sleet_accum += p_data["sleet_accum"]
         total_frzrain_accum += p_data["frzrain_accum"]
-        total_rain_error += p_data["rain_error"]
-        total_snow_error += p_data["snow_error"]
-        total_ice_error += p_data["ice_error"]
-        has_any_rain_error_data |= p_data["has_rain_error_data"]
-        has_any_snow_error_data |= p_data["has_snow_error_data"]
-        has_any_ice_error_data |= p_data["has_ice_error_data"]
         total_hours_precip += p_data["num_hours_precip"]
         overall_max_rain_intensity = max(
-            overall_max_rain_intensity, p_data["max_rain_intensity"]
+            overall_max_rain_intensity, p_data["precip_rain_intensity"]
         )
         overall_max_snow_intensity = max(
-            overall_max_snow_intensity, p_data["max_snow_intensity"]
+            overall_max_snow_intensity, p_data["precip_snow_intensity"]
         )
         overall_max_ice_intensity = max(
-            overall_max_ice_intensity, p_data["max_ice_intensity"]
+            overall_max_ice_intensity, p_data["precip_ice_intensity"]
         )
         overall_max_wind = max(overall_max_wind, p_data["max_wind_speed"])
         overall_cloud_cover_sum += p_data["median_cloud_cover"]
         overall_min_visibility = min(overall_min_visibility, p_data["min_visibility"])
         overall_max_smoke = max(overall_max_smoke, p_data["max_smoke"])
 
-        # Check if precipitation is significant enough in this period (thresholds in mm)
-        is_precip_in_period = (
-            p_data["snow_accum"] > PRECIP_INTENSITY_THRESHOLDS["mid"]
-            or p_data["rain_accum"] > precip_text_threshold
-            or p_data["sleet_accum"] > precip_text_threshold
-            or p_data["frzrain_accum"] > precip_text_threshold
-        )
+        is_precip_in_period = _is_precip_in_period(p_data, precip_text_threshold)
         if is_precip_in_period:
             precip_periods.append(i)
             overall_precip_types.extend(p_data["precip_types_in_period"])
@@ -1583,26 +1672,35 @@ def calculate_day_text(
     # ("Rain throughout the day. 7–16 mm of rain expected."). It replaces the
     # snow-only "parenthetical". A "possible" summary doesn't get one, as an
     # expected amount would contradict it.
+    # The amount covers every hour of the window, including those where
+    # precipitation is unlikely (see _window_accumulation), but only for the
+    # types that fall in the likely hours: unlikely snow must not add "12 cm
+    # of snow expected" to "Light rain overnight".
     accumulation_sentence = None
     if precip_summary_text is not None and overall_max_pop >= PRECIP_PROB_THRESHOLD:
+        (
+            window_totals,
+            window_errors,
+            window_has_error_data,
+            window_frzrain_accum,
+            window_sleet_accum,
+        ) = _window_accumulation(hours)
+        likely_totals = {
+            "rain": total_rain_accum,
+            "snow": total_snow_accum,
+            "ice": total_ice_accum,
+        }
+        for kind, likely_total in likely_totals.items():
+            if likely_total <= 0:
+                window_totals[kind] = 0.0
+                window_errors[kind] = 0.0
+                window_has_error_data[kind] = False
         accumulation_sentence = _expected_accumulation_sentence(
-            {
-                "rain": total_rain_accum,
-                "snow": total_snow_accum,
-                "ice": total_ice_accum,
-            },
-            {
-                "rain": total_rain_error,
-                "snow": total_snow_error,
-                "ice": total_ice_error,
-            },
-            {
-                "rain": has_any_rain_error_data,
-                "snow": has_any_snow_error_data,
-                "ice": has_any_ice_error_data,
-            },
+            window_totals,
+            window_errors,
+            window_has_error_data,
             "medium-freezing-rain"
-            if total_frzrain_accum >= total_sleet_accum
+            if window_frzrain_accum >= window_sleet_accum
             else "medium-sleet",
             unit_system,
         )
@@ -1680,6 +1778,11 @@ def calculate_day_text(
                     precip_periods = precip_periods[1:]
                 while len(precip_periods) > 1 and can_trim(precip_periods[-1]):
                     precip_periods = precip_periods[:-1]
+            elif _is_possible_text(precip_summary_text):
+                # Only possible precipitation isn't described as occasional,
+                # periods of or intermittent: "possible occasional rain" hedges
+                # twice. It stays possible precipitation for the whole window.
+                pass
             elif total_hours_precip < len(hours) * INTERMITTENT_PRECIP_MIN_FRACTION:
                 precip_summary_text = ["occasional", precip_summary_text]
             elif len(wet_spells) <= PERIODS_OF_PRECIP_MAX_SPELLS and all(
@@ -1692,10 +1795,12 @@ def calculate_day_text(
     # Precipitation from the start of the window that ends by weakening is
     # "rain tapering off in the afternoon" rather than "rain until evening".
     # Not when wind or fog shares its periods, which would read "rain tapering
-    # off and windy". The spell judged is the last one starting by the end of
-    # the precipitation periods, not a later shower too light to be reported.
+    # off and windy", nor for possible precipitation ("possible light rain
+    # tapering off" describes something that may not happen as ending). The
+    # spell judged is the last one starting by the end of the precipitation
+    # periods, not a later shower too light to be reported.
     ending_spell = None
-    if has_precip:
+    if has_precip and not _is_possible_text(precip_summary_text):
         ending_spell = next(
             (
                 spell
