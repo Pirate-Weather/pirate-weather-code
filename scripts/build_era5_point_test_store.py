@@ -183,7 +183,19 @@ def main() -> None:
         raise ValueError(f"Unexpected ERA5 grid {dict(week.sizes)}")
     lats = week["latitude"].values
     lons = week["longitude"].values
-    logger.info("Opened %s week %s .. %s", GOOGLE_ERA5_URL, times[0], times[-1])
+    # Google extends final ERA5 (valid_time_stop, ~3 months behind) with the
+    # preliminary ERA5T (valid_time_stop_era5t, ~5 days behind), which ECMWF later
+    # replaces. A week that ends past the final date is ERA5T and is tagged so it
+    # can be rebuilt once final ERA5 covers it.
+    final_stop = np.datetime64(ds.attrs["valid_time_stop"]) + np.timedelta64(23, "h")
+    era5t = bool(times[-1] > final_stop)
+    logger.info(
+        "Opened %s week %s .. %s (%s)",
+        GOOGLE_ERA5_URL,
+        times[0],
+        times[-1],
+        "ERA5T" if era5t else "final ERA5",
+    )
 
     # Spot-check cells: both poles, the dateline and random cells. Their source
     # values are kept to compare with the decoded store.
@@ -264,6 +276,8 @@ def main() -> None:
             "delta_variables": list(ERA5_ARCHIVE_DELTA_VARS),
             "nan_variables": list(ERA5_ARCHIVE_NAN_VARS),
             "source": GOOGLE_ERA5_URL,
+            "era5t": era5t,
+            "google_valid_time_stop": ds.attrs["valid_time_stop"],
             "week_start": week_start.isoformat(),
             "precipitation_probability_threshold_m": PRECIP_PROB_THRESHOLD_M,
             # The API locates ERA5 cells from the grid.
