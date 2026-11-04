@@ -228,6 +228,86 @@ shard per 120 h block; about 11-19 TB. Daily ERA5T appends (about 6 days behind)
 monthly replacement with final ERA5 (3 months behind). Prototype one month first.
 Replaces `init_ERA5` (`API/io/ZarrHelpers.py`) and `_load_era5_slice`
 (`API/request/grid_indexing.py`), including the 20 GB disk cache.
+`scripts/build_era5_point_test_store.py` now builds the int16 layout measured below
+(`ERA5_ARCHIVE*` in `API/constants/model_const.py`, `encode_era5_archive_field` /
+`write_era5_archive_zarr` in `API/ingest_utils.py`, `decode_era5_archive` in
+`API/io/ZarrHelpers.py`, contract test `tests/ingest/test_era5_archive.py`): 19
+variables including direct solar (`fdir`) and cloud base height (`cbh`, NaN where there
+is none). Real 2015-06-29 week (2026-11-04): 1125 MiB, 121 objects, 11.4 GB peak
+memory (27 GB for the float32 builder), 15 s write, 2:22 wall; 16 spot cells x 19
+variables decode within one quantization step of Google's values.
+The API reads it first when `ERA5_ARCHIVE` is set (`s3://bucket/prefix` or a local
+directory; `ERA5_ARCHIVE_S3_ENDPOINT` / `_REGION` for the BHS private endpoint):
+`_load_era5_slice` -> `read_era5_archive_point`, which returns Google's layout and
+units, so nothing downstream changed. A request touching any week the archive lacks
+is read entirely from Google. Live, BHS private endpoint (2026-11-04): 15 ms warm,
+~1 s for the first read in a process (connection setup, week metadata and shard
+index), 37 ms to find a week missing; values within half a step of Google's.
+Still to do: daily ERA5T appends (recent weeks fall back to Google until then), and
+open a week with one metadata read instead of two (KvStore read + `ts.open`).
+
+Backfill estimate: ~4,500 weeks from 1940; each pulls 7.2 GiB from Google (20 source
+variables x 168 hourly 2.2 MiB chunks), so ~32 TiB in total. The read took 35 s
+(~190 MiB/s) on 2026-11-03 and 125 s on 2026-11-04 (Google or a busy test server; the
+int16 encoding adds ~1 s per variable); write 15 s, upload ~6-10 s to RBX at the store's
+1.1 GB. So ~1-2.5 min per week sequential, 3-8 days. With ~12 GB per worker, 6-8 weeks
+in parallel fit a 128 GB VM; the download (~50 h at 190 MiB/s) is then the bound, about
+2 days. Check the build VM's bandwidth cap and Google's sustained throughput first.
+
+### ERA5: tune rounding and compression for storage cost
+The one-week test store (`scripts/build_era5_point_test_store.py`, 2015-06-29, 18
+variables, 10 x 10 inner chunks of the whole week, 100 x 100 shards) is 1885 MiB, which
+would make 1940 to present roughly 8 TB. It uses the stock `KEEPBITS` classes and Blosc
+zstd 3, so there is room to shrink it.
+
+Measured 2026-11-03 (June and January 2015 weeks; sizes from a 15 % block sample,
+checked against full one-week builds; reads from an RBX-A VM against RBX buckets):
+- **Store int16, not bitrounded float32.** Linear quantization in API units (0.1 K,
+  0.1 hPa, 0.1 m/s, 1 % cloud, ozone 2 DU, UV index 0.05, solar 2 W/m2, CAPE 10 J/kg)
+  and `round(100 * sqrt(mm))` for precipitation and rates (error <= 0.01 mm below
+  1 mm, <= 1 % above). That is finer than today's bitrounding for temperature (0.05 K
+  max error against 0.125 K), and it makes the K -> C conversion moot.
+- **Bitshuffle, not byte shuffle** (Blosc zstd 3): small ints compress far better
+  bit-plane by bit-plane. Bitround floats gain nothing from it.
+- **Hour-to-hour delta for the smooth fields only** (gust, MSLP, surface pressure,
+  temperature, dewpoint, u, v, ozone), stored as values in the array, so any zarr
+  reader works; the reader takes a cumulative sum over the chunk's hours. Delta makes
+  precipitation, cloud, radiation, CAPE and precipitation type larger. The built-in
+  `numcodecs.delta` filter is no substitute: tensorstore cannot open a store that uses
+  it, and it differences the flattened chunk (along longitude: 1090 MiB/week against
+  920; with a transpose codec to difference along time: 1276).
+- **Merge the four rain/snow rates into rain and snow** (the API only uses the sums),
+  and **precompute the 3x3 precipitation probability** as a stored variable (+1.2 %):
+  a point read then never needs a neighbouring chunk (with 10 x 10 chunks about a
+  third of points straddle a chunk edge today).
+- Result (v1: 17 vars, 10 x 10 x 168 h chunks, 100 x 100 shards): **953 MiB/week
+  against 1885 (-49 %), about 4.3 TB for 1940-2025**; Jan week -52 %. Point read
+  93 KiB against 184 KiB. Without delta (plain tensorstore-readable values) 1220 MiB.
+  A ~2 % precision set (0.2 K, 0.2 m/s, 0.2 hPa, 2 % cloud, coarser precipitation)
+  gives 805 MiB/week (3.8 TB).
+- No help: dewpoint depression instead of dewpoint (-0.4 %), time-innermost chunk
+  order (+15-35 %), separate per-variable chunks (+1 %, and 17 requests per point),
+  lz4/lz4hc, pcodec (+7 %, not readable by tensorstore), zfp (2.5x larger at this
+  chunk size). zstd 5 is -1.3 % at similar write speed; zstd 9 -3.5 % but ~30x slower.
+- Chunk shape barely moves size once bitshuffled: 5 x 5 cells costs +4.6 % for 24 KiB
+  reads, but the full-archive shard index grows from 0.75 GB to 3 GB (10 x 10 x 168 h)
+  - keep 10 x 10 unless indexes live on local disk. Day-long time chunks: 2 requests
+  per point and larger.
+- RBX High Performance, 16 reads in flight: today's layout 294-299 points/s at
+  ~40 ms p50; v1 460-493 points/s at 21 ms; 5 x 5 chunks 531-590 points/s. Without a
+  cached index (index GET + chunk GET) a read roughly doubles. RBX Standard is seek
+  bound (190-320 ms p50, p99 up to 1.7 s, ~60 points/s) whatever the layout, so the
+  time-machine path needs High Performance storage or local disk.
+- Untested idea, measured for size only: latitude bands with fewer longitudes toward
+  the poles (constant ~28 km east-west spacing, like ERA5's native reduced Gaussian
+  grid) store 64 % of the points in 75 % of the bytes (710 MiB/week); it resamples
+  Google's 0.25 deg grid, so check the API's nearest-cell lookup and values first.
+- Extra variables Google's store already has, cost per week in this encoding:
+  `fg10` gust since last hour 83 MiB (replace `i10fg` at no net cost), `mx2t`/`mn2t`
+  as offsets from `t2m` 49 MiB each, snowfall `sf` 14, snow depth `sd` ~1-2, direct
+  solar `fdir` 59, low/mid/high cloud 90/79/66, boundary layer height 80, cloud base
+  112. ERA5 has no visibility or sunshine duration; ERA5-Land and the EDA spread are
+  CDS-only.
 
 ### Move to OVHCloud
 Including a Terraform setup script.

@@ -1316,6 +1316,103 @@ def write_final_zarr(
     close_store(store)
 
 
+def encode_era5_archive_field(name: str, values: np.ndarray) -> np.ndarray:
+    """Encode one week of an ERA5 archive variable, ``(time, y, x)`` in API units,
+    as int16 per ``ERA5_ARCHIVE_ENCODING``; ``ERA5_ARCHIVE_DELTA_VARS`` become
+    hour-to-hour differences along time (first hour absolute).
+
+    Quantized integers compress far better than bitrounded floats (1885 -> 953
+    MiB per week with bitshuffle, measured 2026-11-03), and a linear step keeps
+    an absolute precision where bitrounding kept a relative one (0.125 K at
+    300 K). NaN is allowed only in ``ERA5_ARCHIVE_NAN_VARS`` and is stored as
+    ``ERA5_ARCHIVE_FILL``. A value outside int16 raises rather than being
+    clipped into the store.
+    """
+    from API.constants.model_const import (
+        ERA5_ARCHIVE_DELTA_VARS,
+        ERA5_ARCHIVE_ENCODING,
+        ERA5_ARCHIVE_FILL,
+        ERA5_ARCHIVE_NAN_VARS,
+    )
+
+    kind, step_or_scale, offset = ERA5_ARCHIVE_ENCODING[name]
+    missing = np.isnan(values)
+    if missing.any() and name not in ERA5_ARCHIVE_NAN_VARS:
+        raise ValueError(f"ERA5 {name} has NaN values; not encoding the week")
+    if np.isinf(values).any():
+        raise ValueError(f"ERA5 {name} has infinite values; not encoding the week")
+    if kind == "lin":
+        scaled = (values - offset) / step_or_scale
+    else:
+        # ERA5 packing leaves accumulations of about -1e-9: zero precipitation.
+        scaled = np.sqrt(np.clip(values, 0, None)) * step_or_scale
+    scaled = np.rint(np.where(missing, 0, scaled))
+    is_delta = name in ERA5_ARCHIVE_DELTA_VARS
+    # Delta variables stay within half the range so every difference fits int16.
+    limit = 16383 if is_delta else 32767
+    if np.abs(scaled).max() > limit:
+        raise OverflowError(f"ERA5 {name} exceeds its int16 encoding range")
+    encoded = scaled.astype(np.int16)
+    del scaled
+    encoded[missing] = ERA5_ARCHIVE_FILL
+    if is_delta:
+        encoded[1:] = np.diff(encoded, axis=0)
+    return encoded
+
+
+def write_era5_archive_zarr(
+    stacked: np.ndarray,
+    store_path: str,
+    chunk: int,
+    shard: int,
+    zarr_store_workers: int,
+    attributes: dict,
+) -> None:
+    """Write one week of the ERA5 archive: an int16 ``(variable, time, y, x)``
+    array from ``encode_era5_archive_field``, inner chunks of every variable and
+    hour for a ``chunk`` square, in ``shard`` square shards, Blosc zstd 3 with
+    bitshuffle.
+
+    Bitshuffle beat byte shuffle by 15-20 % on these small integers (byte
+    shuffle won for bitrounded floats); zstd 9 was only 3.5 % smaller and ~30x
+    slower. One band of shards is written per call, which keeps zarr's encode
+    buffers to one band rather than the week.
+    """
+    import zarr
+
+    from API.constants.model_const import ERA5_ARCHIVE_FILL
+
+    if stacked.dtype != np.int16 or stacked.ndim != 4:
+        raise ValueError(
+            f"Expected int16 (variable, time, y, x), got {stacked.dtype} {stacked.shape}"
+        )
+    if shard % chunk or stacked.shape[2] % chunk or stacked.shape[3] % chunk:
+        raise ValueError(f"{stacked.shape} is not a whole number of {chunk} chunks")
+    times = np.asarray(attributes["time"], dtype=float)
+    if len(times) != stacked.shape[1] or np.any(np.diff(times) <= 0):
+        raise ValueError(
+            "time attribute must match the array's strictly increasing hours"
+        )
+
+    array = zarr.create_array(
+        store=zarr.storage.LocalStore(store_path),
+        shape=stacked.shape,
+        chunks=(stacked.shape[0], stacked.shape[1], chunk, chunk),
+        shards=(stacked.shape[0], stacked.shape[1], shard, shard),
+        dtype="int16",
+        fill_value=ERA5_ARCHIVE_FILL,
+        compressors=zarr.codecs.BloscCodec(
+            cname="zstd", clevel=3, shuffle="bitshuffle", typesize=2
+        ),
+        dimension_names=("variable", "time", "latitude", "longitude"),
+        attributes={**attributes, "fill_value": ERA5_ARCHIVE_FILL},
+        overwrite=True,
+    )
+    with zarr.config.set({"threading.max_workers": zarr_store_workers}):
+        for y0 in range(0, stacked.shape[2], shard):
+            array[:, :, y0 : y0 + shard, :] = stacked[:, :, y0 : y0 + shard, :]
+
+
 def remote_object_exists(remote, key: str) -> bool:
     """True if ``key`` exists on the remote (a local remote raises a different error)."""
     import obstore
