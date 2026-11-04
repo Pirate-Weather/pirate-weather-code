@@ -142,6 +142,8 @@ def test_daily_sleet_is_kept_apart_from_freezing_rain(
     )
 
     assert result.tolist() == [PRECIP_IDX[expected]]
+
+
 def test_mixed_ensemble_hours_keep_their_precipitation():
     """GEPS and REPS mark an hour with several strong channels as mixed before the
     accumulation is split by type, which only knew rain, snow, ice and sleet: the

@@ -5,11 +5,10 @@ from __future__ import annotations
 import datetime
 import functools
 import math
+from zoneinfo import ZoneInfo
 
 import reverse_geocode
 from timezonefinder import TimezoneFinder
-from typing import TYPE_CHECKING
-from zoneinfo import ZoneInfo
 
 from API.constants.api_const import (
     DEFAULT_ROUNDING_INTERVAL,
