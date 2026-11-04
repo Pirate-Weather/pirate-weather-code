@@ -273,6 +273,55 @@ def test_daily_precipitation_pattern(wet_hours, amounts, expected):
 
 
 @pytest.mark.parametrize(
+    ("wet_hours", "amounts", "pops", "expected"),
+    [
+        # Light rain from 11am to 3am that is only likely from 1am: the
+        # unlikely hours must not stretch the 1-3am rain across the day.
+        pytest.param(
+            list(range(5, 22)),
+            [0.3] * 17,
+            [0.1] * 14 + [0.6] * 3,
+            ["during", "very-light-rain", "night"],
+            id="likely-only-overnight",
+        ),
+        # Rain that is only possible isn't "possible rain tapering off".
+        pytest.param(
+            list(range(10)),
+            [3, 3, 3, 3, 3, 3, 2.5, 1.5, 0.8, 0.3],
+            [0.15] * 10,
+            ["until", "possible-medium-rain", "evening"],
+            id="possible-not-tapering",
+        ),
+        # Nor is it "possible occasional rain".
+        pytest.param(
+            [2, 8, 14, 20],
+            [1.0] * 4,
+            [0.15] * 4,
+            ["for-day", "possible-light-rain"],
+            id="possible-not-occasional",
+        ),
+    ],
+)
+def test_daily_precipitation_follows_chance(wet_hours, amounts, pops, expected):
+    """Precipitation periods must come from the hours where it is likely, so a
+    model's long tail of unlikely light rain (common in the Canadian models)
+    doesn't turn a short likely spell into all-day rain. With no likely
+    precipitation the summary falls back to "possible" precipitation, which
+    must not be described as tapering off or occasional.
+    """
+    hours = make_hours(24, BASE_TIME + 6 * HOUR, cloudCover=0.95)
+    for hour_idx, amount, pop in zip(wet_hours, amounts, pops, strict=True):
+        hours[hour_idx].update(
+            precipType="rain",
+            rainIntensity=amount,
+            liquidAccumulation=amount,
+            precipProbability=pop,
+        )
+
+    assert calculate_day_text(hours, True, "UTC", "day")[1] == ["sentence", expected]
+
+
+@pytest.mark.parametrize(
     ("cloud_cover", "expected"),
     [
         # HRRR/HRDPS-style two-hour dip must not turn an overcast day into
