@@ -23,15 +23,6 @@ so `exclude=aigfs` also sets `ex_gfs=1` and `exclude=aigefs` also sets `ex_gefs=
 Excluding an AI model silently drops its conventional counterpart. The model flags
 should match whole comma-separated tokens.
 
-### `interpolate_temporal_gaps_efficiently` fills gaps longer than `max_gap_hours`
-`API/ingest_utils.py` (~1400-1458): `interpolate_na(limit=max_gap_hours)` fills the
-first `limit` NaNs of *any* gap, and the unconditional `ffill`/`bfill` that follows
-fills the rest, so `[1, nan×5, 7]` with `max_gap_hours=3` becomes
-`[1, 2, 3, 4, 4, 4, 7]` (partial ramp, flat line, jump). The docstring implies
-xarray's `max_gap` semantics (leave long gaps alone). Used by the DWD ingest with
-`max_gap_hours=3`; `fill_station_gaps` runs first and already blanks whole series
-with long gaps, so the impact is limited to gaps it doesn't catch.
-
 ## Improvements
 
 ### `interp_time_take_blend`: blend in the data's dtype
@@ -360,6 +351,13 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### DWD gap filling leaves long gaps alone (2026-11-04)
+`interpolate_temporal_gaps_efficiently` used `limit=`, which fills the start of a gap of any
+length, then a `ffill`/`bfill` that filled the rest: `[1, nan x 5, 7]` with a 3 hour limit
+became `[1, 2, 3, 4, 4, 4, 7]`. Gaps past the limit now stay missing, so another model fills
+them, and only the two ends of a series are extended. `fill_station_gaps` already blanks
+most such series first, so this is rare in practice.
 
 ### `useETOPO` docs and the stale `aqiunits=tw` entry (2026-11-04)
 The README's Docker example and a compose comment set `useETOPO`, but the API reads

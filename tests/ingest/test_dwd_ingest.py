@@ -3,6 +3,7 @@
 import dask.array as da
 import numpy as np
 import pandas as pd
+import pytest
 import xarray as xr
 
 from API.ingest_utils import interpolate_temporal_gaps_efficiently
@@ -103,4 +104,53 @@ def test_gridded_temporal_gap_fill_uses_nearest_for_ptype():
     )
     np.testing.assert_allclose(
         result["PTYPE_surface"].values.ravel(), [0.0, 0.0, 0.0, 3.0, 3.0, 3.0]
+    )
+
+
+@pytest.mark.parametrize(
+    "times",
+    [
+        pytest.param(np.arange(9), id="numeric-time"),
+        pytest.param(
+            np.datetime64("2026-11-04T00") + np.arange(9) * np.timedelta64(1, "h"),
+            id="datetime-time",
+        ),
+    ],
+)
+def test_gridded_gap_fill_leaves_long_gaps_missing(times):
+    """A partial ramp, a flat line and a jump aren't weather: [1, nan x 5, 7] became
+    [1, 2, 3, 4, 4, 4, 7] with a 3 hour limit. A gap past the limit must stay missing
+    so another model can fill those hours, and a gap at the limit is still filled.
+    The real store has datetimes, where the limit is a duration.
+    """
+
+    def _gridded(values):
+        values = np.array(values).reshape(9, 1, 1)
+        return xr.Dataset(
+            {
+                "TMP_2maboveground": xr.DataArray(
+                    da.from_array(values, chunks=values.shape),
+                    dims=("time", "y", "x"),
+                    coords={"time": times},
+                )
+            }
+        )
+
+    def _filled(values):
+        return (
+            interpolate_temporal_gaps_efficiently(
+                _gridded(values), max_gap_hours=3, time_dim="time"
+            )
+            .compute()["TMP_2maboveground"]
+            .values.ravel()
+        )
+
+    nan = np.nan
+    np.testing.assert_allclose(
+        _filled([nan, 1.0, nan, nan, nan, nan, nan, 7.0, nan]),
+        [1.0, 1.0, nan, nan, nan, nan, nan, 7.0, 7.0],
+    )
+    np.testing.assert_allclose(
+        _filled([nan, 1.0, nan, nan, nan, 5.0, nan, 7.0, nan]),
+        [1.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 7.0],
     )

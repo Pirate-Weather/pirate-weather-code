@@ -2035,8 +2035,9 @@ def interpolate_temporal_gaps_efficiently(
         ds_chunked (xr.Dataset): Input dataset. Must be chunked with time as a single chunk.
         nearest_vars (list): List of variable names to use 'nearest' interpolation for
                              (e.g., flags, codes). Default is 'linear' for others.
-        max_gap_hours (int): Max gap size to interpolate internally.
-                             Extrapolation is applied to the ends regardless of gap size.
+        max_gap_hours (int): Longest run of missing hours to interpolate internally;
+                             longer gaps stay missing. Extrapolation is applied to the
+                             ends regardless of gap size.
         time_dim (str): Name of the time dimension.
 
     Returns:
@@ -2058,16 +2059,31 @@ def interpolate_temporal_gaps_efficiently(
             block, dims=(time_dim, "y", "x"), coords={time_dim: time_coords}
         )
 
-        # 1. Interpolate Internal Gaps
-        # use_coordinate=True ensures we respect actual time steps, not just index count
+        # 1. Interpolate Internal Gaps, leaving gaps longer than max_gap_hours alone.
+        # max_gap is the distance between the valid points either side of a gap, so
+        # N missing hourly steps span N + 1 hours. `limit` would be wrong here: it
+        # fills the first N steps of a gap of any length.
+        max_gap = max_gap_hours + 1
+        if np.issubdtype(time_coords.dtype, np.datetime64):
+            max_gap = np.timedelta64(max_gap, "h")
         filled = da_temp.interpolate_na(
-            dim=time_dim, method=method, limit=max_gap_hours, use_coordinate=True
+            dim=time_dim, method=method, max_gap=max_gap, use_coordinate=True
         )
 
         # 2. Extrapolate Edges (Nearest Neighbour)
-        # We use ffill (forward) and bfill (backward) to extend the last known
-        # valid value to the start/end of the series.
-        filled = filled.ffill(time_dim).bfill(time_dim)
+        # Extend the first and last known values to the ends of the series, and no
+        # further: a long gap between valid values stays missing so that another
+        # model can fill it, rather than holding a stale value across it.
+        valid = da_temp.notnull()
+        has_earlier_value = valid.cumsum(time_dim) > 0
+        has_later_value = (
+            valid.isel({time_dim: slice(None, None, -1)})
+            .cumsum(time_dim)
+            .isel({time_dim: slice(None, None, -1)})
+            > 0
+        )
+        is_edge = ~(has_earlier_value & has_later_value)
+        filled = filled.where(~is_edge, filled.ffill(time_dim).bfill(time_dim))
 
         return filled.values
 
