@@ -256,7 +256,7 @@ def _get_time_phrase(period_indices, all_periods, partial_day=False):
     The periods are split into runs of consecutive periods. Each run is then
     described relative to the start and end of the window:
 
-        whole window                       ["for-day"]
+        whole window                       ["for-day"], or ["for-rest-of-day"]
         run from the start and a run to    ["until-starting-again", first dry, first wet again]
         the end (dry in between)
         only single, separate periods      ["during", P] / ["during", ["and", P1, P2]]
@@ -274,8 +274,8 @@ def _get_time_phrase(period_indices, all_periods, partial_day=False):
     - period_indices (list): Sorted indices of the periods with the condition.
     - all_periods (list): The period names of the window, in order.
     - partial_day (bool): The window is what is left of today, so a condition
-      filling it is named by its periods: the hours before it are unknown, so it
-      can't be "throughout the day".
+      filling it lasts "for the rest of the day": the hours before it are not
+      looked at, so it can't be "throughout the day".
 
     Returns:
     - list | None: The time phrase, or None if the condition never happens.
@@ -285,13 +285,7 @@ def _get_time_phrase(period_indices, all_periods, partial_day=False):
 
     num_periods = len(all_periods)
     if len(period_indices) == num_periods:
-        if not partial_day:
-            return ["for-day"]
-        if num_periods == 1:
-            return ["during", all_periods[0]]
-        if num_periods == 2:
-            return ["during", _join_with_and(all_periods)]
-        return ["during", ["list", *all_periods]]
+        return ["for-rest-of-day"] if partial_day else ["for-day"]
 
     # Runs of consecutive periods, e.g. [0, 1, 3] -> [[0, 1], [3]]
     runs = [[period_indices[0]]]
@@ -420,7 +414,7 @@ def calculate_period_summary_text(
 
     if time_phrase is None:
         summary_text = None
-    elif time_phrase == ["for-day"]:
+    elif time_phrase in (["for-day"], ["for-rest-of-day"]):
         # Half-day summaries describe the whole half-day with the bare condition
         # (#385), except a night half-day can say "throughout the night"
         if for_night:
@@ -428,7 +422,7 @@ def calculate_period_summary_text(
         elif half_day:
             summary_text = condition_text
         else:
-            summary_text = ["for-day", condition_text]
+            summary_text = [time_phrase[0], condition_text]
     else:
         summary_text = _insert_condition_text(time_phrase, condition_text)
 

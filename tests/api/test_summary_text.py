@@ -516,17 +516,10 @@ def test_dry_week_condition_icon_follows_the_icon_set():
     assert calculate_weekly_text(breezy, "UTC", icon="pirate")[1] == "breezy"
 
 
-@pytest.mark.parametrize(
-    ("start_hour", "periods"),
-    [
-        pytest.param(13, ["list", "afternoon", "evening", "night"], id="three-periods"),
-        pytest.param(19, ["and", "evening", "night"], id="two-periods"),
-    ],
-)
-def test_rest_of_today_is_not_throughout_the_day(start_hour, periods):
+@pytest.mark.parametrize("start_hour", [13, 19, 23])
+def test_rest_of_today_is_not_throughout_the_day(start_hour):
     """Today's summary only covers the hours left. Rain filling them can't be
-    "throughout the day", which would claim hours the summary no longer looks at,
-    so it must name the periods. A whole window would otherwise have no phrase.
+    "throughout the day", which would claim hours the summary no longer looks at.
     """
     # Light enough not to add an "expected" sentence
     rain = RAIN | {"liquidAccumulation": 0.5, "windSpeed": 1.0}
@@ -534,6 +527,5 @@ def test_rest_of_today_is_not_throughout_the_day(start_hour, periods):
 
     _, text = calculate_day_text(hours, True, "UTC", "day", partial_day=True)
 
-    # ["sentence", ["during", <rain text>, <periods>]]
-    assert text[1][0] == "during"
-    assert text[1][2] == periods
+    # ["sentence", ["for-rest-of-day", <rain text>]]
+    assert text[1][0] == "for-rest-of-day"

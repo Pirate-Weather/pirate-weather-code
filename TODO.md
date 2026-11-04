@@ -407,11 +407,10 @@ implausible value blanks every above-max value").
   Sky visibility icon is `fog`. Cairo: "Misty today through Friday, with highs ...". The
   week keeps one condition, and the icon follows it.
 - **Today's summary covers the rest of the day.** `calculate_day_text(partial_day=True)`
-  starts at the current hour and names the periods instead of "throughout the day":
-  "Clear in the afternoon, evening and overnight". Today's icon comes from the same call,
-  so it follows too, and today can now join a rainy run in the weekly text. Half-day
-  summaries still cover their whole window. A shorter "for the rest of the day" would
-  read better but needs a new key in all 57 languages.
+  starts at the current hour, and a condition filling it lasts "for the rest of the
+  day" (`for-rest-of-day`, new in pirateweather-translations 2.1.0). Today's icon comes
+  from the same call, so it follows too, and today can now join a rainy run in the weekly
+  text. Half-day summaries still cover their whole window.
 - **GEPS and REPS use mixed** when several channels are strong. The accumulation split
   and the daily text only knew the four types, so these hours count as ice accumulation
   (as they did when labelled sleet) and read as mixed. The minutely columns have no mixed
