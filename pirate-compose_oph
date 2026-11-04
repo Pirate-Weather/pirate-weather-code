@@ -625,7 +625,7 @@ services:
 #      - nvme/Data:/data:ro
 #    environment:
 #      STAGE: "PROD"
-#      useETOPO: "False"
+#      use_etopo: "False"
 #      s3_bucket: "/data"
 #      TIMING: "TRUE"
 #      save_type: "Download"

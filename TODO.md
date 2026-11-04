@@ -23,16 +23,6 @@ so `exclude=aigfs` also sets `ex_gfs=1` and `exclude=aigefs` also sets `ex_gefs=
 Excluding an AI model silently drops its conventional counterpart. The model flags
 should match whole comma-separated tokens.
 
-### `aqiunits=tw` is silently ignored
-`API/request/preprocess.py:731` documents `tw → Taiwan AQI`, but `tw` is missing from
-`_VALID_AQI_UNITS` and `_AQI_UNITS_MAP`, so the parameter falls back to the unit
-system's default. Either add Taiwan AQI support or fix the comment.
-
-### `useETOPO` environment variable does nothing
-`API/responseLocal.py:108` reads `use_etopo`, but the README Docker example
-(`README.md`, "Option 2") sets `useETOPO=FALSE`. ETOPO is loaded anyway.
-Fix the README (or accept both names).
-
 ### `interpolate_temporal_gaps_efficiently` fills gaps longer than `max_gap_hours`
 `API/ingest_utils.py` (~1400-1458): `interpolate_na(limit=max_gap_hours)` fills the
 first `limit` NaNs of *any* gap, and the unconditional `ffill`/`bfill` that follows
@@ -370,6 +360,13 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### `useETOPO` docs and the stale `aqiunits=tw` entry (2026-11-04)
+The README's Docker example and a compose comment set `useETOPO`, but the API reads
+`use_etopo`, so ETOPO loaded anyway. Both now use the real name. The `aqiunits=tw` entry was
+already out of date: the comment no longer mentions Taiwan and nothing implements it, so
+`tw` falls back like any unknown value. Taiwan AQI support would be a feature, and needs
+breakpoints checked against the official tables.
 
 ### SILAM runs after FMI posts each cycle (2026-11-04)
 The 07:00 UTC run always missed that morning's file, leaving the API a day behind. Over the
