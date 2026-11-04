@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
 import xarray as xr
 from zarr.abc.store import (
     ByteRequest,
@@ -235,3 +236,32 @@ def init_ERA5(cache_dir: str | None = None):
     }
 
     return ERA5_Data
+
+
+def decode_era5_archive(columns: np.ndarray, attributes: dict) -> np.ndarray:
+    """Decode int16 ``(variable, hours)`` columns of an ERA5 archive store to
+    float64 values in the store's API units (``attributes["units"]``).
+
+    ``columns`` must start at the first hour of the store's week: the
+    ``delta_variables`` hold hour-to-hour differences, so their values are the
+    cumulative sum from that hour. The fill value (padding rows; no cloud base)
+    becomes NaN. Reads the encoding from the store's attributes, so a store keeps
+    decoding correctly if the constants change for later builds.
+    """
+    fill = attributes["fill_value"]
+    delta = set(attributes["delta_variables"])
+    missing = columns == fill
+    values = np.full(columns.shape, np.nan)
+    for i, name in enumerate(attributes["variables"]):
+        series = columns[i].astype(np.int64)
+        if name in delta:
+            if missing[i].any():
+                continue  # padding row: no data
+            series = np.cumsum(series)
+        kind, step_or_scale, offset = attributes["encoding"][name]
+        if kind == "lin":
+            decoded = series * step_or_scale + offset
+        else:
+            decoded = (series / step_or_scale) ** 2
+        values[i] = np.where(missing[i], np.nan, decoded)
+    return values

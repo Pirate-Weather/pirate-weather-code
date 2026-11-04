@@ -201,6 +201,81 @@ ERA5 = {
 
 ERA5_SOURCE_VARS = tuple(var for var in ERA5 if var != "prob")
 
+# Own ERA5 archive (scripts/build_era5_point_test_store.py), one int16 store per
+# 1940-aligned week. Column map as for the forecast stores: time is column 0,
+# rebuilt from the store's "time" attribute. Values are in the API units below,
+# not Google's (mm rather than m, hPa rather than Pa, W/m2 rather than hourly
+# J/m2). rain_rate and snowfall_rate_water_equivalent are the large-scale plus
+# convective rates (the API only uses the sums), and precipitation_probability is
+# the API's 3x3 neighbourhood probability, precomputed so a point read is one chunk.
+ERA5_ARCHIVE = {
+    "instantaneous_10m_wind_gust": 1,  # m/s
+    "mean_sea_level_pressure": 2,  # hPa
+    "2m_temperature": 3,  # K
+    "2m_dewpoint_temperature": 4,  # K
+    "10m_u_component_of_wind": 5,  # m/s
+    "10m_v_component_of_wind": 6,  # m/s
+    "precipitation_type": 7,  # ERA5 ptype code
+    "total_precipitation": 8,  # mm over the hour
+    "rain_rate": 9,  # mm/h
+    "snowfall_rate_water_equivalent": 10,  # mm/h
+    "total_column_ozone": 11,  # DU
+    "total_cloud_cover": 12,  # %
+    "downward_uv_radiation_at_the_surface": 13,  # W/m2, mean over the hour
+    "surface_solar_radiation_downwards": 14,  # W/m2, mean over the hour
+    "convective_available_potential_energy": 15,  # J/kg
+    "surface_pressure": 16,  # hPa
+    "precipitation_probability": 17,  # %
+    "total_sky_direct_solar_radiation_at_surface": 18,  # W/m2, mean over the hour
+    "cloud_base_height": 19,  # m above the surface, NaN where there is none
+}
+
+# int16 encoding per archive variable: ("lin", step, offset) stores
+# round((value - offset) / step); ("sqrt", scale, 0) stores round(sqrt(value) * scale),
+# which keeps <= 0.01 mm error below 1 mm and <= 1 % above for precipitation.
+# Steps follow the API's precision classes (0.1 K, 0.1 hPa, 0.1 m/s, 1 %), coarser
+# where the API reports far less than the source precision (ozone, UV, solar, CAPE).
+ERA5_ARCHIVE_ENCODING = {
+    "instantaneous_10m_wind_gust": ("lin", 0.1, 0.0),
+    "mean_sea_level_pressure": ("lin", 0.1, 1000.0),
+    "2m_temperature": ("lin", 0.1, 273.15),
+    "2m_dewpoint_temperature": ("lin", 0.1, 273.15),
+    "10m_u_component_of_wind": ("lin", 0.1, 0.0),
+    "10m_v_component_of_wind": ("lin", 0.1, 0.0),
+    "precipitation_type": ("lin", 1.0, 0.0),
+    "total_precipitation": ("sqrt", 100.0, 0.0),
+    "rain_rate": ("sqrt", 100.0, 0.0),
+    "snowfall_rate_water_equivalent": ("sqrt", 100.0, 0.0),
+    "total_column_ozone": ("lin", 2.0, 300.0),
+    "total_cloud_cover": ("lin", 1.0, 0.0),
+    "downward_uv_radiation_at_the_surface": ("lin", 0.5, 0.0),  # 0.05 UV index
+    "surface_solar_radiation_downwards": ("lin", 2.0, 0.0),
+    "convective_available_potential_energy": ("lin", 10.0, 0.0),
+    "surface_pressure": ("lin", 0.1, 750.0),
+    "precipitation_probability": ("lin", 0.01, 0.0),
+    "total_sky_direct_solar_radiation_at_surface": ("lin", 2.0, 0.0),
+    "cloud_base_height": ("lin", 10.0, 0.0),
+}
+
+# Smooth in time: these are stored as hour-to-hour differences (first hour
+# absolute), which made them 10-25 % smaller; a reader takes the cumulative sum
+# from the first hour of the week. Delta makes the intermittent fields larger.
+ERA5_ARCHIVE_DELTA_VARS = (
+    "instantaneous_10m_wind_gust",
+    "mean_sea_level_pressure",
+    "2m_temperature",
+    "2m_dewpoint_temperature",
+    "10m_u_component_of_wind",
+    "10m_v_component_of_wind",
+    "total_column_ozone",
+    "surface_pressure",
+)
+
+# int16 fill: padding rows past the last latitude, and cloud base where there is none.
+ERA5_ARCHIVE_FILL = -32768
+# The only archive variable where NaN is a value rather than missing data.
+ERA5_ARCHIVE_NAN_VARS = ("cloud_base_height",)
+
 # DWD MOSMIX variable indices
 # These match the zarr_vars order in DWD_Mosmix_Local_Ingest.py:
 # time, TMP_2maboveground, DPT_2maboveground, RH_2maboveground,
