@@ -392,3 +392,22 @@ jobs:
       - name: Force new ECS deployment for pirate-api service
         run: |
           aws ecs update-service --cluster PirateBackEc2 --service PirateDev --force-new-deployment
+
+  restart_ovh_dev:
+    name: Restart dev on OVH
+    # dev pushes only: a release publishes the release tag, which dev doesn't run.
+    if: github.event_name == 'push'
+    needs: [manifest_api]
+    runs-on: ubuntu-24.04
+    steps:
+      # The dev Deployment uses the :dev tag with imagePullPolicy Always, so a restart
+      # pulls the manifest just published. This credential can restart only that Deployment.
+      - name: Restart the dev Deployment
+        env:
+          KUBECONFIG_DATA: ${{ secrets.OVH_RBX_DEV_KUBECONFIG }}
+        run: |
+          umask 077
+          export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
+          printf '%s' "$KUBECONFIG_DATA" > "$KUBECONFIG"
+          kubectl -n pirate-weather rollout restart deployment/dev
+          kubectl -n pirate-weather rollout status deployment/dev --timeout=600s
