@@ -93,6 +93,13 @@ SOURCE_READ_THREADS = 64
 # Matches ERA5_PRECIP_PROB_THRESHOLD_M in API/request/grid_indexing.py, which the
 # API used to apply to Google's total_precipitation (m) at read time.
 PRECIP_PROB_THRESHOLD_M = 0.0001
+# ERA5 has isolated spurious CAPE spikes over steep terrain: 2011-04-30 09 UTC
+# has 24 cells over the Peruvian Andes at up to 466,656 J/kg, where observed CAPE
+# tops out near 8,000 J/kg and ERA5's ordinary maximum in the tested weeks was
+# ~9,700. Such values are capped (and counted in the log) rather than stored; a
+# cap well above any real value leaves genuine extremes untouched. Other fields
+# keep encode_era5_archive_field's strict range check, so new oddities still fail.
+CAPE_MAX_J_PER_KG = 20000.0
 
 DERIVED_VARS = ("precipitation_probability",)
 ARCHIVE_UNITS = {
@@ -250,7 +257,18 @@ def main() -> None:
                 store_encoded(
                     "precipitation_probability", precipitation_probability(values)
                 )
-            store_encoded(name, values * np.float32(factor))
+            values = values * np.float32(factor)
+            if name == "convective_available_potential_energy":
+                spurious = int((values > CAPE_MAX_J_PER_KG).sum())
+                if spurious:
+                    logger.warning(
+                        "Capping %d spurious ERA5 CAPE values (max %.0f J/kg) at %.0f",
+                        spurious,
+                        float(np.nanmax(values)),
+                        CAPE_MAX_J_PER_KG,
+                    )
+                    np.minimum(values, CAPE_MAX_J_PER_KG, out=values)
+            store_encoded(name, values)
             del values
             logger.info(
                 "Read and encoded %s in %.1f s", name, time.perf_counter() - t_var
