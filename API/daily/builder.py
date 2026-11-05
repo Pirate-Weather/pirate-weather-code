@@ -23,7 +23,7 @@ from API.legacy.daily import (
     pick_day_icon_and_summary,
     select_hour_window,
 )
-from API.PirateDailyText import calculate_day_text
+from API.PirateDailyText import HourColumns, calculate_day_text
 
 
 @dataclass
@@ -36,16 +36,33 @@ class DailySection:
 
 
 def _get_night_window_end(
-    day_array_4am_grib: np.ndarray, idx: int, start_time: int
+    day_array_6am_grib: np.ndarray, idx: int, start_time: int
 ) -> int:
-    """Return the closing 4am boundary for a night window.
+    """Return the closing 6am boundary for a night window.
 
     Test fixtures may only provide `daily_days` boundaries rather than the
-    next-day 4am marker required by the legacy night summary window.
+    next-day 6am marker required by the night summary window.
     """
-    if idx + 1 < len(day_array_4am_grib):
-        return int(day_array_4am_grib[idx + 1])
-    return start_time + (11 * 3600)
+    if idx + 1 < len(day_array_6am_grib):
+        return int(day_array_6am_grib[idx + 1])
+    return start_time + (12 * 3600)
+
+
+def _circular_mean_by_day(directions, day_index, daily_days):
+    """Mean direction in degrees (0 to 360) per day, from unit vectors.
+
+    An arithmetic mean of 350 and 10 degrees would report 180: due south for
+    winds on either side of north. Hours whose index is outside the forecast days
+    are ignored, and a NaN hour makes its day NaN, as in the other daily means.
+    bincount handles every day in one pass, which is about 6x cheaper per request
+    than a call per day inside _aggregate_stats.
+    """
+    in_range = (day_index >= 0) & (day_index < daily_days)
+    days = day_index[in_range].astype(int)
+    radians = np.radians(directions[in_range])
+    sin_sum = np.bincount(days, weights=np.sin(radians), minlength=daily_days)
+    cos_sum = np.bincount(days, weights=np.cos(radians), minlength=daily_days)
+    return np.mod(np.degrees(np.arctan2(sin_sum, cos_sum)), 360.0)
 
 
 def _aggregate_stats(
@@ -87,13 +104,26 @@ def _aggregate_stats(
     res_argmin = []
     res_precip = np.zeros(daily_days)
 
-    masks = [index_array == day_index for day_index in range(daily_days)]
-    for mIDX, mask in enumerate(masks):
-        filtered_data = InterPhour[mask]
+    for mIDX in range(daily_days):
+        day_rows = np.flatnonzero(index_array == mIDX)
+        n_rows = day_rows.size
+        if n_rows > 0 and day_rows[-1] - day_rows[0] + 1 == n_rows:
+            # The hours of a day are a contiguous run, so a slice (a view)
+            # replaces the boolean-mask copy.
+            filtered_data = InterPhour[day_rows[0] : day_rows[-1] + 1]
+        else:
+            # Empty or non-contiguous selection: keep the original mask path
+            # (an empty day raises/warns exactly as before).
+            filtered_data = InterPhour[index_array == mIDX]
 
-        if calc_mean:
+        if calc_mean and calc_sum:
+            # np.mean is add.reduce / n, so reuse the sum instead of reducing twice.
+            day_sum = np.sum(filtered_data, axis=0)
+            res_sum.append(day_sum)
+            res_mean.append(np.true_divide(day_sum, filtered_data.shape[0]))
+        elif calc_mean:
             res_mean.append(np.mean(filtered_data, axis=0))
-        if calc_sum:
+        elif calc_sum:
             res_sum.append(np.sum(filtered_data, axis=0))
         if calc_max:
             res_max.append(np.max(filtered_data, axis=0))
@@ -465,6 +495,15 @@ def _build_display_data(
     )
 
 
+def _round_columns_by_decimals(arr, rounding_map):
+    """Round columns in place, one np.round call per distinct decimal count."""
+    cols_by_dec = {}
+    for idx_field, decimals in rounding_map.items():
+        cols_by_dec.setdefault(decimals, []).append(idx_field)
+    for decimals, cols in cols_by_dec.items():
+        arr[:, cols] = np.round(arr[:, cols], decimals)
+
+
 def _apply_rounding(
     daily_display_mean,
     daily_display_high,
@@ -519,42 +558,19 @@ def _apply_rounding(
         DATA_DAY["moon_phase"]: ROUNDING_RULES.get("moonPhase", 2),
     }
 
-    for idx_field, decimals in daily_mean_rounding_map.items():
-        if decimals == 0:
-            daily_display_mean[:, idx_field] = np.round(
-                daily_display_mean[:, idx_field]
-            )
-        else:
-            daily_display_mean[:, idx_field] = np.round(
-                daily_display_mean[:, idx_field], decimals
-            )
+    _round_columns_by_decimals(daily_display_mean, daily_mean_rounding_map)
 
     temp_dec = ROUNDING_RULES.get("temperature", 2)
     app_dec = ROUNDING_RULES.get("apparentTemperature", 2)
-    daily_display_high[:, DATA_DAY["temp"]] = np.round(
-        daily_display_high[:, DATA_DAY["temp"]], temp_dec
-    )
-    daily_display_low[:, DATA_DAY["temp"]] = np.round(
-        daily_display_low[:, DATA_DAY["temp"]], temp_dec
-    )
-    daily_display_min[:, DATA_DAY["temp"]] = np.round(
-        daily_display_min[:, DATA_DAY["temp"]], temp_dec
-    )
-    daily_display_max[:, DATA_DAY["temp"]] = np.round(
-        daily_display_max[:, DATA_DAY["temp"]], temp_dec
-    )
-    daily_display_high[:, DATA_DAY["apparent"]] = np.round(
-        daily_display_high[:, DATA_DAY["apparent"]], app_dec
-    )
-    daily_display_low[:, DATA_DAY["apparent"]] = np.round(
-        daily_display_low[:, DATA_DAY["apparent"]], app_dec
-    )
-    daily_display_min[:, DATA_DAY["apparent"]] = np.round(
-        daily_display_min[:, DATA_DAY["apparent"]], app_dec
-    )
-    daily_display_max[:, DATA_DAY["apparent"]] = np.round(
-        daily_display_max[:, DATA_DAY["apparent"]], app_dec
-    )
+    for temp_arr in (
+        daily_display_high,
+        daily_display_low,
+        daily_display_min,
+        daily_display_max,
+    ):
+        _round_columns_by_decimals(
+            temp_arr, {DATA_DAY["temp"]: temp_dec, DATA_DAY["apparent"]: app_dec}
+        )
     daily_display_max[:, DATA_DAY["k_index"]] = np.round(
         daily_display_max[:, DATA_DAY["k_index"]], 0
     )
@@ -568,6 +584,7 @@ def _apply_rounding(
         daily_display_min[:, DATA_DAY["vertical_velocity"]], 2
     )
 
+    max_cols_by_dec = {}
     for idx_field in (
         DATA_DAY["intensity"],
         DATA_DAY["rain_intensity"],
@@ -585,15 +602,15 @@ def _apply_rounding(
                 daily_display_max[:, idx_field]
             ).astype(int)
         else:
-            daily_display_max[:, idx_field] = np.round(
-                daily_display_max[:, idx_field], dec
-            )
+            max_cols_by_dec.setdefault(dec, []).append(idx_field)
+    for dec, cols in max_cols_by_dec.items():
+        daily_display_max[:, cols] = np.round(daily_display_max[:, cols], dec)
 
     accum_dec = ROUNDING_RULES.get("precipAccumulation", 2)
-    for idx_field in (DATA_DAY["rain"], DATA_DAY["snow"], DATA_DAY["ice"]):
-        daily_display_sum[:, idx_field] = np.round(
-            daily_display_sum[:, idx_field], accum_dec
-        )
+    daily_accum_cols = [DATA_DAY["rain"], DATA_DAY["snow"], DATA_DAY["ice"]]
+    daily_display_sum[:, daily_accum_cols] = np.round(
+        daily_display_sum[:, daily_accum_cols], accum_dec
+    )
 
     half_rounding_map = {
         DATA_HOURLY["dew"]: ROUNDING_RULES.get("dewPoint", 2),
@@ -624,36 +641,16 @@ def _apply_rounding(
         DATA_HOURLY["k_index"]: ROUNDING_RULES.get("kIndex", 0),
     }
 
-    def _apply_rounding_to(arr, rounding_map):
-        for idx_field, decimals in rounding_map.items():
-            if decimals == 0:
-                arr[:, idx_field] = np.round(arr[:, idx_field])
-            else:
-                arr[:, idx_field] = np.round(arr[:, idx_field], decimals)
+    _round_columns_by_decimals(half_day_display_mean, half_rounding_map)
+    _round_columns_by_decimals(half_day_display_max, half_rounding_map)
+    _round_columns_by_decimals(half_night_display_mean, half_rounding_map)
+    _round_columns_by_decimals(half_night_display_max, half_rounding_map)
 
-    _apply_rounding_to(half_day_display_mean, half_rounding_map)
-    _apply_rounding_to(half_day_display_max, half_rounding_map)
-    _apply_rounding_to(half_night_display_mean, half_rounding_map)
-    _apply_rounding_to(half_night_display_max, half_rounding_map)
-
-    half_day_display_sum[:, DATA_HOURLY["rain"]] = np.round(
-        half_day_display_sum[:, DATA_HOURLY["rain"]], accum_dec
-    )
-    half_day_display_sum[:, DATA_HOURLY["snow"]] = np.round(
-        half_day_display_sum[:, DATA_HOURLY["snow"]], accum_dec
-    )
-    half_day_display_sum[:, DATA_HOURLY["ice"]] = np.round(
-        half_day_display_sum[:, DATA_HOURLY["ice"]], accum_dec
-    )
-    half_night_display_sum[:, DATA_HOURLY["rain"]] = np.round(
-        half_night_display_sum[:, DATA_HOURLY["rain"]], accum_dec
-    )
-    half_night_display_sum[:, DATA_HOURLY["snow"]] = np.round(
-        half_night_display_sum[:, DATA_HOURLY["snow"]], accum_dec
-    )
-    half_night_display_sum[:, DATA_HOURLY["ice"]] = np.round(
-        half_night_display_sum[:, DATA_HOURLY["ice"]], accum_dec
-    )
+    half_accum_cols = [DATA_HOURLY["rain"], DATA_HOURLY["snow"], DATA_HOURLY["ice"]]
+    for half_sum_arr in (half_day_display_sum, half_night_display_sum):
+        half_sum_arr[:, half_accum_cols] = np.round(
+            half_sum_arr[:, half_accum_cols], accum_dec
+        )
 
 
 def _build_half_day_item(
@@ -752,9 +749,9 @@ def build_daily_section(
     *,
     InterPhour: np.ndarray,
     hourlyDayIndex: np.ndarray,
-    hourlyDay4amIndex: np.ndarray,
-    hourlyDay4pmIndex: np.ndarray,
-    hourlyNight4amIndex: np.ndarray,
+    hourlyDay6amIndex: np.ndarray,
+    hourlyHalfDayIndex: np.ndarray,
+    hourlyHalfNightIndex: np.ndarray,
     hourlyHighIndex: np.ndarray,
     hourlyLowIndex: np.ndarray,
     daily_days: int,
@@ -775,8 +772,8 @@ def build_daily_section(
     timeMachine: bool,
     tmExtra: bool,
     day_array_grib: np.ndarray,
-    day_array_4am_grib: np.ndarray,
-    day_array_5pm_grib: np.ndarray,
+    day_array_6am_grib: np.ndarray,
+    day_array_6pm_grib: np.ndarray,
     InterSday: np.ndarray,
     hourList_si: list,
     pTypeMap: np.ndarray,
@@ -786,6 +783,9 @@ def build_daily_section(
     log_timing: Callable[[str], None] | None = None,
     aq_inputs=None,
     inc_airqualitydetails: int = 0,
+    include_day_night: bool = True,
+    hour_columns: HourColumns | None = None,
+    current_hour_time: int | None = None,
 ) -> DailySection:
     """
     Build all daily- and half-day-level objects.
@@ -797,9 +797,9 @@ def build_daily_section(
     Args:
         InterPhour: Hourly interpolated data.
         hourlyDayIndex: Indices for daily aggregation.
-        hourlyDay4amIndex: Indices for 4am-to-4am aggregation.
-        hourlyDay4pmIndex: Indices for day aggregation.
-        hourlyNight4amIndex: Indices for night aggregation.
+        hourlyDay6amIndex: Indices for 6am-to-6am aggregation (daily icon and precipitation type).
+        hourlyHalfDayIndex: Indices for the 6am-to-6pm day half.
+        hourlyHalfNightIndex: Indices for the 6pm-to-6am night half.
         hourlyHighIndex: Indices for daily high calculation.
         hourlyLowIndex: Indices for daily low calculation.
         daily_days: Number of days.
@@ -820,8 +820,8 @@ def build_daily_section(
         timeMachine: Whether this is a time machine request.
         tmExtra: Extra time machine parameters.
         day_array_grib: Daily GRIB array.
-        day_array_4am_grib: Daily 4am GRIB array.
-        day_array_5pm_grib: Daily 5pm GRIB array.
+        day_array_6am_grib: Daily 6am GRIB array (daily summary and day half start).
+        day_array_6pm_grib: Daily 6pm GRIB array (night half start).
         InterSday: Daily source data.
         hourList_si: Hourly list for SI units.
         pTypeMap: Precipitation type map.
@@ -829,6 +829,13 @@ def build_daily_section(
         logger: Logger instance.
         loc_tag: Location tag.
         log_timing: Optional timing logger.
+        include_day_night: Build the day/night (half-day) items; when False
+            ``day_night_list`` is empty.
+        current_hour_time: Unix time of the current hour, where today's summary
+            starts. None (Time Machine) keeps the whole 6am to 6am window.
+        hour_columns: The forecast's HourColumns (the same hours as
+            ``hourList_si``), built once per request; built here from
+            ``hourList_si`` when not given.
 
     Returns:
         DailySection object containing the daily forecast.
@@ -857,16 +864,16 @@ def build_daily_section(
     )
 
     (
-        mean_4am_results,
-        sum_4am_results,
-        max_4am_results,
+        mean_6am_results,
+        sum_6am_results,
+        max_6am_results,
         _,
         _,
         _,
         maxPchanceDay,
     ) = _aggregate_stats(
         InterPhour,
-        hourlyDay4amIndex,
+        hourlyDay6amIndex,
         daily_days,
         calc_mean=True,
         calc_sum=True,
@@ -884,7 +891,7 @@ def build_daily_section(
         max_precip_chance_day,
     ) = _aggregate_stats(
         InterPhour,
-        hourlyDay4pmIndex,
+        hourlyHalfDayIndex,
         daily_days,
         calc_mean=True,
         calc_sum=True,
@@ -902,7 +909,7 @@ def build_daily_section(
         max_precip_chance_night,
     ) = _aggregate_stats(
         InterPhour,
-        hourlyNight4amIndex,
+        hourlyHalfNightIndex,
         daily_days,
         calc_mean=True,
         calc_sum=True,
@@ -952,15 +959,30 @@ def build_daily_section(
     InterPdayLow = np.array(low_results)
     InterPdayHighTime = np.array(arghigh_results)
     InterPdayLowTime = np.array(arglow_results)
-    InterPday4am = np.array(mean_4am_results)
-    InterPdaySum4am = np.array(sum_4am_results)
-    InterPdayMax4am = np.array(max_4am_results)
+    InterPday6am = np.array(mean_6am_results)
+    InterPdaySum6am = np.array(sum_6am_results)
+    InterPdayMax6am = np.array(max_6am_results)
     interp_half_day_sum = np.array(sum_day_results)
     interp_half_day_mean = np.array(mean_day_results)
     interp_half_day_max = np.array(max_day_results)
     interp_half_night_sum = np.array(sum_night_results)
     interp_half_night_mean = np.array(mean_night_results)
     interp_half_night_max = np.array(max_night_results)
+
+    # Bearings wrap at north, so _aggregate_stats' plain means don't apply to them
+    hourly_bearing = InterPhour[:, DATA_HOURLY["bearing"]]
+    InterPday[:, DATA_DAY["bearing"]] = _circular_mean_by_day(
+        hourly_bearing, hourlyDayIndex, daily_days
+    )
+    InterPday6am[:, DATA_HOURLY["bearing"]] = _circular_mean_by_day(
+        hourly_bearing, hourlyDay6amIndex, daily_days
+    )
+    interp_half_day_mean[:, DATA_HOURLY["bearing"]] = _circular_mean_by_day(
+        hourly_bearing, hourlyHalfDayIndex, daily_days
+    )
+    interp_half_night_mean[:, DATA_HOURLY["bearing"]] = _circular_mean_by_day(
+        hourly_bearing, hourlyHalfNightIndex, daily_days
+    )
 
     maxPchanceDay, max_precip_chance_day, max_precip_chance_night = (
         _calculate_precip_chance(
@@ -1045,120 +1067,137 @@ def build_daily_section(
         half_night_display_sum,
     )
 
+    # The summary windows are slices of the forecast's hour columns. Without
+    # summary text no window is summarised, so the columns aren't built and
+    # the windows are list slices found by bisection on the sorted times.
+    if hour_columns is None and summaryText:
+        hour_columns = HourColumns.from_hours(hourList_si)
+    if hour_columns is not None:
+        window_source = hour_columns
+        hour_times_si = None
+    else:
+        window_source = hourList_si
+        hour_times_si = [hour["time"] for hour in hourList_si]
+
     for idx in range(daily_days):
-        day_icon, day_text = pick_day_icon_and_summary(
-            max_arr=interp_half_day_max,
-            mean_arr=interp_half_day_mean,
-            sum_arr=interp_half_day_sum,
-            precip_type_arr=precip_type_half_day,
-            precip_text_arr=precip_text_half_day,
-            idx=idx,
-            is_night=is_all_night,
-            mode="hourly",
-            prep_accum_unit=prepAccumUnit,
-            vis_units=visUnits,
-            wind_unit=windUnit,
-        )
-
-        day_item = _build_half_day_item(
-            idx,
-            day_array_4am_grib[idx],
-            day_icon,
-            day_text,
-            precip_type_half_day[idx],
-            daily_display_high[idx, DATA_DAY["temp"]],
-            daily_display_high[idx, DATA_DAY["apparent"]],
-            half_day_display_mean,
-            half_day_display_max,
-            half_day_display_sum,
-            interp_half_day_mean,
-            extraVars,
-        )
-
-        if idx < 8:
-            day_text, day_icon = apply_legacy_half_day_text(
-                summary_text=summaryText,
-                translation=translation,
-                hour_list_slice=select_hour_window(
-                    hourList_si,
-                    start_time=int(day_array_4am_grib[idx]),
-                    end_time=int(day_array_5pm_grib[idx]),
-                ),
-                is_day=not is_all_night,
-                tz_name=tz_name,
-                icon_set=icon,
-                unit_system=unitSystem,
-                fallback_text=day_item["summary"],
-                fallback_icon=day_item["icon"],
-                logger=logger,
-                loc_tag=loc_tag,
-                phase="DAY HALF DAY",
+        # The half-day text costs as much as the daily text; skip it when the
+        # day_night block isn't returned.
+        if include_day_night:
+            day_icon, day_text = pick_day_icon_and_summary(
+                max_arr=interp_half_day_max,
+                mean_arr=interp_half_day_mean,
+                sum_arr=interp_half_day_sum,
+                precip_type_arr=precip_type_half_day,
+                precip_text_arr=precip_text_half_day,
+                idx=idx,
+                is_night=is_all_night,
+                mode="hourly",
+                prep_accum_unit=prepAccumUnit,
+                vis_units=visUnits,
+                wind_unit=windUnit,
             )
-            day_item["summary"] = day_text
-            day_item["icon"] = day_icon
 
-        day_night_list.append(day_item)
+            day_item = _build_half_day_item(
+                idx,
+                day_array_6am_grib[idx],
+                day_icon,
+                day_text,
+                precip_type_half_day[idx],
+                daily_display_high[idx, DATA_DAY["temp"]],
+                daily_display_high[idx, DATA_DAY["apparent"]],
+                half_day_display_mean,
+                half_day_display_max,
+                half_day_display_sum,
+                interp_half_day_mean,
+                extraVars,
+            )
 
-        day_icon, day_text = pick_day_icon_and_summary(
-            max_arr=interp_half_night_max,
-            mean_arr=interp_half_night_mean,
-            sum_arr=interp_half_night_sum,
-            precip_type_arr=precip_type_half_night,
-            precip_text_arr=precip_text_half_night,
-            idx=idx,
-            is_night=not is_all_day,
-            mode="hourly",
-            prep_accum_unit=prepAccumUnit,
-            vis_units=visUnits,
-            wind_unit=windUnit,
-        )
-
-        day_item = _build_half_day_item(
-            idx,
-            day_array_5pm_grib[idx],
-            day_icon,
-            day_text,
-            precip_type_half_night[idx],
-            daily_display_low[idx, DATA_DAY["temp"]],
-            daily_display_low[idx, DATA_DAY["apparent"]],
-            half_night_display_mean,
-            half_night_display_max,
-            half_night_display_sum,
-            interp_half_night_mean,
-            extraVars,
-        )
-
-        if idx < 8:
-            night_start_time = int(day_array_5pm_grib[idx])
-            day_text, day_icon = apply_legacy_half_day_text(
-                summary_text=summaryText,
-                translation=translation,
-                hour_list_slice=select_hour_window(
-                    hourList_si,
-                    start_time=night_start_time,
-                    end_time=_get_night_window_end(
-                        day_array_4am_grib, idx, night_start_time
+            if idx < 8:
+                day_text, day_icon = apply_legacy_half_day_text(
+                    summary_text=summaryText,
+                    translation=translation,
+                    hour_list_slice=select_hour_window(
+                        window_source,
+                        start_time=int(day_array_6am_grib[idx]),
+                        end_time=int(day_array_6pm_grib[idx]),
+                        hour_times=hour_times_si,
                     ),
-                ),
-                is_day=is_all_day,
-                tz_name=tz_name,
-                icon_set=icon,
-                unit_system=unitSystem,
-                fallback_text=day_item["summary"],
-                fallback_icon=day_item["icon"],
-                logger=logger,
-                loc_tag=loc_tag,
-                phase="NIGHT HALF DAY",
-            )
-            day_item["summary"] = day_text
-            day_item["icon"] = day_icon
+                    is_day=not is_all_night,
+                    tz_name=tz_name,
+                    icon_set=icon,
+                    unit_system=unitSystem,
+                    fallback_text=day_item["summary"],
+                    fallback_icon=day_item["icon"],
+                    logger=logger,
+                    loc_tag=loc_tag,
+                    phase="DAY HALF DAY",
+                )
+                day_item["summary"] = day_text
+                day_item["icon"] = day_icon
 
-        day_night_list.append(day_item)
+            day_night_list.append(day_item)
+
+            day_icon, day_text = pick_day_icon_and_summary(
+                max_arr=interp_half_night_max,
+                mean_arr=interp_half_night_mean,
+                sum_arr=interp_half_night_sum,
+                precip_type_arr=precip_type_half_night,
+                precip_text_arr=precip_text_half_night,
+                idx=idx,
+                is_night=not is_all_day,
+                mode="hourly",
+                prep_accum_unit=prepAccumUnit,
+                vis_units=visUnits,
+                wind_unit=windUnit,
+            )
+
+            day_item = _build_half_day_item(
+                idx,
+                day_array_6pm_grib[idx],
+                day_icon,
+                day_text,
+                precip_type_half_night[idx],
+                daily_display_low[idx, DATA_DAY["temp"]],
+                daily_display_low[idx, DATA_DAY["apparent"]],
+                half_night_display_mean,
+                half_night_display_max,
+                half_night_display_sum,
+                interp_half_night_mean,
+                extraVars,
+            )
+
+            if idx < 8:
+                night_start_time = int(day_array_6pm_grib[idx])
+                day_text, day_icon = apply_legacy_half_day_text(
+                    summary_text=summaryText,
+                    translation=translation,
+                    hour_list_slice=select_hour_window(
+                        window_source,
+                        start_time=night_start_time,
+                        end_time=_get_night_window_end(
+                            day_array_6am_grib, idx, night_start_time
+                        ),
+                        hour_times=hour_times_si,
+                    ),
+                    is_day=is_all_day,
+                    tz_name=tz_name,
+                    icon_set=icon,
+                    unit_system=unitSystem,
+                    fallback_text=day_item["summary"],
+                    fallback_icon=day_item["icon"],
+                    logger=logger,
+                    loc_tag=loc_tag,
+                    phase="NIGHT HALF DAY",
+                )
+                day_item["summary"] = day_text
+                day_item["icon"] = day_icon
+
+            day_night_list.append(day_item)
 
         dayIcon, dayText = pick_day_icon_and_summary(
-            max_arr=InterPdayMax4am,
-            mean_arr=InterPday4am,
-            sum_arr=InterPdaySum4am,
+            max_arr=InterPdayMax6am,
+            mean_arr=InterPday6am,
+            sum_arr=InterPdaySum6am,
             precip_type_arr=PTypeDay,
             precip_text_arr=PTextDay,
             idx=idx,
@@ -1344,16 +1383,35 @@ def build_daily_section(
                 idx, DATA_DAY["station_pressure"]
             ]
 
+        day_summary_text = None
         try:
             if idx < 8 and summaryText:
+                # The daily summary describes 6am to 6am the next day. Today's
+                # describes what is left of that: past hours have no precipitation
+                # (zeroed in the hourly block), which would misdescribe the day.
+                text_start = int(day_array_6am_grib[idx])
+                partial_day = (
+                    idx == 0
+                    and current_hour_time is not None
+                    and current_hour_time > text_start
+                )
+                if partial_day:
+                    text_start = int(current_hour_time)
                 dayIcon, dayText = calculate_day_text(
-                    hourList_si[((idx) * 24) + 4 : ((idx + 1) * 24) + 4],
+                    select_hour_window(
+                        window_source,
+                        start_time=text_start,
+                        end_time=int(day_array_6am_grib[idx + 1]),
+                        hour_times=hour_times_si,
+                    ),
                     not is_all_night,
                     str(tz_name),
                     "day",
                     icon,
                     unitSystem,
+                    partial_day=partial_day,
                 )
+                day_summary_text = dayText
 
                 dayObject["summary"] = translation.translate(["sentence", dayText])
                 dayObject["icon"] = dayIcon
@@ -1391,6 +1449,8 @@ def build_daily_section(
                 idx, DATA_DAY["convective_inhibition"]
             ],
             "kIndexMax": InterPdayMax[idx, DATA_DAY["k_index"]],
+            # The untranslated summary, for the weekly summary's conditions
+            "summaryText": day_summary_text,
         }
         dayList_si.append(dayObject_si)
 

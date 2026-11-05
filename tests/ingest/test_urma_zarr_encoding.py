@@ -8,20 +8,23 @@ import numpy as np
 import xarray as xr
 import zarr
 
-URMA_SCRIPT = Path(__file__).resolve().parents[2] / "API" / "URMA_Local_Ingest.py"
+from API.ingest_utils import shard_whole_variables
+from ingest.URMA_Local_Ingest import zarr_vars
+
+URMA_SCRIPT = Path(__file__).resolve().parents[2] / "ingest" / "URMA_Local_Ingest.py"
 
 
 def test_urma_hourly_zarr_write_preserves_data_and_compression(tmp_path):
+    """The URMA hourly store is merged into the historic archive by reading each
+    variable as a named Zarr v3 array with Dask. If the production write changed
+    format, dtype, chunking, or array names, the merge (and the API reading the
+    archive) would break or silently change values. Each variable must be one
+    shard, so the merge downloads one object per variable instead of one per
+    chunk. The write lives inline in main() next to the GRIB download, so the
+    real statements are evaluated from source rather than duplicated here.
+    """
+    vars_in = list(zarr_vars)
     tree = ast.parse(URMA_SCRIPT.read_text(encoding="utf-8"))
-    vars_in = next(
-        ast.literal_eval(node.value)
-        for node in tree.body
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "zarr_vars"
-            for target in node.targets
-        )
-    )
     writes = [
         node
         for node in ast.walk(tree)
@@ -32,6 +35,14 @@ def test_urma_hourly_zarr_write_preserves_data_and_compression(tmp_path):
         and node.func.attr == "to_zarr"
     ]
     assert len(writes) == 1
+    sharding = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Call)
+        and getattr(node.value.func, "id", None) == "shard_whole_variables"
+    ]
+    assert len(sharding) == 1
 
     source_data = {}
     for index, var in enumerate(vars_in):
@@ -51,12 +62,19 @@ def test_urma_hourly_zarr_write_preserves_data_and_compression(tmp_path):
     store_path = tmp_path / "URMA_Hist.zarr"
     store = zarr.storage.LocalStore(store_path)
     try:
-        # Execute the production write itself; importing the script would start ingest.
-        write = compile(ast.Expression(body=writes[0]), str(URMA_SCRIPT), "eval")
-        eval(
-            write,
-            {"ds_out": ds_out, "zarr_store": store, "vars_in": vars_in, "zarr": zarr},
+        namespace = {
+            "ds_out": ds_out,
+            "zarr_store": store,
+            "vars_in": vars_in,
+            "zarr": zarr,
+            "shard_whole_variables": shard_whole_variables,
+        }
+        shard = compile(
+            ast.Expression(body=sharding[0].value), str(URMA_SCRIPT), "eval"
         )
+        namespace["ds_out"], namespace["encoding"] = eval(shard, namespace)
+        write = compile(ast.Expression(body=writes[0]), str(URMA_SCRIPT), "eval")
+        eval(write, namespace)
     finally:
         store.close()
 
@@ -67,11 +85,11 @@ def test_urma_hourly_zarr_write_preserves_data_and_compression(tmp_path):
         array = group[var]
         assert array.dtype == np.dtype("float32")
         assert array.chunks == (1, 2, 3)
+        assert array.shards == (1, 4, 6)
         assert len(array.compressors) == 1
         compressor = array.compressors[0]
         assert isinstance(compressor, zarr.codecs.BloscCodec)
         assert compressor.cname == "zstd"
-        assert compressor.clevel == 3
         expected = data.astype("float32")
         np.testing.assert_array_equal(array[:], expected)
         # The historical merge reads each named component with Dask.

@@ -1,6 +1,5 @@
-from datetime import datetime, timedelta
-
-import pytz
+from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 
 def get_period(hour):
@@ -15,11 +14,11 @@ def get_period(hour):
 
 def run_dst(start_date, label):
     print(f"\n--- {label} ---")
-    tz = pytz.timezone("US/Eastern")
-    start_dt = tz.localize(datetime.strptime(start_date, "%Y-%m-%d"))
+    tz = ZoneInfo("US/Eastern")
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=tz)
 
     # Generate 72 hours using UTC offsets to handle DST transitions correctly
-    times_utc = [start_dt.astimezone(pytz.utc) + timedelta(hours=i) for i in range(72)]
+    times_utc = [start_dt.astimezone(UTC) + timedelta(hours=i) for i in range(72)]
     times_local = [t.astimezone(tz) for t in times_utc]
 
     slices = [(4, 17), (17, 28), (28, 41), (41, 52)]

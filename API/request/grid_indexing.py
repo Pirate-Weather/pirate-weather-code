@@ -35,10 +35,29 @@ from API.constants.grid_const import (
     RTMA_RU_Y_MAX,
     RTMA_RU_Y_MIN,
 )
-from API.constants.model_const import ERA5, ERA5_SOURCE_VARS, RAQDPS, SILAM
-from API.constants.shared_const import HISTORY_PERIODS
+from API.constants.model_const import (
+    ERA5,
+    ERA5_SOURCE_VARS,
+    RAQDPS,
+    RRFS,
+    RRFS_SUBH,
+    SILAM,
+)
+from API.constants.shared_const import (
+    FIRST_FORECAST_LEAD_HOURS,
+    HISTORY_PERIODS,
+    LIBREWXR_GRID_HEIGHT,
+    LIBREWXR_GRID_NORTH,
+    LIBREWXR_GRID_RESOLUTION_DEG,
+    LIBREWXR_GRID_WEST,
+    LIBREWXR_GRID_WIDTH,
+    LIBREWXR_MAX_NOWCAST_AGE_SECONDS,
+)
+from API.io.ZarrHelpers import read_era5_archive_point
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
+
+logger = logging.getLogger(__name__)
 
 ERA5_PRECIP_PROB_THRESHOLD_M = 0.0001  # m, matching ERA5 total_precipitation units
 SILAM_LAT_START = -89.6
@@ -46,6 +65,10 @@ SILAM_LON_START = -179.8
 SILAM_GRID_DELTA = 0.2
 SILAM_LAT_COUNT = 897
 SILAM_LON_COUNT = 1800
+# LibreWXR composite cell centres: half a cell in from the grid edge, rows
+# north to south (negative latitude step), columns west to east
+LIBREWXR_LAT_START = LIBREWXR_GRID_NORTH - LIBREWXR_GRID_RESOLUTION_DEG / 2
+LIBREWXR_LON_START = LIBREWXR_GRID_WEST + LIBREWXR_GRID_RESOLUTION_DEG / 2
 RAQDPS_VALUE_COLUMNS = tuple(index for name, index in RAQDPS.items() if name != "time")
 SILAM_VALUE_COLUMNS = tuple(
     index for name, index in SILAM.items() if name not in {"time", "blh"}
@@ -54,7 +77,7 @@ SILAM_VALUE_COLUMNS = tuple(
 
 @dataclass(frozen=True)
 class RotatedLatLonGrid:
-    """Describe a CMC rotated latitude/longitude grid."""
+    """Describe a rotated latitude/longitude grid (CMC models, RRFS North America)."""
 
     north_pole_latitude: float
     north_pole_longitude: float
@@ -87,6 +110,26 @@ REPS_ROTATED_GRID = RotatedLatLonGrid(
     latitude_count=960,
     longitude_count=908,
 )
+# RRFS North American 13 km grid (ingest/RRFS_NA_Local_Ingest.py): GRIB southern
+# pole at (-35, 247), so the rotated north pole is (35, 67). Rows run south to
+# north and columns west to east, as wgrib2 writes them.
+RRFS_NA_ROTATED_GRID = RotatedLatLonGrid(
+    north_pole_latitude=35.0,
+    north_pole_longitude=67.0,
+    first_latitude=-36.9303,
+    first_longitude=-61.0,
+    latitude_increment=0.1083,
+    longitude_increment=0.1083,
+    latitude_count=683,
+    longitude_count=1127,
+)
+# RRFS hourly runs to 18 h and its 6-hourly runs to 83 h. Like HRRR, a run is
+# dropped once about 70% of its hours have passed.
+RRFS_HOURLY_MAX_RUN_AGE = datetime.timedelta(hours=13)
+RRFS_6H_MAX_RUN_AGE = datetime.timedelta(hours=58)
+# RRFS sub-hourly only runs to 5 h (HRRR's runs to 18 h), so a run is dropped
+# while at least 2 h of it remain for the minutely and currently blocks.
+RRFS_SUBH_MAX_RUN_AGE = datetime.timedelta(hours=3)
 
 
 def _normalize_longitude_180(lon):
@@ -177,7 +220,7 @@ def _nearest_regular_grid_index(
 def _rotated_to_geographic(
     latitude: float, longitude: float, grid: RotatedLatLonGrid
 ) -> tuple[float, float]:
-    """Convert a CMC rotated-grid coordinate to geographic latitude/longitude."""
+    """Convert a rotated-grid coordinate to geographic latitude/longitude."""
     rotated_latitude = math.radians(latitude)
     rotated_longitude = math.radians(longitude)
     pole_latitude = math.radians(grid.north_pole_latitude)
@@ -212,7 +255,7 @@ def _nearest_rotated_grid_coords(
     max_distance: float,
     model_name: str,
 ) -> tuple[int, int, float, float]:
-    """Return the nearest CMC rotated-grid point for a geographic location."""
+    """Return the nearest rotated-grid point for a geographic location."""
     geographic_latitude = math.radians(latitude)
     geographic_longitude = math.radians(longitude)
     pole_latitude = math.radians(grid.north_pole_latitude)
@@ -317,6 +360,17 @@ def _aq_source_covers_request(
     )
 
 
+# RAQDPS keeps no history, but a stale run still holds rows for hours that are
+# now in the past. Never serve rows older than this, so a stale run cannot extend
+# time machine coverage (#751/#752).
+RAQDPS_MAX_LOOKBACK_HOURS = 48
+
+
+def _forecast_run_time(data: np.ndarray, model: str) -> float:
+    """Model run time of a forecast-only store: first valid time minus the first lead."""
+    return data[0, 0] - FIRST_FORECAST_LEAD_HOURS[model] * 3600
+
+
 def _mask_old_aq_values(
     data: np.ndarray, now_time: datetime.datetime, history_hours: int
 ) -> np.ndarray:
@@ -358,6 +412,12 @@ class ZarrSources:
     raqdps: Any = None
     silam: Any = None
     raqdps_lat_lon: Any = None
+    librewxr: Any = None
+    rrfs: Any = None
+    rrfs_6h: Any = None
+    rrfs_subh: Any = None
+    rrfs_na: Any = None
+    rrfs_na_6h: Any = None
 
 
 @dataclass
@@ -438,16 +498,45 @@ class GridIndexingResult:
     y_silam: float | None = None
     silam_lat: float | None = None
     silam_lon: float | None = None
+    dataOut_librewxr: np.ndarray | bool = False
+    librewxrRunTime: float | None = None
     dataOut_urma: np.ndarray | bool = False
     urmaRunTime: float | None = None
     x_urma: float | None = None
     y_urma: float | None = None
     urma_lat: float | None = None
     urma_lon: float | None = None
+    # RRFS (include=rrfs only). rrfs_grid is "rrfs" for the 3 km CONUS stores
+    # or "rrfs_na" for the 13 km North American ones; the sub-hourly store
+    # exists for CONUS only.
+    rrfs_grid: str | None = None
+    dataOut_rrfs: np.ndarray | bool = False
+    dataOut_rrfs_6h: np.ndarray | bool = False
+    dataOut_rrfs_subh: np.ndarray | bool = False
+    rrfsRunTime: float | None = None
+    rrfs6hRunTime: float | None = None
+    rrfsSubhRunTime: float | None = None
 
 
 def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
-    """Load the ERA5 point slice needed for the requested hourly grid."""
+    """Load the ERA5 point slice needed for the requested hourly grid.
+
+    The own ERA5 archive is read first when it is configured (one chunk per week,
+    tens of ms); any week it does not have yet (recent ERA5T weeks, a gap, a failed
+    read) sends the whole request to Google ERA5, so a response never mixes the two.
+    """
+    archive = era5_data.get("ERA5_archive")
+    if archive is not None:
+        base_time = np.datetime64(base_day_utc.replace(tzinfo=None))
+        archive_rows = read_era5_archive_point(archive, lat, lon, base_time, num_hours)
+        if archive_rows is not None:
+            return archive_rows
+        logger.info(
+            "ERA5 archive does not cover %s + %d h; reading Google ERA5",
+            base_time,
+            num_hours,
+        )
+
     abslat_era5 = np.abs(era5_data["ERA5_lats"] - lat)
     abslon_era5 = np.abs(era5_data["ERA5_lons"] - lon)
     y_p = np.argmin(abslat_era5)
@@ -535,6 +624,25 @@ def _cache_stats_delta(
     return {key: after.get(key, 0) - before.get(key, 0) for key in after}
 
 
+# Regular lat/lon grids of the global models and the WMO alert grid, built
+# once: a request only needs the nearest index on each of them.
+GFS_LATS = np.arange(-90, 90, 0.25)
+GFS_LONS = np.arange(0, 360, 0.25)
+# ECMWF IFS: 3600 x 1801 at 0.1 degrees (linspace, as np.arange at 0.1 accumulates
+# float error). AIFS has no 0.1 degree feed and stays at 0.25 degrees.
+ECMWF_LATS = np.linspace(90.0, -90.0, 1801)
+ECMWF_LONS = np.linspace(-180.0, 179.9, 3600)
+AIFS_LATS = np.arange(90, -90, -0.25)
+AIFS_LONS = np.arange(-180, 180, 0.25)
+# GDPS: 2400 x 1201 at 0.15 degrees, GEPS: 720 x 361 at 0.5 degrees
+GDPS_LATS = np.linspace(-90.0, 90.0, 1201)
+GDPS_LONS = np.linspace(0, 360.0 - 0.15, 2400)
+GEPS_LATS = np.linspace(-90.0, 90.0, 361)
+GEPS_LONS = np.linspace(0.0, 360.0 - 0.5, 720)
+WMO_ALERT_LATS = np.arange(-60, 85, 0.0625)
+WMO_ALERT_LONS = np.arange(-180, 180, 0.0625)
+
+
 async def calculate_grid_indexing(
     *,
     lat: float,
@@ -560,7 +668,9 @@ async def calculate_grid_indexing(
     ex_reps: int = 0,
     ex_raqdps: int = 0,
     ex_silam: int = 0,
+    ex_librewxr: int = 0,
     inc_aimodels: int = 0,
+    inc_rrfs: int = 0,
     read_wmo_alerts: bool = True,
     base_day_utc: datetime.datetime | None = None,
     num_hours: int = 0,
@@ -589,6 +699,7 @@ async def calculate_grid_indexing(
     readAIGFS = False
     readAIGEFS = False
     readAIFS = False
+    readLibreWXR = False
 
     def _get_grid_coords(
         lat,
@@ -666,6 +777,54 @@ async def calculate_grid_indexing(
         sourceIDX["hrrr"]["y"] = int(y_hrrr)
         sourceIDX["hrrr"]["lat"] = round(hrrr_lat, 2)
         sourceIDX["hrrr"]["lon"] = round(((hrrr_lon + 180) % 360) - 180, 2)
+
+    timer.log("### RRFS Detail Start ###")
+
+    # RRFS is read only for include=rrfs. The 3 km CONUS stores are on the HRRR
+    # grid and are used wherever that grid covers the point; elsewhere in North
+    # America the 13 km rotated-grid stores are used. RRFS keeps no history, so
+    # Time Machine never reads it (inc_rrfs is already 0 there).
+    rrfs_grid = None
+    x_rrfs = y_rrfs = rrfs_lat = rrfs_lon = None
+    if inc_rrfs:
+        if (
+            -134 <= az_lon <= -61
+            and 21 <= lat <= 53
+            and (zarr_sources.rrfs is not None or zarr_sources.rrfs_6h is not None)
+        ):
+            rrfs_lat, rrfs_lon, x_rrfs, y_rrfs, rrfs_in_bounds = _get_grid_coords(
+                lat,
+                lon,
+                262.5,
+                38.5,
+                38.5,
+                6371229,
+                -2697500,
+                -1587300,
+                3000,
+                HRRR_X_MIN,
+                HRRR_Y_MIN,
+                HRRR_X_MAX,
+                HRRR_Y_MAX,
+            )
+            if rrfs_in_bounds:
+                rrfs_grid = "rrfs"
+        if rrfs_grid is None and (
+            zarr_sources.rrfs_na is not None or zarr_sources.rrfs_na_6h is not None
+        ):
+            try:
+                x_rrfs, y_rrfs, rrfs_lat, rrfs_lon = _nearest_rotated_grid_coords(
+                    lat,
+                    lon,
+                    RRFS_NA_ROTATED_GRID,
+                    max_distance=0.005,
+                    model_name="RRFS_NA",
+                )
+                rrfs_grid = "rrfs_na"
+            except ValueError as exc:
+                logger.debug("RRFS NA grid lookup failed: %s", exc)
+
+    timer.log("### RRFS Detail END ###")
 
     timer.log("### RTMA_RU Start ###")
 
@@ -776,14 +935,12 @@ async def calculate_grid_indexing(
 
     timer.log("### GFS/GEFS Start ###")
 
-    lats_gfs = np.arange(-90, 90, 0.25)
-    lons_gfs = np.arange(0, 360, 0.25)
-    abslat = np.abs(lats_gfs - lat)
-    abslon = np.abs(lons_gfs - lon)
+    abslat = np.abs(GFS_LATS - lat)
+    abslon = np.abs(GFS_LONS - lon)
     y_p = np.argmin(abslat)
     x_p = np.argmin(abslon)
-    gfs_lat = lats_gfs[y_p]
-    gfs_lon = lons_gfs[x_p]
+    gfs_lat = GFS_LATS[y_p]
+    gfs_lon = GFS_LONS[x_p]
 
     x_hrdps = None
     y_hrdps = None
@@ -815,12 +972,20 @@ async def calculate_grid_indexing(
     lons_ecmwf = None
     x_p_eur = None
     y_p_eur = None
-    if ex_ecmwf == 1 or time_machine or zarr_sources.ecmwf is None:
+    # A store still on the 0.25 degree grid (published before the 0.1 degree ingest
+    # first ran) would be read at the wrong location. Skip it: GFS and the other
+    # global sources cover these hours until the next ECMWF run is published.
+    if (
+        ex_ecmwf == 1
+        or time_machine
+        or zarr_sources.ecmwf is None
+        or zarr_sources.ecmwf.shape[2] < len(ECMWF_LATS)
+    ):
         dataOut_ecmwf = False
     else:
         readECMWF = True
-        lats_ecmwf = np.arange(90, -90, -0.25)
-        lons_ecmwf = np.arange(-180, 180, 0.25)
+        lats_ecmwf = ECMWF_LATS
+        lons_ecmwf = ECMWF_LONS
         abslat_ecmwf = np.abs(lats_ecmwf - lat)
         abslon_ecmwf = np.abs(lons_ecmwf - az_lon)
         y_p_eur = np.argmin(abslat_ecmwf)
@@ -867,8 +1032,8 @@ async def calculate_grid_indexing(
         if ex_gdps != 1 and zarr_sources.gdps is not None:
             try:
                 # Build GDPS lat/lon arrays (-90 -> 90, -180 -> 179.85)
-                lats_gdps = np.linspace(-90.0, 90.0, 1201)
-                lons_gdps = np.linspace(0, 360.0 - 0.15, 2400)
+                lats_gdps = GDPS_LATS
+                lons_gdps = GDPS_LONS
 
                 # Convert input lon to 0..360 for GDPS indexing
                 target_lon_360 = (az_lon + 360.0) % 360.0
@@ -886,8 +1051,8 @@ async def calculate_grid_indexing(
         if ex_geps != 1 and zarr_sources.geps is not None:
             try:
                 # GEPS: 720 x 361, 0.5° resolution, lon 0..359.5, lat -90..90
-                lats_geps = np.linspace(-90.0, 90.0, 361)
-                lons_geps = np.linspace(0.0, 360.0 - 0.5, 720)
+                lats_geps = GEPS_LATS
+                lons_geps = GEPS_LONS
                 # Convert input lon to 0..360 for GEPS indexing
                 lon360 = (az_lon + 360.0) % 360.0
                 abslat = np.abs(lats_geps - lat)
@@ -957,13 +1122,8 @@ async def calculate_grid_indexing(
             readAIGEFS = True
     elif ai_models_requested and not is_na:
         if ex_aifs != 1 and zarr_sources.ecmwf_aifs is not None:
-            if x_p_eur is None or y_p_eur is None:
-                lats_ecmwf = np.arange(90, -90, -0.25)
-                lons_ecmwf = np.arange(-180, 180, 0.25)
-                abslat_ecmwf = np.abs(lats_ecmwf - lat)
-                abslon_ecmwf = np.abs(lons_ecmwf - az_lon)
-                y_p_eur = np.argmin(abslat_ecmwf)
-                x_p_eur = np.argmin(abslon_ecmwf)
+            y_p_aifs = np.argmin(np.abs(AIFS_LATS - lat))
+            x_p_aifs = np.argmin(np.abs(AIFS_LONS - az_lon))
             readAIFS = True
 
     timer.log("### AI Models Detail END ###")
@@ -1055,13 +1215,55 @@ async def calculate_grid_indexing(
     else:
         ERA5_MERGED = False
 
+    # LibreWXR radar composite for the minutely block: a global regular lat/lon
+    # grid, so only the current forecast (never Time Machine) reads it.
+    dataOut_librewxr = False
+    librewxrRunTime = None
+    if not time_machine and ex_librewxr != 1 and zarr_sources.librewxr is not None:
+        readLibreWXR = True
+        y_librewxr = _nearest_regular_grid_index(
+            lat, LIBREWXR_LAT_START, -LIBREWXR_GRID_RESOLUTION_DEG, LIBREWXR_GRID_HEIGHT
+        )
+        x_librewxr = _nearest_regular_grid_index(
+            az_lon,
+            LIBREWXR_LON_START,
+            LIBREWXR_GRID_RESOLUTION_DEG,
+            LIBREWXR_GRID_WIDTH,
+        )
+
     zarrTasks = {}
+    if rrfs_grid == "rrfs":
+        if zarr_sources.rrfs is not None:
+            zarrTasks["RRFS"] = weather.zarr_read(
+                "RRFS", zarr_sources.rrfs, x_rrfs, y_rrfs
+            )
+        if zarr_sources.rrfs_6h is not None:
+            zarrTasks["RRFS_6H"] = weather.zarr_read(
+                "RRFS_6H", zarr_sources.rrfs_6h, x_rrfs, y_rrfs
+            )
+        if zarr_sources.rrfs_subh is not None:
+            zarrTasks["RRFS_SubH"] = weather.zarr_read(
+                "RRFS_SubH", zarr_sources.rrfs_subh, x_rrfs, y_rrfs
+            )
+    elif rrfs_grid == "rrfs_na":
+        if zarr_sources.rrfs_na is not None:
+            zarrTasks["RRFS"] = weather.zarr_read(
+                "RRFS_NA", zarr_sources.rrfs_na, x_rrfs, y_rrfs
+            )
+        if zarr_sources.rrfs_na_6h is not None:
+            zarrTasks["RRFS_6H"] = weather.zarr_read(
+                "RRFS_NA_6H", zarr_sources.rrfs_na_6h, x_rrfs, y_rrfs
+            )
     if readHRRR:
         zarrTasks["SubH"] = weather.zarr_read("SubH", zarr_sources.subh, x_hrrr, y_hrrr)
         zarrTasks["HRRR_6H"] = weather.zarr_read(
             "HRRR_6H", zarr_sources.hrrr_6h, x_hrrr, y_hrrr
         )
         zarrTasks["HRRR"] = weather.zarr_read("HRRR", zarr_sources.hrrr, x_hrrr, y_hrrr)
+    if readLibreWXR:
+        zarrTasks["LibreWXR"] = weather.zarr_read(
+            "LibreWXR", zarr_sources.librewxr, x_librewxr, y_librewxr
+        )
     if readNBM:
         zarrTasks["NBM"] = weather.zarr_read("NBM", zarr_sources.nbm, x_nbm, y_nbm)
     if readGFS:
@@ -1098,7 +1300,7 @@ async def calculate_grid_indexing(
         zarrTasks["AIGEFS"] = weather.zarr_read("AIGEFS", zarr_sources.aigefs, x_p, y_p)
     if readAIFS:
         zarrTasks["ECMWF_AIFS"] = weather.zarr_read(
-            "ECMWF_AIFS", zarr_sources.ecmwf_aifs, x_p_eur, y_p_eur
+            "ECMWF_AIFS", zarr_sources.ecmwf_aifs, x_p_aifs, y_p_aifs
         )
     if readRAQDPS:
         zarrTasks["RAQDPS"] = weather.zarr_read_max_square(
@@ -1110,11 +1312,11 @@ async def calculate_grid_indexing(
         )
 
     WMO_alertDat = None
+    # The WMO alert store is optional: until its ingest has published (e.g. a
+    # fresh deployment), serve the forecast without WMO alerts.
     if read_wmo_alerts and zarr_sources.wmo_alerts is not None:
-        wmo_alerts_lats = np.arange(-60, 85, 0.0625)
-        wmo_alerts_lons = np.arange(-180, 180, 0.0625)
-        wmo_abslat = np.abs(wmo_alerts_lats - lat)
-        wmo_abslon = np.abs(wmo_alerts_lons - az_lon)
+        wmo_abslat = np.abs(WMO_ALERT_LATS - lat)
+        wmo_abslon = np.abs(WMO_ALERT_LONS - az_lon)
         wmo_alerts_y_p = np.argmin(wmo_abslat)
         wmo_alerts_x_p = np.argmin(wmo_abslon)
         WMO_alertDat = zarr_sources.wmo_alerts[wmo_alerts_y_p, wmo_alerts_x_p]
@@ -1141,6 +1343,95 @@ async def calculate_grid_indexing(
     aigefsRunTime = None
     aifsRunTime = None
 
+    if readLibreWXR:
+        dataOut_librewxr = zarr_results["LibreWXR"]
+        # The reader blanks the time column where every variable is NaN, so a
+        # cell outside radar coverage reads as all NaN: not a source here. The
+        # run time is the radar frame the nowcast starts from (the store's
+        # first time), not the data column.
+        if dataOut_librewxr is not False and np.all(np.isnan(dataOut_librewxr[:, 1:])):
+            dataOut_librewxr = False
+        if dataOut_librewxr is not False:
+            librewxrRunTime = float(zarr_sources.librewxr.times[0])
+            nowcast_age = utc_time - datetime.datetime.fromtimestamp(
+                int(librewxrRunTime), datetime.UTC
+            ).replace(tzinfo=None)
+            if nowcast_age > datetime.timedelta(
+                seconds=LIBREWXR_MAX_NOWCAST_AGE_SECONDS
+            ):
+                dataOut_librewxr = False
+        if dataOut_librewxr is not False:
+            sourceIDX["librewxr"] = {
+                "x": int(x_librewxr),
+                "y": int(y_librewxr),
+                "lat": round(
+                    LIBREWXR_LAT_START - y_librewxr * LIBREWXR_GRID_RESOLUTION_DEG, 2
+                ),
+                "lon": round(
+                    (
+                        (
+                            LIBREWXR_LON_START
+                            + x_librewxr * LIBREWXR_GRID_RESOLUTION_DEG
+                            + 180
+                        )
+                        % 360
+                    )
+                    - 180,
+                    2,
+                ),
+            }
+
+    dataOut_rrfs = dataOut_rrfs_6h = dataOut_rrfs_subh = False
+    rrfsRunTime = rrfs6hRunTime = rrfsSubhRunTime = None
+    if rrfs_grid is not None:
+        # Cells outside the NA model domain (the rotated grid's corners) are
+        # NaN for every variable except reflectivity, which the ingest stores
+        # as 0 there, so the reader does not blank their time column. Without
+        # any temperature the cell is not covered and RRFS is not a source.
+        def _rrfs_block(key, temp_column):
+            data = zarr_results.get(key, False)
+            if data is False or not np.isfinite(data[:, temp_column]).any():
+                return False
+            return data
+
+        def _run_age(run_time):
+            return utc_time - datetime.datetime.fromtimestamp(
+                int(run_time), datetime.UTC
+            ).replace(tzinfo=None)
+
+        rrfs_model = "RRFS" if rrfs_grid == "rrfs" else "RRFS_NA"
+        dataOut_rrfs = _rrfs_block("RRFS", RRFS["temp"])
+        if dataOut_rrfs is not False:
+            rrfsRunTime = _forecast_run_time(dataOut_rrfs, rrfs_model)
+            if _run_age(rrfsRunTime) > RRFS_HOURLY_MAX_RUN_AGE:
+                dataOut_rrfs = False
+                rrfsRunTime = None
+        dataOut_rrfs_6h = _rrfs_block("RRFS_6H", RRFS["temp"])
+        if dataOut_rrfs_6h is not False:
+            rrfs6hRunTime = _forecast_run_time(dataOut_rrfs_6h, f"{rrfs_model}_6H")
+            if _run_age(rrfs6hRunTime) > RRFS_6H_MAX_RUN_AGE:
+                dataOut_rrfs_6h = False
+                rrfs6hRunTime = None
+        dataOut_rrfs_subh = _rrfs_block("RRFS_SubH", RRFS_SUBH["temp"])
+        if dataOut_rrfs_subh is not False:
+            rrfsSubhRunTime = _forecast_run_time(dataOut_rrfs_subh, "RRFS_SubH")
+            if _run_age(rrfsSubhRunTime) > RRFS_SUBH_MAX_RUN_AGE:
+                dataOut_rrfs_subh = False
+                rrfsSubhRunTime = None
+        if dataOut_rrfs is not False or dataOut_rrfs_6h is not False:
+            sourceIDX[rrfs_grid] = {
+                "x": int(x_rrfs),
+                "y": int(y_rrfs),
+                "lat": round(rrfs_lat, 2),
+                "lon": round(((rrfs_lon + 180) % 360) - 180, 2),
+            }
+        else:
+            # Without the hourly stores there is no hourly fallback for the
+            # sub-hourly block, so RRFS is not a source at all.
+            dataOut_rrfs_subh = False
+            rrfsSubhRunTime = None
+            rrfs_grid = None
+
     if readHRRR:
         dataOut = zarr_results["SubH"]
         dataOut_h2 = zarr_results["HRRR_6H"]
@@ -1161,7 +1452,7 @@ async def calculate_grid_indexing(
                 ).replace(tzinfo=None)
             ) > datetime.timedelta(hours=4):
                 dataOut = False
-            hrrrhRunTime = dataOut_hrrrh[HISTORY_PERIODS["HRRR"], 0]
+            hrrrhRunTime = _forecast_run_time(dataOut_hrrrh, "HRRR")
             # Freshness check for HRRR 0-18h
             # The general rule is to exclude models after roughy 70% of their hours has past
             # HRRR has 18 hours of data so exclude if 13 hours stale
@@ -1190,7 +1481,7 @@ async def calculate_grid_indexing(
     if readNBM:
         dataOut_nbm = zarr_results["NBM"]
         if dataOut_nbm is not False:
-            nbmRunTime = dataOut_nbm[HISTORY_PERIODS["NBM"], 0]
+            nbmRunTime = _forecast_run_time(dataOut_nbm, "NBM")
             try:
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     nbmRunTime.astype(int), datetime.UTC
@@ -1265,7 +1556,7 @@ async def calculate_grid_indexing(
         dataOut_gefs = zarr_results["GEFS"]
         if dataOut_gefs is not False:
             try:
-                gefsRunTime = dataOut_gefs[HISTORY_PERIODS["GEFS"] - 3, 0]
+                gefsRunTime = _forecast_run_time(dataOut_gefs, "GEFS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gefsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1284,7 +1575,7 @@ async def calculate_grid_indexing(
         dataOut_hrdps = zarr_results["HRDPS"]
         if dataOut_hrdps is not False:
             try:
-                hrdpsRunTime = dataOut_hrdps[HISTORY_PERIODS["HRDPS"] - 1, 0]
+                hrdpsRunTime = _forecast_run_time(dataOut_hrdps, "HRDPS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     hrdpsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1309,7 +1600,7 @@ async def calculate_grid_indexing(
         dataOut_gdps = zarr_results["GDPS"]
         if dataOut_gdps is not False:
             try:
-                gdpsRunTime = dataOut_gdps[HISTORY_PERIODS["GDPS"] - 1, 0]
+                gdpsRunTime = _forecast_run_time(dataOut_gdps, "GDPS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gdpsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1334,7 +1625,7 @@ async def calculate_grid_indexing(
         dataOut_geps = zarr_results["GEPS"]
         if dataOut_geps is not False:
             try:
-                gepsRunTime = dataOut_geps[HISTORY_PERIODS["GEPS"] - 3, 0]
+                gepsRunTime = _forecast_run_time(dataOut_geps, "GEPS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     gepsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1359,7 +1650,7 @@ async def calculate_grid_indexing(
         dataOut_reps = zarr_results["REPS"]
         if dataOut_reps is not False:
             try:
-                repsRunTime = dataOut_reps[HISTORY_PERIODS["REPS"] - 3, 0]
+                repsRunTime = _forecast_run_time(dataOut_reps, "REPS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     repsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1405,17 +1696,11 @@ async def calculate_grid_indexing(
             if np.all(np.isnan(dataOut_dwd_mosmix[:, 1:])):
                 # All data is NaN, treat as no data available
                 dataOut_dwd_mosmix = False
-            elif len(dataOut_dwd_mosmix) > HISTORY_PERIODS["DWD_MOSMIX"]:
-                # Bounds check before accessing the specific index
-                # Negative 1 is because the 19Z forecast contains data starting at hour 1
-                dwdMosmixRunTime = dataOut_dwd_mosmix[
-                    HISTORY_PERIODS["DWD_MOSMIX"] - 1, 0
-                ]
+            else:
+                dwdMosmixRunTime = _forecast_run_time(dataOut_dwd_mosmix, "DWD_MOSMIX")
 
                 # Validate the timestamp is valid (not 0, NaN, or unreasonably old/future)
                 # A timestamp of 0 results in "1970-01-01 00Z" which indicates missing data
-                # Note: DWD MOSMIX may show timestamps up to 48 hours in the future when
-                # historical data is unavailable (uses HISTORY_PERIODS offset on forecast-only data)
                 if np.isnan(dwdMosmixRunTime) or dwdMosmixRunTime <= 0:
                     # Invalid timestamp (NaN or zero), treat as no data available
                     logger.debug(
@@ -1452,15 +1737,12 @@ async def calculate_grid_indexing(
                         sourceIDX["dwd_mosmix"]["lon"] = round(
                             ((dwd_lon + 180) % 360) - 180, 2
                         )
-            else:
-                # Data array too short, treat as no data available
-                dataOut_dwd_mosmix = False
 
     if readAIGFS:
         dataOut_aigfs = zarr_results["AIGFS"]
         if dataOut_aigfs is not False:
             try:
-                aigfsRunTime = dataOut_aigfs[HISTORY_PERIODS["AIGFS"] - 1, 0]
+                aigfsRunTime = _forecast_run_time(dataOut_aigfs, "AIGFS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     aigfsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1479,7 +1761,7 @@ async def calculate_grid_indexing(
         dataOut_aigefs = zarr_results["AIGEFS"]
         if dataOut_aigefs is not False:
             try:
-                aigefsRunTime = dataOut_aigefs[HISTORY_PERIODS["AIGEFS"] - 1, 0]
+                aigefsRunTime = _forecast_run_time(dataOut_aigefs, "AIGEFS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     aigefsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1498,7 +1780,7 @@ async def calculate_grid_indexing(
         dataOut_aifs = zarr_results["ECMWF_AIFS"]
         if dataOut_aifs is not False:
             try:
-                aifsRunTime = dataOut_aifs[HISTORY_PERIODS["ECMWF_AIFS"] - 1, 0]
+                aifsRunTime = _forecast_run_time(dataOut_aifs, "ECMWF_AIFS")
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     aifsRunTime.astype(int), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1523,7 +1805,7 @@ async def calculate_grid_indexing(
         dataOut_raqdps = zarr_results["RAQDPS"]
         if isinstance(dataOut_raqdps, np.ndarray):
             dataOut_raqdps = _mask_old_aq_values(
-                dataOut_raqdps, now_time, HISTORY_PERIODS["RAQDPS"]
+                dataOut_raqdps, now_time, RAQDPS_MAX_LOOKBACK_HOURS
             )
         if (
             base_day_utc is not None
@@ -1538,7 +1820,7 @@ async def calculate_grid_indexing(
             dataOut_raqdps = False
         if isinstance(dataOut_raqdps, np.ndarray):
             try:
-                raqdpsRunTime = float(dataOut_raqdps[HISTORY_PERIODS["RAQDPS"], 0])
+                raqdpsRunTime = float(_forecast_run_time(dataOut_raqdps, "RAQDPS"))
                 timestamp_dt = datetime.datetime.fromtimestamp(
                     int(raqdpsRunTime), datetime.UTC
                 ).replace(tzinfo=None)
@@ -1618,6 +1900,8 @@ async def calculate_grid_indexing(
         aigfsRunTime=aigfsRunTime,
         aigefsRunTime=aigefsRunTime,
         aifsRunTime=aifsRunTime,
+        dataOut_librewxr=dataOut_librewxr,
+        librewxrRunTime=librewxrRunTime,
         x_rtma=x_rtma,
         y_rtma=y_rtma,
         rtma_lat=rtma_lat,
@@ -1664,4 +1948,11 @@ async def calculate_grid_indexing(
         y_silam=y_silam,
         silam_lat=silam_lat_val,
         silam_lon=silam_lon_val,
+        rrfs_grid=rrfs_grid,
+        dataOut_rrfs=dataOut_rrfs,
+        dataOut_rrfs_6h=dataOut_rrfs_6h,
+        dataOut_rrfs_subh=dataOut_rrfs_subh,
+        rrfsRunTime=rrfsRunTime,
+        rrfs6hRunTime=rrfs6hRunTime,
+        rrfsSubhRunTime=rrfsSubhRunTime,
     )

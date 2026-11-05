@@ -100,12 +100,12 @@ def _comparison_grid_points() -> tuple[list[dict], dict[str, tuple[int, int]]]:
     return coordinates, indices
 
 
-def _fetch_gribstream_urma_run(
-    api_key: str, run_time, coordinates: list[dict]
+def _fetch_gribstream_urma(
+    api_key: str, run_times: list, coordinates: list[dict]
 ) -> list[dict]:
-    """Fetch selected fields for one URMA analysis at several grid points."""
+    """Fetch selected fields for one or more URMA analyses at several grid points."""
     payload = {
-        "timesList": [_format_utc(run_time)],
+        "timesList": [_format_utc(run_time) for run_time in run_times],
         "minLeadTime": "0h",
         "maxLeadTime": "0h",
         "coordinates": coordinates,
@@ -124,5 +124,5 @@ def _fetch_gribstream_urma_run(
         },
         method="POST",
     )
-    with urlopen(request, timeout=30) as response:
+    with urlopen(request, timeout=60) as response:
         return json.loads(response.read().decode("utf-8"))

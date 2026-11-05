@@ -6,7 +6,6 @@ import datetime
 from dataclasses import dataclass
 
 import numpy as np
-from pytz import utc
 
 from API.constants.shared_const import MISSING_DATA
 
@@ -16,37 +15,39 @@ class TimeIndexing:
     """Pre-computed day arrays and hourly-to-day index mappings."""
 
     day_array_grib: np.ndarray
-    day_array_4am_grib: np.ndarray
-    day_array_4pm_grib: np.ndarray
-    day_array_5pm_grib: np.ndarray
     day_array_6am_grib: np.ndarray
     day_array_6pm_grib: np.ndarray
+    # Midnight to midnight days (daily accumulations and means)
     hourly_day_index: np.ndarray
-    hourly_day_4am_index: np.ndarray
+    # 6am to 6am days (daily summary, icon and precipitation type)
+    hourly_day_6am_index: np.ndarray
     hourly_high_index: np.ndarray
     hourly_low_index: np.ndarray
-    hourly_day_4pm_index: np.ndarray
-    hourly_night_4am_index: np.ndarray
+    # 6am to 6pm and 6pm to 6am halves of each day (day/night forecast)
+    hourly_half_day_index: np.ndarray
+    hourly_half_night_index: np.ndarray
 
 
 def _build_day_array(
     *,
     base_time: datetime.datetime,
-    timezone_localizer,
+    local_tz,
     hour: int,
     days: int = 10,
 ) -> np.ndarray:
+    # Adding days to a zone-aware time moves the wall clock, so each stays at this
+    # local hour across a DST change. Fold 0 is the start of a day where clocks change
+    # at midnight: see prepare_initial_request.
     base = datetime.datetime(
         year=base_time.year,
         month=base_time.month,
         day=base_time.day,
         hour=hour,
+        tzinfo=local_tz,
     )
     return np.array(
         [
-            timezone_localizer.localize(base + datetime.timedelta(days=i))
-            .astimezone(utc)
-            .timestamp()
+            (base + datetime.timedelta(days=i)).astimezone(datetime.UTC).timestamp()
             for i in range(days)
         ]
     ).astype(np.int32)
@@ -74,7 +75,7 @@ def _finalize_index(values: np.ndarray) -> np.ndarray:
 def calculate_time_indexing(
     *,
     base_time: datetime.datetime,
-    timezone_localizer,
+    local_tz,
     hour_array_grib: np.ndarray,
     time_machine: bool,
     daily_days: int = 1,
@@ -84,51 +85,40 @@ def calculate_time_indexing(
     day_array_grib = (
         existing_day_array_grib.astype(np.int32)
         if existing_day_array_grib is not None
-        else _build_day_array(
-            base_time=base_time, timezone_localizer=timezone_localizer, hour=0
-        )
-    )
-    day_array_4am_grib = _build_day_array(
-        base_time=base_time, timezone_localizer=timezone_localizer, hour=4
-    )
-    day_array_4pm_grib = _build_day_array(
-        base_time=base_time, timezone_localizer=timezone_localizer, hour=16
-    )
-    day_array_5pm_grib = _build_day_array(
-        base_time=base_time, timezone_localizer=timezone_localizer, hour=17
+        else _build_day_array(base_time=base_time, local_tz=local_tz, hour=0)
     )
     day_array_6am_grib = _build_day_array(
-        base_time=base_time, timezone_localizer=timezone_localizer, hour=6
+        base_time=base_time, local_tz=local_tz, hour=6
     )
     day_array_6pm_grib = _build_day_array(
-        base_time=base_time, timezone_localizer=timezone_localizer, hour=18
+        base_time=base_time, local_tz=local_tz, hour=18
     )
 
     if time_machine and daily_days == 1:
-        zero_index = np.full(len(hour_array_grib), 0)
+        # Every daily statistic covers the whole requested local day (the grid has
+        # no 6am-6am window to offer). Grid rows past its end belong to the next
+        # day, an hour on a normal day and two on a 23-hour one.
+        zero_index = (hour_array_grib >= day_array_grib[1]).astype(int)
         return TimeIndexing(
             day_array_grib=day_array_grib,
-            day_array_4am_grib=day_array_4am_grib,
-            day_array_4pm_grib=day_array_4pm_grib,
-            day_array_5pm_grib=day_array_5pm_grib,
             day_array_6am_grib=day_array_6am_grib,
             day_array_6pm_grib=day_array_6pm_grib,
             hourly_day_index=zero_index.copy(),
-            hourly_day_4am_index=zero_index.copy(),
+            hourly_day_6am_index=zero_index.copy(),
             hourly_high_index=zero_index.copy(),
             hourly_low_index=zero_index.copy(),
-            hourly_day_4pm_index=zero_index.copy(),
-            hourly_night_4am_index=zero_index.copy(),
+            hourly_half_day_index=zero_index.copy(),
+            hourly_half_night_index=zero_index.copy(),
         )
 
     hourly_day_index = np.full(len(hour_array_grib), MISSING_DATA)
-    hourly_day_4am_index = np.full(len(hour_array_grib), MISSING_DATA)
+    hourly_day_6am_index = np.full(len(hour_array_grib), MISSING_DATA)
     hourly_high_index = np.full(len(hour_array_grib), MISSING_DATA)
     hourly_low_index = np.full(len(hour_array_grib), MISSING_DATA)
-    hourly_day_4pm_index = np.full(len(hour_array_grib), MISSING_DATA)
-    hourly_night_4am_index = np.full(len(hour_array_grib), MISSING_DATA)
+    hourly_half_day_index = np.full(len(hour_array_grib), MISSING_DATA)
+    hourly_half_night_index = np.full(len(hour_array_grib), MISSING_DATA)
 
-    # Zero to 9 to account for the four hours in day 8
+    # Zero to 9 to account for the hours before 6am in day 8
     for d in range(9):
         _assign_range(
             hourly_day_index,
@@ -140,28 +130,28 @@ def calculate_time_indexing(
             value=d,
         )
         _assign_range(
-            hourly_day_4am_index,
+            hourly_day_6am_index,
             hour_array_grib,
-            start=day_array_4am_grib[d],
-            end=day_array_4am_grib[d + 1],
+            start=day_array_6am_grib[d],
+            end=day_array_6am_grib[d + 1],
             include_start=True,
             include_end=False,
             value=d,
         )
         _assign_range(
-            hourly_day_4pm_index,
+            hourly_half_day_index,
             hour_array_grib,
-            start=day_array_4am_grib[d],
-            end=day_array_4pm_grib[d],
+            start=day_array_6am_grib[d],
+            end=day_array_6pm_grib[d],
             include_start=True,
-            include_end=True,
+            include_end=False,
             value=d,
         )
         _assign_range(
-            hourly_night_4am_index,
+            hourly_half_night_index,
             hour_array_grib,
-            start=day_array_5pm_grib[d],
-            end=day_array_4am_grib[d + 1],
+            start=day_array_6pm_grib[d],
+            end=day_array_6am_grib[d + 1],
             include_start=True,
             include_end=False,
             value=d,
@@ -198,15 +188,12 @@ def calculate_time_indexing(
 
     return TimeIndexing(
         day_array_grib=day_array_grib,
-        day_array_4am_grib=day_array_4am_grib,
-        day_array_4pm_grib=day_array_4pm_grib,
-        day_array_5pm_grib=day_array_5pm_grib,
         day_array_6am_grib=day_array_6am_grib,
         day_array_6pm_grib=day_array_6pm_grib,
         hourly_day_index=_finalize_index(hourly_day_index),
-        hourly_day_4am_index=_finalize_index(hourly_day_4am_index),
+        hourly_day_6am_index=_finalize_index(hourly_day_6am_index),
         hourly_high_index=_finalize_index(hourly_high_index),
         hourly_low_index=_finalize_index(hourly_low_index),
-        hourly_day_4pm_index=_finalize_index(hourly_day_4pm_index),
-        hourly_night_4am_index=_finalize_index(hourly_night_4am_index),
+        hourly_half_day_index=_finalize_index(hourly_half_day_index),
+        hourly_half_night_index=_finalize_index(hourly_half_night_index),
     )

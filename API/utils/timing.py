@@ -7,18 +7,34 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import MutableHeaders
 
 
-class TimingMiddleware(BaseHTTPMiddleware):
-    """Attach X-Server-Time header to responses."""
+class TimingMiddleware:
+    """Attach X-Server-Time header to responses.
 
-    async def dispatch(self, request, call_next):
+    A plain ASGI middleware: Starlette's BaseHTTPMiddleware runs each request in
+    an extra task group and streams the body through it, which cost more than
+    the timing it adds.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
         start = time.perf_counter()
-        response = await call_next(request)
-        total_ms = (time.perf_counter() - start) * 1000
-        response.headers["X-Server-Time"] = f"{total_ms:.1f}"
-        return response
+
+        async def send_with_timing(message):
+            if message["type"] == "http.response.start":
+                total_ms = (time.perf_counter() - start) * 1000
+                MutableHeaders(scope=message)["X-Server-Time"] = f"{total_ms:.1f}"
+            await send(message)
+
+        await self.app(scope, receive, send_with_timing)
 
 
 @dataclass

@@ -8,8 +8,7 @@ import datetime
 
 import numpy as np
 from astral import LocationInfo
-from astral.sun import sun
-from pytz import utc
+from astral import sun as astral_sun
 
 from API.utils.geo import _polar_is_all_day
 
@@ -19,7 +18,10 @@ UNIX_EPOCH = np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
 def datetime_to_unix_seconds(value: datetime.datetime) -> np.int32:
     """Convert a timezone-aware datetime to unix seconds in UTC."""
     return (
-        (np.datetime64(value.astimezone(utc).replace(tzinfo=None)) - UNIX_EPOCH)
+        (
+            np.datetime64(value.astimezone(datetime.UTC).replace(tzinfo=None))
+            - UNIX_EPOCH
+        )
         .astype("timedelta64[s]")
         .astype(np.int32)
     )
@@ -42,7 +44,15 @@ def calculate_solar_times(
     try:
         solar_date = base_day + datetime.timedelta(days=day_index)
 
-        solar_times = sun(location.observer, date=solar_date)
+        # The four events used, called directly: astral's sun() also computes
+        # solar noon, which isn't needed.
+        observer = location.observer
+        solar_times = {
+            "dawn": astral_sun.dawn(observer, solar_date),
+            "sunrise": astral_sun.sunrise(observer, solar_date),
+            "sunset": astral_sun.sunset(observer, solar_date),
+            "dusk": astral_sun.dusk(observer, solar_date),
+        }
 
         # If polar/edge-case ordering is weird, clamp twilight bounds to the day.
         if solar_times["dawn"] > solar_times["sunrise"]:

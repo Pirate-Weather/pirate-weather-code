@@ -6,20 +6,23 @@ It includes functions for reading weather data from zarr files, processing
 weather forecasts, and generating API responses.
 """
 
+import asyncio
 import datetime
+import functools
 import logging
 import os
 import pickle
 import platform
 import sys
 import threading
+from contextlib import asynccontextmanager
 
 import aiobotocore.session as _aio_session
 import numpy as np
+import orjson
 from astral import LocationInfo, moon
 from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
-from timezonefinder import TimezoneFinder
 
 from API.alerts import build_alerts
 from API.api_utils import (
@@ -37,7 +40,6 @@ from API.constants.api_const import (
     ROUNDING_RULES,
 )
 from API.constants.forecast_const import (
-    DATA_CURRENT,
     DATA_DAY,
     DATA_HOURLY,
     DATA_MINUTELY,
@@ -55,6 +57,8 @@ from API.constants.model_const import (
     HRRR,
     HRRR_SUBH,
     NBM,
+    RRFS,
+    RRFS_SUBH,
     RTMA_RU,
     URMA,
 )
@@ -74,7 +78,7 @@ from API.forecast_sources import (
     merge_hourly_models,
 )
 from API.hourly.block import build_hourly_block
-from API.io.zarr_reader import update_zarr_store
+from API.io.store_reader import load_stores, watch_stores
 from API.io.ZarrHelpers import _add_custom_header
 from API.legacy.summary import (
     build_daily_summary,
@@ -82,12 +86,13 @@ from API.legacy.summary import (
     build_minutely_summary,
 )
 from API.minutely.builder import build_minutely_block
+from API.PirateDailyText import HourColumns
 from API.request.grid_indexing import ZarrSources, calculate_grid_indexing
 from API.request.preprocess import prepare_initial_request
 from API.utils.filtering import apply_block_indices as _apply_block_indices
 from API.utils.filtering import apply_blocks_param as _apply_blocks_param
 from API.utils.filtering import parse_indices as _parse_indices
-from API.utils.geo import haversine_distance, is_in_north_america
+from API.utils.geo import get_timezone_finder, haversine_distance, is_in_north_america
 from API.utils.solar import calculate_solar_times
 from API.utils.time_indexing import calculate_time_indexing
 from API.utils.timing import StepTimer, TimingMiddleware
@@ -130,86 +135,38 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 
-# Initialize Zarr stores via helper module
-ETOPO_f = None
-SubH_Zarr = None
-HRRR_6H_Zarr = None
-GFS_Zarr = None
-URMA_Zarr = None
-ECMWF_Zarr = None
-NBM_Zarr = None
-GEFS_Zarr = None
-HRDPS_Zarr = None
-GDPS_Zarr = None
-GEPS_Zarr = None
-REPS_Zarr = None
-HRRR_Zarr = None
-NWS_Alerts_Zarr = None
-WMO_Alerts_Zarr = None
-RTMA_RU_Zarr = None
-ERA5_Data = None
-DWD_MOSMIX_Zarr = None
 DWD_MOSMIX_Stations = None
-AIGFS_Zarr = None
-AIGEFS_Zarr = None
-ECMWF_AIFS_Zarr = None
-RAQDPS_Zarr = None
-SILAM_Zarr = None
-RAQDPS_LatLon = None
-
 
 setup_logging()
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
-app.add_middleware(TimingMiddleware)
-
 STAGE = os.environ.get("STAGE", "PROD")
 logger.info("OS: %s Stage: %s", platform.system(), STAGE)
 
-"""Load zarr stores on startup.
 
-File syncing is now handled by a separate container.
-This just loads the zarr stores from their expected paths.
-"""
-zarr_stores = update_zarr_store(
-    True,
-    stage=STAGE,
-    save_dir=save_dir,
-    use_etopo=use_etopo,
-    save_type=save_type,
-    s3_bucket=s3_bucket,
-    aws_access_key_id=aws_access_key_id,
-    aws_secret_access_key=aws_secret_access_key,
-    logger=logger,
-)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Open the model stores when a worker starts, then keep swapping in new
+    versions as the sync (API/store_sync.py) publishes them."""
+    stores, store_root = await load_stores(
+        stage=STAGE,
+        save_dir=save_dir,
+        use_etopo=use_etopo,
+        save_type=save_type,
+        s3_bucket=s3_bucket,
+        logger=logger,
+    )
+    app.state.stores = stores
+    logger.info("Initial data load complete")
+    watcher = asyncio.create_task(
+        watch_stores(stores, store_root, STAGE, logger=logger)
+    )
+    yield
+    watcher.cancel()
 
-logger.info("Initial data load complete")
 
-ETOPO_f = zarr_stores.ETOPO_f
-SubH_Zarr = zarr_stores.SubH_Zarr
-HRRR_6H_Zarr = zarr_stores.HRRR_6H_Zarr
-GFS_Zarr = zarr_stores.GFS_Zarr
-URMA_Zarr = zarr_stores.URMA_Zarr
-ECMWF_Zarr = zarr_stores.ECMWF_Zarr
-NBM_Zarr = zarr_stores.NBM_Zarr
-GEFS_Zarr = zarr_stores.GEFS_Zarr
-HRDPS_Zarr = zarr_stores.HRDPS_Zarr
-GDPS_Zarr = zarr_stores.GDPS_Zarr
-GEPS_Zarr = zarr_stores.GEPS_Zarr
-REPS_Zarr = zarr_stores.REPS_Zarr
-HRRR_Zarr = zarr_stores.HRRR_Zarr
-NWS_Alerts_Zarr = zarr_stores.NWS_Alerts_Zarr
-WMO_Alerts_Zarr = zarr_stores.WMO_Alerts_Zarr
-RTMA_RU_Zarr = zarr_stores.RTMA_RU_Zarr
-ERA5_Data = zarr_stores.ERA5_Data
-DWD_MOSMIX_Zarr = zarr_stores.DWD_MOSMIX_Zarr
-AIGFS_Zarr = zarr_stores.AIGFS_Zarr
-AIGEFS_Zarr = zarr_stores.AIGEFS_Zarr
-ECMWF_AIFS_Zarr = zarr_stores.ECMWF_AIFS_Zarr
-RAQDPS_Zarr = zarr_stores.RAQDPS_Zarr
-SILAM_Zarr = zarr_stores.SILAM_Zarr
-RAQDPS_LatLon = zarr_stores.RAQDPS_LatLon
+app = FastAPI(lifespan=lifespan)
+app.add_middleware(TimingMiddleware)
 
 # Load DWD MOSMIX station mapping
 try:
@@ -261,9 +218,6 @@ try:
 except (OSError, pickle.UnpicklingError) as e:
     logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
-logger.info("Initial data load complete")
-
-
 lats_etopo = np.arange(
     COORDINATE_CONST["latitude_min"],
     COORDINATE_CONST["latitude_max"],
@@ -275,7 +229,7 @@ lons_etopo = np.arange(
     ETOPO_CONST["lon_resolution"],
 )
 
-tf = TimezoneFinder(in_memory=True)
+tf = get_timezone_finder()
 
 
 def convert_data_to_celsius(
@@ -293,6 +247,9 @@ def convert_data_to_celsius(
     dataOut_hrdps,
     dataOut_gdps,
     dataOut_urma=None,
+    dataOut_rrfs=None,
+    dataOut_rrfs_6h=None,
+    dataOut_rrfs_subh=None,
 ):
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
@@ -326,6 +283,9 @@ def convert_data_to_celsius(
         (dataOut_hrdps, HRDPS, ["temp", "dew"]),
         (dataOut_gdps, GDPS, ["temp", "dew"]),
         (dataOut_urma, URMA, ["temp", "dew"]),
+        (dataOut_rrfs, RRFS, ["temp", "dew"]),
+        (dataOut_rrfs_6h, RRFS, ["temp", "dew"]),
+        (dataOut_rrfs_subh, RRFS_SUBH, ["temp", "dew"]),
     ]
 
     for data_array, indices_dict, keys in model_mappings:
@@ -361,11 +321,65 @@ def _prefer_ai_with_fallback(ai_data, base_data):
     return out
 
 
+# Distinct (location, day) pairs remembered per worker; a table is ~2 KB
+SOLAR_TABLE_CACHE_SIZE = 4096
+
+
+@functools.lru_cache(maxsize=SOLAR_TABLE_CACHE_SIZE)
+def _solar_day_table(lat, az_lon, tz_name, base_day, daily_days, day_array_grib):
+    """Sunrise, sunset, dawn, dusk and moon phase for each forecast day, in
+    the ``InterSday`` layout, plus the polar day/night flags.
+
+    The table depends only on the location and the day, so it is memoised:
+    clients poll the same coordinates all day, and astral costs ~1 ms per
+    request. The cached array is read-only; the sections only read it.
+
+    Returns (InterSday, is_all_day, is_all_night).
+    """
+    # +1 to account for the extra 4 hours of summary
+    InterSday = np.zeros(shape=(daily_days + 1, 21))
+    loc = LocationInfo("name", "region", tz_name, lat, az_lon)
+    day_array_grib = np.asarray(day_array_grib)
+
+    is_all_day = False
+    is_all_night = False
+
+    for i in range(daily_days + 1):
+        (
+            sunrise_value,
+            sunset_value,
+            dawn_value,
+            dusk_value,
+            saw_all_day,
+            saw_all_night,
+        ) = calculate_solar_times(
+            day_index=i,
+            base_day=base_day,
+            location=loc,
+            day_array_grib=day_array_grib,
+            latitude=lat,
+        )
+        InterSday[i, DATA_DAY["sunrise"]] = sunrise_value
+        InterSday[i, DATA_DAY["sunset"]] = sunset_value
+        InterSday[i, DATA_DAY["dawn"]] = dawn_value
+        InterSday[i, DATA_DAY["dusk"]] = dusk_value
+        is_all_day = is_all_day or saw_all_day
+        is_all_night = is_all_night or saw_all_night
+
+        m = moon.phase(base_day + datetime.timedelta(days=i))
+        moon_phase_value = np.clip(m / 27.99, 0.0, 1.0)
+        InterSday[i, DATA_DAY["moon_phase"]] = np.round(
+            moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
+        )
+
+    InterSday.flags.writeable = False
+    return InterSday, is_all_day, is_all_night
+
+
 @app.get("/timemachine/{apikey}/{location}")
 @app.get("/forecast/{apikey}/{location}")
 async def PW_Forecast(
     request: Request,
-    response: Response,
     location: str,
     units: str | None = None,
     extend: str | None = None,
@@ -381,7 +395,7 @@ async def PW_Forecast(
     daily_indices: str | None = None,
     hourly_indices: str | None = None,
     day_night_indices: str | None = None,
-) -> dict:
+) -> Response:
     """
     Main entry point for the Pirate Weather API forecast.
 
@@ -425,7 +439,7 @@ async def PW_Forecast(
         day_night_indices: CSV of non-negative integers selecting items from day_night.data.
 
     Returns:
-        dict: The complete weather forecast JSON object.
+        Response: The complete weather forecast as JSON.
     """
 
     # Timing Check
@@ -470,7 +484,6 @@ async def PW_Forecast(
         start_time=T_Start,
     )
 
-    STAGE = initial.stage
     lat = initial.lat
     lon_IN = initial.lon_in
     lon = initial.lon
@@ -506,8 +519,10 @@ async def PW_Forecast(
     exAIGFS = initial.ex_aigfs
     exAIFS = initial.ex_aifs
     incAIModels = initial.inc_aimodels
+    incRRFS = initial.inc_rrfs
     exRAQDPS = initial.ex_raqdps
     exSILAM = initial.ex_silam
+    exLIBREWXR = initial.ex_librewxr
     exHRDPS = initial.ex_hrdps
     exGDPS = initial.ex_gdps
     exGEPS = initial.ex_geps
@@ -525,7 +540,7 @@ async def PW_Forecast(
     humidUnit = initial.humid_unit
     elevUnit = initial.elev_unit
     weather = initial.weather
-    pytzTZ = initial.pytz_tz
+    localTZ = initial.local_tz
     baseTime = initial.base_time
     baseHour = initial.base_hour
     baseDay = initial.base_day
@@ -558,29 +573,37 @@ async def PW_Forecast(
     timer.log("### HRRR Start ###")
 
     # 2. Initialize Zarr sources
+    # The stores held now; a version swapped in mid-request is used from the next one
+    stores = request.app.state.stores
     zarr_sources = ZarrSources(
-        subh=SubH_Zarr,
-        hrrr_6h=HRRR_6H_Zarr,
-        hrrr=HRRR_Zarr,
-        nbm=NBM_Zarr,
-        gfs=GFS_Zarr,
-        urma=URMA_Zarr,
-        ecmwf=ECMWF_Zarr,
-        gefs=GEFS_Zarr,
-        hrdps=HRDPS_Zarr,
-        gdps=GDPS_Zarr,
-        geps=GEPS_Zarr,
-        reps=REPS_Zarr,
-        rtma_ru=RTMA_RU_Zarr,
-        wmo_alerts=WMO_Alerts_Zarr,
-        era5_data=ERA5_Data,
-        dwd_mosmix=DWD_MOSMIX_Zarr,
-        aigfs=AIGFS_Zarr,
-        aigefs=AIGEFS_Zarr,
-        ecmwf_aifs=ECMWF_AIFS_Zarr,
-        raqdps=RAQDPS_Zarr,
-        silam=SILAM_Zarr,
-        raqdps_lat_lon=RAQDPS_LatLon,
+        subh=stores.SubH_Zarr,
+        hrrr_6h=stores.HRRR_6H_Zarr,
+        hrrr=stores.HRRR_Zarr,
+        nbm=stores.NBM_Zarr,
+        gfs=stores.GFS_Zarr,
+        urma=stores.URMA_Zarr,
+        ecmwf=stores.ECMWF_Zarr,
+        gefs=stores.GEFS_Zarr,
+        hrdps=stores.HRDPS_Zarr,
+        gdps=stores.GDPS_Zarr,
+        geps=stores.GEPS_Zarr,
+        reps=stores.REPS_Zarr,
+        rtma_ru=stores.RTMA_RU_Zarr,
+        wmo_alerts=stores.WMO_Alerts_Zarr,
+        era5_data=stores.ERA5_Data,
+        dwd_mosmix=stores.DWD_MOSMIX_Zarr,
+        librewxr=stores.LibreWXR_Zarr,
+        aigfs=stores.AIGFS_Zarr,
+        aigefs=stores.AIGEFS_Zarr,
+        ecmwf_aifs=stores.ECMWF_AIFS_Zarr,
+        raqdps=stores.RAQDPS_Zarr,
+        silam=stores.SILAM_Zarr,
+        raqdps_lat_lon=stores.RAQDPS_LatLon,
+        rrfs=stores.RRFS_Zarr,
+        rrfs_6h=stores.RRFS_6H_Zarr,
+        rrfs_subh=stores.RRFS_SubH_Zarr,
+        rrfs_na=stores.RRFS_NA_Zarr,
+        rrfs_na_6h=stores.RRFS_NA_6H_Zarr,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores
@@ -610,7 +633,9 @@ async def PW_Forecast(
         ex_reps=exREPS,
         ex_raqdps=exRAQDPS,
         ex_silam=exSILAM,
+        ex_librewxr=exLIBREWXR,
         inc_aimodels=incAIModels,
+        inc_rrfs=incRRFS,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
         num_hours=numHours,
@@ -641,6 +666,9 @@ async def PW_Forecast(
     WMO_alertDat = grid_result.WMO_alertDat
     dataOut_raqdps = grid_result.dataOut_raqdps
     dataOut_silam = grid_result.dataOut_silam
+    dataOut_rrfs = grid_result.dataOut_rrfs
+    dataOut_rrfs_6h = grid_result.dataOut_rrfs_6h
+    dataOut_rrfs_subh = grid_result.dataOut_rrfs_subh
 
     ERA5_MERGED = grid_result.era5_merged
 
@@ -662,6 +690,9 @@ async def PW_Forecast(
         dataOut_hrdps,
         dataOut_gdps,
         dataOut_urma,
+        dataOut_rrfs=dataOut_rrfs,
+        dataOut_rrfs_6h=dataOut_rrfs_6h,
+        dataOut_rrfs_subh=dataOut_rrfs_subh,
     )
 
     # 5. Build metadata about the data sources used for this forecast
@@ -686,8 +717,8 @@ async def PW_Forecast(
     y_p_etopo = np.argmin(abslat)
     x_p_etopo = np.argmin(abslon)
 
-    if (use_etopo) and ((STAGE == "PROD") or (STAGE == "DEV")):
-        ETOPO = int(ETOPO_f[y_p_etopo, x_p_etopo])
+    if use_etopo and stores.ETOPO_f is not None:
+        ETOPO = int(await stores.ETOPO_f[y_p_etopo, x_p_etopo].read())
     else:
         ETOPO = 0
 
@@ -710,7 +741,9 @@ async def PW_Forecast(
     if timeMachine:
         baseTimeOffset = 0
     else:
-        baseTimeOffset = (baseHour - baseDay).seconds / 3600
+        # From timestamps: subtracting two times in one ZoneInfo would compare their
+        # wall clocks, an hour out on a DST change day.
+        baseTimeOffset = (baseHour.timestamp() - baseDay.timestamp()) / 3600
 
     # 7. Merge hourly models onto a consistent time grid, starting from midnight on the requested day
     # Note that baseTime is the requested time, in TZ aware datetime format
@@ -742,9 +775,16 @@ async def PW_Forecast(
         data_aifs=dataOut_aifs if isinstance(dataOut_aifs, np.ndarray) else None,
         logger=logger,
         loc_tag=loc_tag,
+        data_rrfs=dataOut_rrfs if isinstance(dataOut_rrfs, np.ndarray) else None,
+        data_rrfs_6h=dataOut_rrfs_6h
+        if isinstance(dataOut_rrfs_6h, np.ndarray)
+        else None,
+        rrfs_grid=grid_result.rrfs_grid,
     )
 
     HRRR_Merged = merge_result.hrrr
+    # RRFS (include=rrfs only) comes first in every element's priority order
+    RRFS_Merged = merge_result.rrfs
     NBM_Merged = merge_result.nbm
     GFS_Merged = merge_result.gfs
     URMA_Merged = merge_result.urma
@@ -797,7 +837,7 @@ async def PW_Forecast(
     sourceIDX = merge_result.metadata.source_idx
 
     # Validate that at least one forecast model source is available.
-    # RTMA-RU, hrrrsubh, and etopo provide only current/elevation data, not forecasts.
+    # RTMA-RU, hrrrsubh, librewxr and etopo provide only current/elevation data, not forecasts.
     # If all forecast sources are excluded or unavailable, return a 400 error.
     if not any(src in sourceList for src in FORECAST_SOURCES):
         raise HTTPException(
@@ -820,13 +860,21 @@ async def PW_Forecast(
             pTypesText,
             pTypesIcon,
             hrrrSubHInterpolation,
+            rrfsSubHInterpolation,
         ) = build_minutely_block(
             minute_array_grib=minute_array_grib,
             source_list=sourceList,
             hrrr_subh_data=dataOut if isinstance(dataOut, np.ndarray) else None,
+            librewxr_data=grid_result.dataOut_librewxr
+            if isinstance(grid_result.dataOut_librewxr, np.ndarray)
+            else None,
             hrrr_merged=HRRR_Merged
             if ("hrrr_0-18" in sourceList and "hrrr_18-48" in sourceList)
             else None,
+            rrfs_subh_data=dataOut_rrfs_subh
+            if "rrfssubh" in sourceList and isinstance(dataOut_rrfs_subh, np.ndarray)
+            else None,
+            rrfs_merged=RRFS_Merged,
             nbm_data=dataOut_nbm if "nbm" in sourceList else None,
             dwd_mosmix_data=DWD_MOSMIX_Merged if "dwd_mosmix" in sourceList else None,
             gefs_data=GEFS_Merged if "gefs" in sourceList else None,
@@ -870,7 +918,7 @@ async def PW_Forecast(
     # This ensures that the forecast data corresponds to the correct local time for the user
     time_indexing = calculate_time_indexing(
         base_time=baseTime,
-        timezone_localizer=pytzTZ,
+        local_tz=localTZ,
         hour_array_grib=hour_array_grib,
         time_machine=timeMachine,
         daily_days=daily_days,
@@ -878,55 +926,29 @@ async def PW_Forecast(
     )
 
     day_array_grib = time_indexing.day_array_grib
-    day_array_4am_grib = time_indexing.day_array_4am_grib
-    day_array_5pm_grib = time_indexing.day_array_5pm_grib
+    day_array_6am_grib = time_indexing.day_array_6am_grib
+    day_array_6pm_grib = time_indexing.day_array_6pm_grib
     hourlyDayIndex = time_indexing.hourly_day_index
-    hourlyDay4amIndex = time_indexing.hourly_day_4am_index
+    hourlyDay6amIndex = time_indexing.hourly_day_6am_index
     hourlyHighIndex = time_indexing.hourly_high_index
     hourlyLowIndex = time_indexing.hourly_low_index
-    hourlyDay4pmIndex = time_indexing.hourly_day_4pm_index
-    hourlyNight4amIndex = time_indexing.hourly_night_4am_index
-
-    # +1 to account for the extra 4 hours of summary
-    InterSday = np.zeros(shape=(daily_days + 1, 21))
+    hourlyHalfDayIndex = time_indexing.hourly_half_day_index
+    hourlyHalfNightIndex = time_indexing.hourly_half_night_index
 
     # Timing Check
     timer.log("Sunrise start")
 
-    loc = LocationInfo("name", "region", tz_name, lat, az_Lon)
-
-    is_all_day = False
-    is_all_night = False
-
-    # 10. Calculate Sunrise, Sunset, Moon Phase for each day in the forecast
-    # This information is used to determine day/night cycles and moon phases
-    for i in range(daily_days + 1):
-        (
-            sunrise_value,
-            sunset_value,
-            dawn_value,
-            dusk_value,
-            saw_all_day,
-            saw_all_night,
-        ) = calculate_solar_times(
-            day_index=i,
-            base_day=baseDay,
-            location=loc,
-            day_array_grib=day_array_grib,
-            latitude=lat,
-        )
-        InterSday[i, DATA_DAY["sunrise"]] = sunrise_value
-        InterSday[i, DATA_DAY["sunset"]] = sunset_value
-        InterSday[i, DATA_DAY["dawn"]] = dawn_value
-        InterSday[i, DATA_DAY["dusk"]] = dusk_value
-        is_all_day = is_all_day or saw_all_day
-        is_all_night = is_all_night or saw_all_night
-
-        m = moon.phase(baseDay + datetime.timedelta(days=i))
-        moon_phase_value = np.clip(m / 27.99, 0.0, 1.0)
-        InterSday[i, DATA_DAY["moon_phase"]] = np.round(
-            moon_phase_value, ROUNDING_RULES.get("moonPhase", 2)
-        )
+    # 10. Sunrise, sunset, dawn, dusk and moon phase for each day in the
+    # forecast (day/night cycles of the icons and text), memoised per
+    # location and day. The polar fallback only looks at the forecast days.
+    InterSday, is_all_day, is_all_night = _solar_day_table(
+        lat,
+        az_Lon,
+        tz_name,
+        baseDay,
+        daily_days,
+        tuple(day_array_grib[: daily_days + 1].tolist()),
+    )
 
     # 11. Extract and prepare specific weather variables (temperature, wind, etc.) from the merged model data
     # This step pulls out the relevant data arrays for each weather variable from the merged dataset
@@ -934,6 +956,7 @@ async def PW_Forecast(
         source_list=sourceList,
         nbm_merged=NBM_Merged,
         hrrr_merged=HRRR_Merged,
+        rrfs_merged=RRFS_Merged,
         dwd_mosmix_merged=DWD_MOSMIX_Merged,
         ecmwf_merged=ECMWF_Merged,
         gefs_merged=GEFS_Merged,
@@ -991,10 +1014,22 @@ async def PW_Forecast(
     )
 
     # Extend smoke_inputs with SILAM PM_FRP_column as a lower-priority fallback
-    # (HRRR smoke wins when available; SILAM fire smoke fills NaN gaps).
+    # (RRFS then HRRR smoke win when available; SILAM fire smoke fills NaN gaps).
     silam_smoke_frp = aq_inputs.get("smoke_frp")
     if silam_smoke_frp is not None and not np.all(np.isnan(silam_smoke_frp)):
         smoke_inputs = np.column_stack([smoke_inputs, silam_smoke_frp.reshape(-1, 1)])
+
+    # The hourly response objects and their text are only needed for the hours
+    # returned. Time Machine and the legacy summaries (no summary text) take the
+    # most common text over every hour, so those build them all.
+    if timeMachine or not summaryText:
+        hourly_display_hours = None
+    elif exHourly == 1:
+        hourly_display_hours = range(0)
+    else:
+        hourly_display_hours = range(
+            int(baseTimeOffset), int(baseTimeOffset) + ouputHours
+        )
 
     # This constructs the hourly forecast objects, applying unit conversions and formatting
     with timing_tracker.track("Hourly block"):
@@ -1007,7 +1042,7 @@ async def PW_Forecast(
             dayZeroSnow,
             dayZeroIce,
             _,
-            _,
+            PTypeHour,
             _,
             InterPhour,
         ) = build_hourly_block(
@@ -1076,6 +1111,7 @@ async def PW_Forecast(
             if URMA_Merged is not None
             else None,
             version=version,
+            display_hours=hourly_display_hours,
         )
 
     pTypeMap = np.array(
@@ -1099,15 +1135,24 @@ async def PW_Forecast(
         ]
     )
 
+    # The daily, half-day and next-24-hour summaries each aggregate a window
+    # of the same hours; their values and per-hour flags are gathered once.
+    # The legacy summaries (no summary text) don't aggregate hours.
+    hour_columns = (
+        HourColumns.from_interphour(InterPhour, hour_array_grib, PTypeHour)
+        if summaryText
+        else None
+    )
+
     # 13. Generate the daily forecast section
     # This aggregates hourly data to create daily summaries (high/low temps, total precip, etc.)
     with timing_tracker.track("Daily block"):
         daily_section = build_daily_section(
             InterPhour=InterPhour,
             hourlyDayIndex=hourlyDayIndex,
-            hourlyDay4amIndex=hourlyDay4amIndex,
-            hourlyDay4pmIndex=hourlyDay4pmIndex,
-            hourlyNight4amIndex=hourlyNight4amIndex,
+            hourlyDay6amIndex=hourlyDay6amIndex,
+            hourlyHalfDayIndex=hourlyHalfDayIndex,
+            hourlyHalfNightIndex=hourlyHalfNightIndex,
             hourlyHighIndex=hourlyHighIndex,
             hourlyLowIndex=hourlyLowIndex,
             daily_days=daily_days,
@@ -1128,8 +1173,8 @@ async def PW_Forecast(
             timeMachine=timeMachine,
             tmExtra=tmExtra,
             day_array_grib=day_array_grib,
-            day_array_4am_grib=day_array_4am_grib,
-            day_array_5pm_grib=day_array_5pm_grib,
+            day_array_6am_grib=day_array_6am_grib,
+            day_array_6pm_grib=day_array_6pm_grib,
             InterSday=InterSday,
             hourList_si=hourList_si,
             pTypeMap=pTypeMap,
@@ -1138,6 +1183,11 @@ async def PW_Forecast(
             loc_tag=loc_tag,
             aq_inputs=aq_inputs,
             inc_airqualitydetails=incAirQualityDetails,
+            include_day_night=inc_day_night == 1 and not timeMachine,
+            hour_columns=hour_columns,
+            current_hour_time=None
+            if timeMachine
+            else int(hour_array_grib[int(baseTimeOffset)]),
         )
     dayList = daily_section.day_list
     dayList_si = daily_section.day_list_si
@@ -1155,7 +1205,7 @@ async def PW_Forecast(
         ex_alerts=exAlerts,
         lat=lat,
         az_lon=az_Lon,
-        nws_alerts_zarr=NWS_Alerts_Zarr,
+        nws_alerts_zarr=stores.NWS_Alerts_Zarr,
         wmo_alert_data=WMO_alertDat,
         read_wmo_alerts=readWMOAlerts,
         logger=logger,
@@ -1202,6 +1252,8 @@ async def PW_Forecast(
             dataOut_rtma_ru=dataOut_rtma_ru,
             hrrrSubHInterpolation=hrrrSubHInterpolation,
             HRRR_Merged=HRRR_Merged,
+            rrfsSubHInterpolation=rrfsSubHInterpolation,
+            RRFS_Merged=RRFS_Merged,
             NBM_Merged=NBM_Merged,
             DWD_MOSMIX_Merged=DWD_MOSMIX_Merged,
             ECMWF_Merged=ECMWF_Merged,
@@ -1242,27 +1294,10 @@ async def PW_Forecast(
 
     if exMinutely != 1:
         returnOBJ["minutely"] = {}
-        current_cape = float(
-            np.nan_to_num(
-                current_section.interp_current[DATA_CURRENT["cape"]],
-                nan=0,
-            )
-        )
-        hourly_cape = 0.0
-        if len(InterPhour) > 0:
-            hourly_cape = float(
-                np.nan_to_num(InterPhour[0, DATA_HOURLY["cape"]], nan=0)
-            )
         minute_summary, minute_icon = build_minutely_summary(
             summary_text=summaryText,
             translation=translation,
-            inter_p_current=current_cape,
-            inter_p_hour=hourly_cape,
             minute_items_si=minuteItems_si,
-            current_text=(
-                current_section.summary_key
-                or current_section.currently.get("summary", "")
-            ),  # This takes the summary from the summary_key variable if available, which has formatted text.
             current_icon=current_section.currently.get("icon", ""),
             icon=icon,
             max_p_chance=maxPchance,
@@ -1301,23 +1336,23 @@ async def PW_Forecast(
             base_time_offset_int=base_time_offset_int,
             logger=logger,
             loc_tag=loc_tag,
+            hour_columns=hour_columns,
         )
-        filtered_hourList = remove_conditional_fields(
-            hourList,
+        if timeMachine:
+            output_hourList = hourList[0:ouputHours]
+        else:
+            output_hourList = hourList[
+                base_time_offset_int : base_time_offset_int + ouputHours
+            ]
+        returnOBJ["hourly"]["summary"] = hour_summary
+        returnOBJ["hourly"]["icon"] = hour_icon
+        returnOBJ["hourly"]["data"] = remove_conditional_fields(
+            output_hourList,
             version,
             timeMachine,
             tmExtra,
             inc_airqualitydetails=incAirQualityDetails,
         )
-        returnOBJ["hourly"]["summary"] = hour_summary
-        returnOBJ["hourly"]["icon"] = hour_icon
-
-        if timeMachine:
-            returnOBJ["hourly"]["data"] = filtered_hourList[0:ouputHours]
-        else:
-            returnOBJ["hourly"]["data"] = filtered_hourList[
-                base_time_offset_int : base_time_offset_int + ouputHours
-            ]
 
     if inc_day_night == 1 and not timeMachine:
         returnOBJ["day_night"] = {}
@@ -1446,21 +1481,24 @@ async def PW_Forecast(
 
     timer.log("Replace NaN Time")
 
+    # orjson writes the same JSON as FastAPI's default (pydantic) serializer at
+    # about a third of the cost; OPT_SERIALIZE_NUMPY covers any numpy scalars.
+    body = orjson.dumps(returnOBJ, option=orjson.OPT_SERIALIZE_NUMPY)
+
     handler_ms = (
         datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
     ).total_seconds() * 1000
 
-    response.headers["X-Node-ID"] = platform.node()
-    response.headers["X-Handler-Time"] = f"{handler_ms:.1f}"
-    response.headers["X-Response-Time"] = str(
-        (
-            datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - T_Start
-        ).total_seconds()
-        * 1000
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={
+            "X-Node-ID": platform.node(),
+            "X-Handler-Time": f"{handler_ms:.1f}",
+            "X-Response-Time": str(handler_ms),
+            "Cache-Control": "max-age=900, must-revalidate",
+        },
     )
-    response.headers["Cache-Control"] = "max-age=900, must-revalidate"
-
-    return returnOBJ
 
 
 if __name__ == "__main__":

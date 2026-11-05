@@ -1,187 +1,407 @@
 # Pirate Weather Python Style Guide
 
-# Introduction
-This style guide outlines the coding conventions for Python code developed at Pirate Weather.
-It's based on PEP 8, but with some modifications to address specific needs and
-preferences within our organization.
+This document defines Python coding and review conventions for Pirate Weather.
 
-# Key Principles
-* **Readability:** Code should be easy to understand for all team members.
-* **Maintainability:** Code should be easy to modify and extend.
-* **Consistency:** Adhering to a consistent style across all projects improves
-  collaboration and reduces errors.
-* **Performance:** While readability is paramount, code should be efficient.
+For repository-wide engineering decisions—architecture, model-specific logic, read-performance priorities, testing philosophy, fallbacks, storage design, and scope discipline—follow [`../AGENTS.md`](../AGENTS.md).
 
-# Deviations from PEP 8
+If this file and `AGENTS.md` appear to conflict, **`AGENTS.md` takes precedence**.
 
-## Line Length
-* **Maximum line length:** 120 characters (instead of PEP 8's 79).
-    * Modern screens allow for wider lines, improving code readability in many cases.
-    * Many common patterns in our codebase, like long strings or URLs, often exceed 79 characters.
+---
 
-## Indentation
-* **Use 4 spaces per indentation level.** (PEP 8 recommendation)
+## 1. Principles
 
-## Imports
-* **Group imports:**
-    * Standard library imports
-    * Related third party imports
-    * Local application/library specific imports
-* **Absolute imports:** Always use absolute imports for clarity.
-* **Import order within groups:**  Sort alphabetically.
+Python code should be:
 
-## Naming Conventions
+- **Readable:** Easy to understand in the context of the weather-data workflow.
+- **Maintainable:** Straightforward to modify without introducing unnecessary architecture.
+- **Consistent:** Mechanically consistent where tooling can enforce consistency.
+- **Traceable:** Easy to connect to upstream model variables, units, and processing decisions.
+- **Performance-aware:** Especially on API/data-read paths.
 
-* **Variables:** Use lowercase with underscores (snake_case): `user_name`, `total_count`
-* **Constants:**  Use uppercase with underscores: `MAX_VALUE`, `DATABASE_NAME`
-* **Functions:** Use lowercase with underscores (snake_case): `calculate_total()`, `process_data()`
-* **Classes:** Use CapWords (CamelCase): `UserManager`, `PaymentProcessor`
-* **Modules:** Use lowercase with underscores (snake_case): `user_utils`, `payment_gateway`
+For Pirate Weather, **read performance is the primary optimization constraint**. Among implementations with comparable read performance, prefer the clearer and more maintainable solution.
 
-## Docstrings
-* **Use triple double quotes (`"""Docstring goes here."""`) for all docstrings.**
-* **First line:** Concise summary of the object's purpose.
-* **For complex functions/classes:** Include detailed descriptions of parameters, return values,
-  attributes, and exceptions.
-* **Use Google style docstrings:** This helps with automated documentation generation.
-    ```python
-    def my_function(param1, param2):
-        """Single-line summary.
+---
 
-        More detailed description, if necessary.
+## 2. Formatting
 
-        Parameters:
-        - param1 (int): The first parameter.
-        - param2 (str): The second parameter.
+Pirate Weather uses Ruff for formatting and linting.
 
-        Returns:
-        - bool: The return value. True for success, False otherwise.
+### Line Length
 
-        Raises:
-        - ValueError: If `param2` is invalid.
-        """
-        # function body here
-    ```
+Maximum line length: **120 characters**.
 
-## Type Hints
-* **Use type hints:**  Type hints improve code readability and help catch errors early.
-* **Follow PEP 484:**  Use the standard type hinting syntax.
+Do not manually optimize formatting that Ruff will handle.
 
-## Comments
-* **Write clear and concise comments:** Explain the "why" behind the code, not just the "what".
-* **Comment sparingly:** Well-written code should be self-documenting where possible.
-* **Use complete sentences:** Start comments with a capital letter and use proper punctuation.
+### Indentation
 
-## Logging
-* **Use a standard logging framework:**  Pirate Weather uses the built-in `logging` module.
-* **Log at appropriate levels:** DEBUG, INFO, WARNING, ERROR, CRITICAL
-* **Provide context:** Include relevant information in log messages to aid debugging.
+Use **4 spaces** per indentation level.
 
-## Error Handling
-* **Use specific exceptions:** Avoid using broad exceptions like `Exception`.
-* **Handle exceptions gracefully:** Provide informative error messages and avoid crashing the program.
-* **Use `try...except` blocks:**  Isolate code that might raise exceptions.
+---
 
-# Tooling
-* **Code formatter:**  Ruff - Enforces consistent formatting automatically.
-* **Linter:**  Ruff - Identifies potential issues and style violations.
+## 3. Imports
 
-## Review Noise
+Group imports in this order:
+
+1. standard library;
+2. third-party packages;
+3. local application/library imports.
+
+Prefer absolute imports.
+
+Let Ruff manage import ordering where configured.
+
+Do not create review comments solely about import ordering that automated tooling can fix.
+
+---
+
+## 4. Naming
+
+For new internal Python names:
+
+- variables: `snake_case`;
+- functions: `snake_case`;
+- constants: `UPPER_SNAKE_CASE`;
+- classes: `CapWords`;
+- modules: `snake_case`.
+
+Use descriptive names.
+
+Avoid single-character names except for conventional indexes, dimensions, or equations where the meaning is obvious.
+
+### Upstream Dataset Names
+
+Preserve authoritative upstream weather/model identifiers when doing so improves provenance and debugging.
+
+For example:
+
+```python
+APCP_surface
+TMP_2maboveground
+PTYPE_prob_GE_1_LT_2_prob_fcst_1_1_surface
+```
+
+do not need to be renamed merely to satisfy local naming conventions.
+
+Use `snake_case` for the surrounding internal code.
+
+---
+
+## 5. Docstrings
+
+Use triple double quotes for docstrings.
+
+Add docstrings when they materially clarify:
+
+- a reusable helper's purpose;
+- non-obvious parameters or return values;
+- units;
+- exceptions;
+- side effects;
+- important domain assumptions.
+
+Use Google-style structure for complex public/reusable functions where detailed parameter and return documentation is useful.
+
+Do **not** add verbose docstrings to trivial helpers merely for stylistic completeness.
+
+A concise docstring is preferable when the interface is simple.
+
+---
+
+## 6. Type Hints
+
+Use standard Python type hints where they improve interfaces, readability, or correctness.
+
+Prioritize type hints for:
+
+- public/reusable functions;
+- non-obvious return structures;
+- configuration/state boundaries;
+- functions where static typing can prevent realistic mistakes.
+
+Do not add typing churn to unrelated legacy code.
+
+Do not annotate every local variable merely to increase type-hint coverage.
+
+---
+
+## 7. Comments
+
+Comments should explain **why**, especially when code reflects unusual behaviour in a weather product or serving path.
+
+Useful comments explain:
+
+- model quirks;
+- accumulation timing;
+- interpolation choices;
+- grid assumptions;
+- source precedence;
+- fallbacks;
+- unusual performance decisions;
+- compatibility constraints.
+
+Avoid comments that merely restate the next line of Python.
+
+Prefer concise complete sentences when practical.
+
+Remove obsolete commented-out code rather than preserving it indefinitely.
+
+---
+
+## 8. Logging
+
+Use Python's built-in `logging` module for new production paths.
+
+Use appropriate log levels:
+
+- `DEBUG`: detailed diagnostic information;
+- `INFO`: normal important lifecycle events;
+- `WARNING`: degraded but recoverable behaviour;
+- `ERROR`: failed operation or invalid product;
+- `CRITICAL`: severe system-level failure.
+
+Include useful context such as:
+
+- model;
+- model run/base time;
+- source;
+- path/store;
+- elapsed time;
+- retry count;
+- failure reason.
+
+Avoid adding high-volume logging to hot read paths if it materially affects serving performance.
+
+Simple `print()` statements are acceptable in one-off utilities and temporary development diagnostics.
+
+---
+
+## 9. Error Handling
+
+Catch specific exceptions.
+
+Avoid:
+
+```python
+except:
+    ...
+```
+
+and generally avoid broad `except Exception:` handlers unless the code is at a deliberate boundary where broad containment is justified.
+
+Handle external-service failures gracefully **only when the resulting output remains valid**.
+
+If a failed operation could produce scientifically invalid data, fail before publication rather than silently continuing.
+
+Do not suppress programming errors behind generic fallback behaviour.
+
+---
+
+## 10. Subprocesses and Shell Commands
+
+Important subprocess calls should use `check=True` or otherwise verify success.
+
+Prefer argument lists:
+
+```python
+subprocess.run(
+    [wgrib2_path, input_file, "-netcdf", output_file],
+    check=True,
+)
+```
+
+Avoid `shell=True` unless it is genuinely required.
+
+Prefer Python filesystem APIs for operations such as file deletion, directory removal, and moves.
+
+When external commands fail, preserve enough context to identify the model, run, input, and output involved.
+
+---
+
+## 11. Units
+
+Use metric/SI-style units internally unless an established Pirate Weather convention requires otherwise.
+
+Wind speed is represented internally in **metres per second**.
+
+Make units explicit in variable names, constants, comments, or docstrings where ambiguity is possible.
+
+Do not repeatedly hardcode conversion factors.
+
+Prefer shared conversion utilities or named constants for reused conversions.
+
+---
+
+## 12. Weather Thresholds and Constants
+
+Weather thresholds should be named constants.
+
+Shared thresholds should live in the repository's shared constants location rather than being duplicated across modules.
+
+Examples:
+
+```python
+LIGHT_PRECIP_MM_PER_HOUR
+HEAVY_SNOW_MM_PER_HOUR
+DEFAULT_VISIBILITY_M
+HRRR_GRID_NX
+```
+
+A threshold or constant should communicate both its meaning and, where relevant, its units.
+
+Do not replace authoritative upstream dataset values with generic constants when preserving the upstream identifier is more useful.
+
+---
+
+## 13. API Compatibility
+
+Preserve backwards compatibility for existing API responses.
+
+Do not silently change:
+
+- response fields;
+- units;
+- meanings;
+- defaults;
+- source precedence;
+- summary semantics.
+
+New response items should normally be exposed through the existing API versioning or include mechanisms rather than being added unconditionally.
+
+Any deliberate compatibility change should be explicit in the pull request.
+
+---
+
+## 14. Localization
+
+Do not change forecast summary text, condition labels, or other user-facing strings without considering translation/localization behaviour.
+
+Condition thresholds may be adjusted when justified, but changes to emitted text should account for the translation layer and API compatibility.
+
+---
+
+## 15. Performance-Sensitive Python
+
+Do not add convenience abstractions to the hot read path without considering their cost.
+
+Be cautious about:
+
+- repeated xarray object construction;
+- unnecessary `.compute()` calls;
+- repeated metadata access;
+- additional array copies;
+- extra object-store requests;
+- per-request configuration parsing;
+- avoidable serialization/deserialization;
+- reading more chunks than necessary.
+
+If a Python change could affect request latency or throughput, benchmark it where practical.
+
+Read-path performance takes priority over stylistic neatness.
+
+---
+
+## 16. Tests
+
+Testing policy is defined primarily in `AGENTS.md`.
+
+In summary:
+
+- keep the test suite small;
+- prefer broad end-to-end, integration, and regression tests;
+- avoid trivial unit tests;
+- do not add tests merely to raise coverage;
+- every new test must document why it exists and what meaningful failure it protects against.
+
+Example:
+
+```python
+def test_gfs_ingest_can_be_served_by_api(...):
+    """Protect the ingest/API contract: GFS output must be directly readable
+    by the forecast endpoint without an intermediate conversion step.
+    """
+    ...
+```
+
+Do not mirror every implementation detail with a corresponding test.
+
+---
+
+## 17. Review Noise
 
 Do not comment on:
 
-- Import ordering handled by Ruff.
-- Formatting handled automatically by Ruff.
-- Line wrapping within Ruff's configured limits.
-- Minor naming differences when they are consistent with nearby code.
-- Legacy style inconsistencies outside the scope of the current pull request.
-- Suggestions that would require a large refactor without a clear functional benefit.
+- import ordering handled by Ruff;
+- formatting handled by Ruff;
+- line wrapping within configured limits;
+- minor naming differences that are consistent with nearby code;
+- legacy style inconsistencies outside the scope of the current pull request;
+- suggestions that would require a large refactor without a clear functional benefit;
+- lack of trivial unit tests;
+- missing type annotations in unrelated legacy code.
 
-## Pirate Weather Conventions
+Focus reviews on:
 
-- Use metric units internally except for wind speed which is metres per second.
-- Do not hardcode conversion factors; use shared utilities.
-- Weather thresholds should be declared as named constants. Shared thresholds should live in the `constants` folder rather than being duplicated across modules.
-- Preserve backwards compatibility for API responses. Any new items to the API response should be behind the version=2 query string or the include query string.
-- Avoid changing summary text without considering the translation module for localization. The summary condition breakpoints can be changed to better represent the condition.
+- correctness;
+- meteorological logic;
+- units and timing;
+- read performance;
+- data layout;
+- source selection and fallback behaviour;
+- API compatibility;
+- failure handling;
+- meaningful maintainability concerns.
 
-# Example
+---
+
+## 18. Tooling
+
+Use the repository's configured tooling.
+
+Primary tools:
+
+- **Formatter:** Ruff
+- **Linter:** Ruff
+
+Run the repository-provided lint/format commands before submission.
+
+Do not manually reformat unrelated files merely to make them look more consistent.
+
+---
+
+## 19. Example Style
+
+Preferred:
+
 ```python
+# NBM switches to 3-hour accumulation intervals after this point.
+# Normalize to hourly values before merging onto the API time grid.
+NBM_THREE_HOUR_START = 48
 
-""" Script to contain the helper functions that can be used to generate the text summary of the forecast data for Pirate Weather """
-from collections import Counter
-import math
+if forecast_hour >= NBM_THREE_HOUR_START:
+    hourly_apcp = APCP_surface / 3
+else:
+    hourly_apcp = APCP_surface
+```
 
-# Cloud Cover Thresholds 
-CLOUD_COVER_DAILY_THRESHOLDS = {
-    "cloudy": 1.0,
-    "mostly_cloudy": 0.75,
-    "partly_cloudy": 0.50,
-    "mostly_clear": 0.25,
-    "clear": 0.0,
-}
+Avoid:
 
-# Precipitation Intensity Thresholds (mm/h liquid equivalent)
-LIGHT_PRECIP_MM_PER_HOUR = 0.4
-MID_PRECIP_MM_PER_HOUR = 2.5
-HEAVY_PRECIP_MM_PER_HOUR = 10.0
+```python
+# Divide by 3.
+x = x / 3
+```
 
-# Snow Intensity Thresholds (mm/h liquid equivalent)
-LIGHT_SNOW_MM_PER_HOUR = 0.13
-MID_SNOW_MM_PER_HOUR = 0.83
-HEAVY_SNOW_MM_PER_HOUR = 3.33
+Also avoid introducing a generalized strategy/factory layer for a single model-specific rule unless the same abstraction solves a demonstrated recurring problem elsewhere.
 
-# Icon Thresholds for Precipitation Accumulation (mm liquid equivalent)
-HOURLY_SNOW_ACCUM_ICON_THRESHOLD_MM = 0.2
-HOURLY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 0.02
+---
 
-DAILY_SNOW_ACCUM_ICON_THRESHOLD_MM = 10.0
-DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0
+## 20. Summary
 
-# Icon Thresholds for Visbility (meters)
-DEFAULT_VISIBILITY = 1000
+Python style in Pirate Weather should support the repository's broader engineering philosophy:
 
+> Keep code explicit, traceable to the underlying weather data, mechanically consistent, and fast on the read path.
 
-def calculate_wind_text(wind, wind_unit, icon="darksky", mode="both"):
-    """
-    Calculates the wind text
+Let Ruff handle formatting.
 
-    Parameters:
-    - wind (float) -  The wind speed
-    - wind_unit (float) -  The unit of the wind speed
-    - mode (str): Determines what gets returned by the function. If set to both the summary and icon for the wind will be returned, if just icon then only the icon is returned and if summary then only the summary is returned.
+Use naming, comments, types, logging, constants, and docstrings to clarify real behaviour—not to add ceremony.
 
-    Returns:
-    - wind_text (str) - The textual representation of the wind
-    - wind_icon (str) - The icon representation of the wind
-    - icon (str): Which icon set to use - Dark Sky or Pirate Weather
-    """
-    wind_text = None
-    wind_icon = None
-
-    LIGHT_WIND_THRESH = 6.7056 * wind_unit
-    MID_WIND_THRESH = 10 * wind_unit
-    HEAVY_WIND_THRESH = 17.8816 * wind_unit
-
-    if wind >= LIGHT_WIND_THRESH and wind < MID_WIND_THRESH:
-        wind_text = "light-wind"
-        if icon == "pirate":
-            wind_icon = "breezy"
-        else:
-            wind_icon = "wind"
-    elif wind >= MID_WIND_THRESH and wind < HEAVY_WIND_THRESH:
-        wind_text = "medium-wind"
-        wind_icon = "wind"
-    elif wind >= HEAVY_WIND_THRESH:
-        wind_text = "heavy-wind"
-        if icon == "pirate":
-            wind_icon = "dangerous-wind"
-        else:
-            wind_icon = "wind"
-
-    if mode == "summary":
-        return wind_text
-    elif mode == "icon":
-        return wind_icon
-    else:
-        return wind_text, wind_icon
+When a style preference conflicts with serving performance or clear meteorological logic, follow `AGENTS.md`.

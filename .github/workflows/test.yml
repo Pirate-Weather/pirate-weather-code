@@ -20,6 +20,4 @@ jobs:
           pip install -r Docker/requirements-api.txt
           pip install pytest pytest-asyncio
       - name: Run pytest
-        env:
-          PW_API: ${{ secrets.PW_API }}
         run: python -m pytest -q tests/api

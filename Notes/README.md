@@ -15,7 +15,7 @@ This folder now documents how AI forecast models are wired into the response pip
 
 ## Integration pattern used
 
-1. **Load stores** in `API/io/zarr_reader.py` and thread through `ZarrSources`.
+1. **Load stores** in `API/io/store_reader.py` (`FORECAST_STORES`) and thread through `ZarrSources`.
 2. **Read model slices** in `API/request/grid_indexing.py` only when `include=aimodels` is enabled and excludes allow them.
 3. **Normalize AI arrays** in `API/forecast_sources.py` to existing response-friendly shapes:
    - AIGFS -> GFS-like layout

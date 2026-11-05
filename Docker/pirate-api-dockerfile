@@ -42,5 +42,11 @@ PY
 
 ENTRYPOINT ["uvicorn"]
 
-# Set the default command
+# Set the default command. Each worker process opens the stores with its own
+# tensorstore cache, so add e.g. "--workers", "4" to use more cores.
+#
+# The same image runs the store sync (S3 -> local disk) as a second container
+# on the API's data volume; set BASE_DIR to the API's save_dir and REMOTE_PATH
+# to the bucket/prefix the ingests publish to:
+#   docker run --entrypoint python <image> -m API.store_sync
 CMD ["API.responseLocal:app", "--host", "0.0.0.0"]

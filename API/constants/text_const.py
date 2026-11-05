@@ -39,6 +39,8 @@ DAILY_PRECIP_ACCUM_ICON_THRESHOLD_MM = 1.0  # (mm liquid)
 
 # Text thresholds for precipitation accumulation (only rain/sleet)
 DAILY_PRECIP_ACCUM_TEXT_THRESHOLD_MM = 0.2  # (mm rain/sleet)
+# Day/night (half-day) summaries need slightly more rain/sleet before mentioning it
+HALF_DAY_PRECIP_ACCUM_TEXT_THRESHOLD_MM = 0.25  # (mm rain/sleet)
 
 # Visibility thresholds (metres)
 FOG_THRESHOLD_METERS = 1000
@@ -119,5 +121,6 @@ SNOW_DENSITY_CONST = {
     "min_density": 50,
 }
 
-# Tolerance to show less-than for snow accumulations in mm
+# Accumulation (mm) from which an expected amount with a zero lower bound is
+# shown as a "1–N" range instead of "< N" (#510)
 LESS_THAN_TOLERANCE = 50

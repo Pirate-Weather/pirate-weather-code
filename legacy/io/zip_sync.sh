@@ -1,0 +1,241 @@
+#!/bin/sh
+set -eu
+
+# Pin libarchive/bsdtar to a known-good version for streaming ZIP extraction.
+# The sync relies on: rclone cat ... | bsdtar -xf -
+LIBARCHIVE_VERSION="${LIBARCHIVE_VERSION:-3.8.3-r0}"
+LIBARCHIVE_EXPECTED="${LIBARCHIVE_EXPECTED:-3.8.3}"
+LIBARCHIVE_REPO="${LIBARCHIVE_REPO:-https://dl-cdn.alpinelinux.org/alpine/v3.20/main}"
+
+echo "Installing pinned libarchive ${LIBARCHIVE_VERSION} from ${LIBARCHIVE_REPO}"
+echo "Container architecture: $(apk --print-arch)"
+
+apk add --no-cache --allow-downgrade \
+  --repository="$LIBARCHIVE_REPO" \
+  "libarchive=${LIBARCHIVE_VERSION}" \
+  "libarchive-tools=${LIBARCHIVE_VERSION}"
+
+BSDTAR_VERSION="$(bsdtar --version | head -n 1)"
+echo "Using: ${BSDTAR_VERSION}"
+
+case "$BSDTAR_VERSION" in
+  "bsdtar ${LIBARCHIVE_EXPECTED} - libarchive ${LIBARCHIVE_EXPECTED}"*)
+    ;;
+  *)
+    echo "ERROR: Expected bsdtar/libarchive ${LIBARCHIVE_EXPECTED}, but got:" >&2
+    echo "  ${BSDTAR_VERSION}" >&2
+    exit 1
+    ;;
+esac
+
+BASE_DIR="${BASE_DIR:-/mnt/nvme/data/ProdTest3}"
+REMOTE_BASE="${REMOTE_BASE:-s3:piratezarr2/ForecastTar_v2/v31}"
+READY_FILE="${BASE_DIR}/models_ready"
+
+# Station metadata file (download on first run)
+STATIONS_FILE_NAME="${STATIONS_FILE_NAME:-DWD_MOSMIX_stations.pickle}"
+REMOTE_STATIONS="${REMOTE_STATIONS:-${REMOTE_BASE}/${STATIONS_FILE_NAME}}"
+LOCAL_STATIONS="${LOCAL_STATIONS:-${BASE_DIR}/${STATIONS_FILE_NAME}}"
+
+# Additional non-Zarr support files to keep in sync (space-separated)
+SUPPORT_FILES="
+  RAQDPS.lat_lon.pickle
+"
+
+# Create BASE_DIR if it doesn't exist
+mkdir -p "$BASE_DIR"
+
+# Remove ready flag on startup
+[ -f "$READY_FILE" ] && rm -f "$READY_FILE"
+
+# Models to update (space-separated)
+MODELS="
+  AIGEFS
+  AIGFS
+  DWD_MOSMIX
+  ECMWF
+  ECMWF_AIFS
+  ETOPO_DA_C
+  GDPS
+  GEFS
+  GEPS
+  GFS
+  HRDPS
+  HRRR
+  HRRR_6H
+  NBM
+  NWS_Alerts
+  RAQDPS
+  REPS
+  RTMA_RU
+  SILAM
+  SubH
+  URMA_Hist
+  WMO_Alerts
+"
+
+# Cleanup on exit
+cleanup() {
+    rm -f "$READY_FILE"
+}
+trap cleanup EXIT
+
+# Track whether it's the first full update loop
+first_run=1
+
+while true; do
+  echo "Starting update loop at $(date -Iseconds)"
+  loop_ok=1
+
+  # On the very first run, fetch the station metadata file if missing
+  if [ "$first_run" -eq 1 ]; then
+    if [ -f "$LOCAL_STATIONS" ]; then
+      echo "Station metadata file already present at $LOCAL_STATIONS — skipping download."
+    else
+      echo "First run: downloading station metadata file from $REMOTE_STATIONS to $LOCAL_STATIONS..."
+      if ! rclone copyto "$REMOTE_STATIONS" "$LOCAL_STATIONS"; then
+        echo "Failed to download station metadata file: $STATIONS_FILE_NAME"
+        loop_ok=0
+      else
+        echo "Successfully downloaded station metadata file: $LOCAL_STATIONS"
+      fi
+    fi
+  fi
+
+  for SUPPORT_FILE in $SUPPORT_FILES; do
+    echo "=== Updating $SUPPORT_FILE ==="
+
+    REMOTE="${REMOTE_BASE}/${SUPPORT_FILE}"
+    LOCAL_FILE="${BASE_DIR}/${SUPPORT_FILE}"
+    STATE_FILE="${BASE_DIR}/${SUPPORT_FILE}.state"
+
+    # Get remote file info (size, date, path)
+    if ! remote_info=$(rclone lsl "$REMOTE" 2>/dev/null); then
+      echo "Remote support file not found or inaccessible: $SUPPORT_FILE"
+      loop_ok=0
+      continue
+    fi
+
+    # Load last known info
+    last_info=""
+    [ -f "$STATE_FILE" ] && last_info=$(cat "$STATE_FILE")
+
+    # Skip if unchanged and present locally
+    if [ "$remote_info" = "$last_info" ] && [ -f "$LOCAL_FILE" ]; then
+      echo "No change detected for $SUPPORT_FILE"
+      continue
+    fi
+
+    echo "Remote changed for $SUPPORT_FILE — downloading..."
+
+    tmpfile=$(mktemp "${LOCAL_FILE}.tmp.XXXXXX") || {
+      echo "Failed to create temp file for $SUPPORT_FILE"
+      loop_ok=0
+      continue
+    }
+
+    if ! rclone copyto "$REMOTE" "$tmpfile"; then
+      echo "Download failed for $SUPPORT_FILE"
+      rm -f "$tmpfile"
+      loop_ok=0
+      continue
+    fi
+
+    mv "$tmpfile" "$LOCAL_FILE"
+    echo "Updated support file: $LOCAL_FILE"
+
+    # Save current state
+    echo "$remote_info" > "$STATE_FILE"
+  done
+
+  for MODEL in $MODELS; do
+    echo "=== Updating $MODEL ==="
+
+    REMOTE="${REMOTE_BASE}/${MODEL}.zarr.zip"
+    STATE_FILE="${BASE_DIR}/${MODEL}.zarr.state"
+
+    # Get remote file info (size, date, path)
+    if ! remote_info=$(rclone lsl "$REMOTE" 2>/dev/null); then
+      echo "Remote file not found or inaccessible for $MODEL"
+      loop_ok=0
+      continue
+    fi
+
+    # Load last known info
+    last_info=""
+    [ -f "$STATE_FILE" ] && last_info=$(cat "$STATE_FILE")
+
+    # Skip if unchanged
+    if [ "$remote_info" = "$last_info" ]; then
+      echo "No change detected for $MODEL"
+      continue
+    fi
+
+    echo "Remote changed for $MODEL — streaming and extracting..."
+
+    timestamp=$(date -u +"%Y%m%dT%H%M%SZ")
+    version_dir="${BASE_DIR}/${MODEL}_${timestamp}.zarr"
+    tmpdir=$(mktemp -d "${version_dir}.tmp.XXXXXX") || {
+      echo "Failed to create temp dir for $MODEL"
+      loop_ok=0
+      continue
+    }
+
+    # Stream and extract directly from S3
+    if [ "$first_run" -eq 1 ]; then
+      echo "(First run: unlimited speed)"
+      if ! rclone cat "$REMOTE" | bsdtar -xf - -C "$tmpdir"; then
+        echo "Extraction failed for $MODEL (first run)"
+        rm -rf "$tmpdir"
+        loop_ok=0
+        continue
+      fi
+    else
+      echo "(Subsequent run: throttled to 100 MB/s)"
+      if ! rclone --bwlimit 100M cat "$REMOTE" | bsdtar -xf - -C "$tmpdir"; then
+        echo "Extraction failed for $MODEL (throttled run)"
+        rm -rf "$tmpdir"
+        loop_ok=0
+        continue
+      fi
+    fi
+
+    mv "$tmpdir" "$version_dir"
+    echo "Created versioned dir: $version_dir"
+
+    # Update symlink atomically
+    (
+      cd "$BASE_DIR" || exit 1
+      ln -sfn "$(basename "$version_dir")" "${MODEL}.zarr"
+    )
+    echo "Updated symlink for $MODEL → $(basename "$version_dir")"
+
+    # Prune old versions (keep only the most recent)
+    (
+      cd "$BASE_DIR" || exit 1
+      old_versions=$(ls -dt "${MODEL}_"[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]T[0-9][0-9][0-9][0-9][0-9][0-9]Z.zarr 2>/dev/null \
+      | sed '1d' || true)
+      if [ -n "$old_versions" ]; then
+        echo "Pruning old versions for $MODEL:"
+        printf '%s\n' "$old_versions"
+        printf '%s\n' "$old_versions" | xargs -r rm -rf
+      fi
+    )
+
+    # Save current state
+    echo "$remote_info" > "$STATE_FILE"
+  done
+
+  # Mark ready or not based on success
+  if [ "$loop_ok" -eq 1 ]; then
+    echo "Loop completed successfully — marking ready."
+    touch "$READY_FILE"
+  else
+    echo "Loop had failures — clearing ready flag."
+    rm -f "$READY_FILE"
+  fi
+
+  first_run=0
+  echo "Update loop finished. Sleeping 300s..."
+  sleep 300
+done

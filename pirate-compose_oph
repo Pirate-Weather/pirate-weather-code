@@ -16,32 +16,32 @@ services:
       ofelia.job-run.nbm-ingest.schedule: "0 30 0/2 * * *"
       ofelia.job-run.nbm-ingest.image: "pirateingest:latest" 
       ofelia.job-run.nbm-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
-      ofelia.job-run.nbm-ingest.environment: '["wgrib2_path=/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/NBM", "forecast_path=/data/Prod/NBM", "historic_path=/data/Hist/NBM", "save_type=Download"]'
-      ofelia.job-run.nbm-ingest.command: "API/NBM_Local_Ingest.py" 
+      ofelia.job-run.nbm-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/NBM", "forecast_path=/data/Prod/NBM", "save_type=Download"]'
+      ofelia.job-run.nbm-ingest.command: "NBM_Local_Ingest.py" 
       ofelia.job-run.nbm-ingest.no-overlap: "true"
       ofelia.job-run.subh-ingest.schedule: "0 45 * * * *"
       ofelia.job-run.subh-ingest.image: "pirateingest:latest" 
       ofelia.job-run.subh-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
-      ofelia.job-run.subh-ingest.environment: '["wgrib2_path=/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/SubH", "forecast_path=/data/Prod/SubH", "historic_path=/data/Hist/SubH", "save_type=Download"]'
-      ofelia.job-run.subh-ingest.command: "API/SubH_Local_Ingest.py" 
+      ofelia.job-run.subh-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/SubH", "forecast_path=/data/Prod/SubH", "save_type=Download"]'
+      ofelia.job-run.subh-ingest.command: "SubH_Local_Ingest.py" 
       ofelia.job-run.subh-ingest.no-overlap: "true"
       ofelia.job-run.gefs-ingest.schedule: "0 0 1/6 * * *"
       ofelia.job-run.gefs-ingest.image: "pirateingest:latest" 
       ofelia.job-run.gefs-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
-      ofelia.job-run.gefs-ingest.environment: '["wgrib2_path=/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/GEFS", "forecast_path=/data/Prod/GEFS", "historic_path=/data/Hist/GEFS", "save_type=Download"]'
-      ofelia.job-run.gefs-ingest.command: "API/GEFS_Local_Ingest.py" 
+      ofelia.job-run.gefs-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/GEFS", "forecast_path=/data/Prod/GEFS", "save_type=Download"]'
+      ofelia.job-run.gefs-ingest.command: "GEFS_Local_Ingest.py" 
       ofelia.job-run.gefs-ingest.no-overlap: "true"
       ofelia.job-run.hrrr-ingest.schedule: "0 40 1/2 * * *"
       ofelia.job-run.hrrr-ingest.image: "pirateingest:latest" 
       ofelia.job-run.hrrr-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
-      ofelia.job-run.hrrr-ingest.environment: '["wgrib2_path=/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/HRRR", "forecast_path=/data/Prod/HRRR "historic_path=/data/Hist/HRRR", "save_type=Download"]'
-      ofelia.job-run.hrrr-ingest.command: "API/HRRR_Local_Ingest.py" 
+      ofelia.job-run.hrrr-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/HRRR", "forecast_path=/data/Prod/HRRR", "save_type=Download"]'
+      ofelia.job-run.hrrr-ingest.command: "HRRR_Local_Ingest.py" 
       ofelia.job-run.hrrr-ingest.no-overlap: "true"
       ofelia.job-run.hrrr6h-ingest.schedule: "0 10 3/6 * * *"
       ofelia.job-run.hrrr6h-ingest.image: "pirateingest:latest" 
       ofelia.job-run.hrrr6h-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
-      ofelia.job-run.hrrr6h-ingest.environment: '["wgrib2_path=/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/HRRR_6H", "forecast_path=/data/Prod/HRRR_6H", "historic_path=/data/Hist/HRRR_6H", "save_type=Download"]'
-      ofelia.job-run.hrrr6h-ingest.command: "API/HRRR_6H_Local_Ingest.py" 
+      ofelia.job-run.hrrr6h-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/HRRR_6H", "forecast_path=/data/Prod/HRRR_6H", "save_type=Download"]'
+      ofelia.job-run.hrrr6h-ingest.command: "HRRR_6H_Local_Ingest.py" 
       ofelia.job-run.hrrr6h-ingest.no-overlap: "true"
       ofelia.job-run.nws-alerts-ingest.schedule: "0 0/30 * * * *"
       ofelia.job-run.nws-alerts-ingest.image: "pirateingest:latest" 
@@ -54,7 +54,7 @@ services:
       ofelia.job-run.wmo-alerts-ingest.environment: '["wgrib2_path=/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/WMO_Alerts", "forecast_path=/data/Prod/WMO_Alerts", "historic_path=/data/Hist/WMO_Alerts", "save_type=Download"]'
       ofelia.job-run.wmo-alerts-ingest.command: "API/WMO_Alerts_Local.py" 
       ofelia.job-run.wmo-alerts-ingest.no-overlap: "true"
-      ofelia.job-run.ecmwf-ingest.schedule: "0 0 8/12 * * *"
+      ofelia.job-run.ecmwf-ingest.schedule: "0 30 10/12 * * *"
       ofelia.job-run.ecmwf-ingest.image: "pirateingest:latest" 
       ofelia.job-run.ecmwf-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
       ofelia.job-run.ecmwf-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/ECMWF", "forecast_path=/data/Prod/ECMWF", "historic_path=/data/Hist/ECMWF", "save_type=Download"]'
@@ -126,7 +126,9 @@ services:
       ofelia.job-run.raqdps-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/RAQDPS", "forecast_path=/data/Prod/RAQDPS", "historic_path=/data/Hist/RAQDPS", "save_type=Download"]'
       ofelia.job-run.raqdps-ingest.command: "API/RAQDPS_Local_Ingest.py" 
       ofelia.job-run.raqdps-ingest.no-overlap: "true"
-      ofelia.job-run.silam-ingest.schedule: "0 0 7 * * *"
+      # FMI posts each 00Z SILAM cycle about 37 h later: near 12:55 UTC the next day, on
+      # some days near 17:50 (21 days to 2026-11-04). A run with nothing new exits in ~3 s.
+      ofelia.job-run.silam-ingest.schedule: "0 0 14,19 * * *"
       ofelia.job-run.silam-ingest.image: "pirateingest:latest" 
       ofelia.job-run.silam-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
       ofelia.job-run.silam-ingest.environment: '["/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/SILAM", "forecast_path=/data/Prod/SILAM", "historic_path=/data/Hist/SILAM", "save_type=Download"]'
@@ -201,7 +203,6 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/NBM"
       forecast_path: "/data/Prod/NBM"
-      historic_path: "/data/Hist/NBM"
       save_type: "Download"
     command: ["API/NBM_Local_Ingest.py"]
     depends_on:
@@ -218,7 +219,6 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/SubH"
       forecast_path: "/data/Prod/SubH"
-      historic_path: "/data/Hist/SubH"
       save_type: "Download"
     command: ["API/SubH_Local_Ingest.py"]
     depends_on:
@@ -237,7 +237,6 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/GEFS"
       forecast_path: "/data/Prod/GEFS"
-      historic_path: "/data/Hist/GEFS"
       save_type: "Download"
     command: ["API/GEFS_Local_Ingest.py"]
     depends_on:
@@ -258,7 +257,6 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/HRRR"
       forecast_path: "/data/Prod/HRRR"
-      historic_path: "/data/Hist/HRRR"
       save_type: "Download"
     command: ["API/HRRR_Local_Ingest.py"]
     depends_on:
@@ -281,7 +279,6 @@ services:
       wgrib2_path: "/build/wgrib2_build/bin/wgrib2 "
       forecast_process_dir: "/tmp/Process/HRRR_6H"
       forecast_path: "/data/Prod/HRRR_6H"
-      historic_path: "/data/Hist/HRRR_6H"
       save_type: "Download"
     command: ["API/HRRR_6H_Local_Ingest.py"]
     depends_on:
@@ -628,7 +625,7 @@ services:
 #      - nvme/Data:/data:ro
 #    environment:
 #      STAGE: "PROD"
-#      useETOPO: "False"
+#      use_etopo: "False"
 #      s3_bucket: "/data"
 #      TIMING: "TRUE"
 #      save_type: "Download"

@@ -2,30 +2,35 @@
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import logging
 import math
 import os
 import re
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import reverse_geocode
 from fastapi import HTTPException, Request
-from pytz import timezone, utc
 from timezonefinder import TimezoneFinder
 
 from API.constants.api_const import COORDINATE_CONST, TIME_MACHINE_CONST
 from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.unit_const import country_units
 from API.hourly.builder import initialize_time_grids
-from API.io.zarr_reader import WeatherParallel
+from API.io.store_reader import WeatherParallel
 from API.utils.geo import get_offset
 from API.utils.offline_geocode import geocode_city_country
 from API.utils.timing import TimingTracker
 
+SECONDS_PER_HOUR = 3600
 RELATIVE_TIME_UNITS = {"s": 1, "h": 3600, "d": 86400}
+
+# reverse_geocode builds its city KD-tree on the first lookup (~0.4 s). Build it
+# when the worker starts so requests can call it directly: a lookup then takes
+# ~20 us, less than handing it to a thread (~120 us).
+reverse_geocode.get((0.0, 0.0))
 
 
 def parse_request_time(
@@ -107,7 +112,7 @@ class InitialRequestContext:
     loc_tag: str
     timing_tracker: TimingTracker
     tz_offset: float
-    tz_name: timezone
+    tz_name: ZoneInfo
     tz_req: str
     loc_name: dict[str, str]
     icon: str
@@ -137,12 +142,14 @@ class InitialRequestContext:
     ex_aifs: int
     ex_raqdps: int
     ex_silam: int
+    ex_librewxr: int
     ex_hrdps: int
     ex_gdps: int
     ex_geps: int
     ex_reps: int
     inc_day_night: int
     inc_aimodels: int
+    inc_rrfs: int
     inc_airqualitydetails: int
     summary_text: bool
     unit_system: str
@@ -156,7 +163,7 @@ class InitialRequestContext:
     elev_unit: float
     read_wmo_alerts: bool
     weather: WeatherParallel
-    pytz_tz: timezone
+    local_tz: ZoneInfo
     base_time: datetime.datetime
     base_hour: datetime.datetime
     base_day: datetime.datetime
@@ -442,8 +449,9 @@ def _parse_parameters(
     ex_alerts = int("alerts" in exclude_params)
     ex_nbm = int("nbm" in exclude_params)
     ex_hrrr = int("hrrr" in exclude_params)
-    ex_gefs = int("gefs" in exclude_params)
-    ex_gfs = int("gfs" in exclude_params)
+    # Whole tokens: "aigefs" and "aigfs" contain these names but are other models
+    ex_gefs = int("gefs" in excluded)
+    ex_gfs = int("gfs" in excluded)
     ex_urma = int("urma" in excluded)
     ex_rtma_ru = int("rtma_ru" in exclude_params)
     ex_ecmwf = int("ecmwf_ifs" in exclude_params)
@@ -453,6 +461,7 @@ def _parse_parameters(
     ex_aifs = int("ecmwf_aifs" in exclude_params)
     ex_raqdps = int("raqdps" in exclude_params)
     ex_silam = int("silam" in exclude_params)
+    ex_librewxr = int("librewxr" in exclude_params)
     exclude_cmc = bool({"cmc", "cmcmodels"} & excluded)
     ex_hrdps = int(exclude_cmc or "hrdps" in excluded)
     ex_gdps = int(exclude_cmc or "gdps" in excluded)
@@ -461,6 +470,9 @@ def _parse_parameters(
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
     inc_aimodels = int("aimodels" in included)
+    # include=rrfs reads RRFS (NOAA's planned HRRR replacement) and puts it
+    # first in every element's priority order; without it RRFS is never read.
+    inc_rrfs = int("rrfs" in included)
     inc_airqualitydetails = int("airqualitydetails" in include_params)
 
     if inc_aimodels:
@@ -473,10 +485,12 @@ def _parse_parameters(
         ex_nbm = 1
         ex_alerts = 1
         ex_hrrr = 1
+        inc_rrfs = 0
         ex_gefs = 1
         ex_rtma_ru = 1
         ex_ecmwf = 1
         ex_dwd_mosmix = 1
+        ex_librewxr = 1
 
     read_wmo_alerts = not (time_machine or ex_alerts == 1)
 
@@ -484,7 +498,10 @@ def _parse_parameters(
         ex_minutely = 1
     if time_machine:
         ex_alerts = 1
+        # RRFS stores keep no history
+        inc_rrfs = 0
         ex_dwd_mosmix = 1
+        ex_librewxr = 1
 
     return (
         exclude_params,
@@ -518,6 +535,8 @@ def _parse_parameters(
         ex_geps,
         ex_reps,
         ex_urma,
+        ex_librewxr,
+        inc_rrfs,
     )
 
 
@@ -526,7 +545,7 @@ def _setup_time_grids(
     extend_flag: int,
     base_time: datetime.datetime,
     base_day: datetime.datetime,
-    pytz_tz: timezone,
+    local_tz: ZoneInfo,
     timemachine_days: int = 1,
     timemachine_output_hours: int = 24,
 ):
@@ -537,7 +556,11 @@ def _setup_time_grids(
         output_days = min(timemachine_days, TIME_MACHINE_CONST["max_days"])
     else:
         daily_days = 8
-        daily_day_hours = 5
+        # Hours past the end of the last day: the last 6am-6am daily summary
+        # and 6pm-6am night run until 6am on the following day, plus one hour
+        # for when the clocks fall back during the forecast (the grid is a
+        # fixed number of UTC hours).
+        daily_day_hours = 7
         output_hours = 168 if extend_flag else 48
         output_days = 8
 
@@ -555,7 +578,7 @@ def _setup_time_grids(
         base_day=base_day,
         daily_days=daily_days,
         daily_day_hours=daily_day_hours,
-        timezone_localizer=pytz_tz,
+        local_tz=local_tz,
     )
 
     return (
@@ -674,8 +697,8 @@ async def prepare_initial_request(
 
     tz_offset_loc = {"lat": lat, "lng": az_lon, "utc_time": utc_time, "tf": tf}
     tz_offset, tz_name = get_offset(**tz_offset_loc)
-    tz_req = tf.timezone_at(lat=lat, lng=az_lon)
-    loc_name = await asyncio.to_thread(reverse_geocode.get, (lat, az_lon))
+    tz_req = tz_name.key
+    loc_name = reverse_geocode.get((lat, az_lon))
     timemachine_days, timemachine_hours, timemachine_grid_days = (
         _parse_timemachine_range(request, time_machine)
     )
@@ -716,6 +739,8 @@ async def prepare_initial_request(
         ex_geps,
         ex_reps,
         ex_urma,
+        ex_librewxr,
+        inc_rrfs,
     ) = _parse_parameters(
         exclude,
         include,
@@ -771,30 +796,31 @@ async def prepare_initial_request(
     elev_unit = unit_config["elev_unit"]
 
     weather = WeatherParallel(loc_tag=loc_tag)
-    pytz_tz = timezone(tz_req)
+    local_tz = tz_name
 
-    base_time = utc.localize(
-        datetime.datetime(
-            year=utc_time.year,
-            month=utc_time.month,
-            day=utc_time.day,
-            hour=utc_time.hour,
-            minute=utc_time.minute,
-        )
-    ).astimezone(pytz_tz)
-    base_hour = pytz_tz.localize(
-        datetime.datetime(
-            year=base_time.year,
-            month=base_time.month,
-            day=base_time.day,
-            hour=base_time.hour,
-        )
+    base_time = datetime.datetime(
+        year=utc_time.year,
+        month=utc_time.month,
+        day=utc_time.day,
+        hour=utc_time.hour,
+        minute=utc_time.minute,
+        tzinfo=datetime.UTC,
+    ).astimezone(local_tz)
+    # replace keeps base_time's fold, so the first 01:30 of a fall-back day stays first.
+    base_hour = base_time.replace(minute=0, second=0, microsecond=0)
+    # Fold 0 is the start of the day in the two awkward cases, where clocks change at
+    # midnight: the first midnight where it happens twice (Havana), and where it never
+    # happens (Beirut), the reading of 00:00 at the old offset, when clocks jump to 01:00.
+    base_day = datetime.datetime(
+        year=base_time.year,
+        month=base_time.month,
+        day=base_time.day,
+        tzinfo=local_tz,
     )
-    base_day = base_time.replace(hour=0, minute=0, second=0, microsecond=0)
-    base_day_utc = base_day.astimezone(utc)
+    base_day_utc = base_day.astimezone(datetime.UTC)
     base_day_utc_grib = (
         (
-            np.datetime64(base_day.astimezone(utc).replace(tzinfo=None))
+            np.datetime64(base_day.astimezone(datetime.UTC).replace(tzinfo=None))
             - np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
         )
         .astype("timedelta64[s]")
@@ -819,13 +845,19 @@ async def prepare_initial_request(
         extend_flag,
         base_time,
         base_day,
-        pytz_tz,
+        local_tz,
         timemachine_grid_days,
         timemachine_hours,
     )
 
     if time_machine:
         output_days = timemachine_days
+        # A requested range of days covers their local hours, 23 or 25 on a DST
+        # change day; an explicit hours parameter stays that many hours.
+        if request.query_params.get("hours") is None:
+            output_hours = int(
+                (day_array_grib[output_days] - day_array_grib[0]) // SECONDS_PER_HOUR
+            )
 
     num_hours = len(hour_array)
 
@@ -875,8 +907,10 @@ async def prepare_initial_request(
         ex_gdps=ex_gdps,
         ex_geps=ex_geps,
         ex_reps=ex_reps,
+        ex_librewxr=ex_librewxr,
         inc_day_night=inc_day_night,
         inc_aimodels=inc_aimodels,
+        inc_rrfs=inc_rrfs,
         inc_airqualitydetails=inc_airqualitydetails,
         summary_text=summary_text,
         unit_system=unit_system,
@@ -890,7 +924,7 @@ async def prepare_initial_request(
         elev_unit=elev_unit,
         read_wmo_alerts=read_wmo_alerts,
         weather=weather,
-        pytz_tz=pytz_tz,
+        local_tz=local_tz,
         base_time=base_time,
         base_hour=base_hour,
         base_day=base_day,

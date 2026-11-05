@@ -1,15 +1,17 @@
 import logging
 
-import metpy as mp
 import numpy as np
-from metpy.calc import relative_humidity_from_dewpoint
 
 from API.api_utils import (
+    _lookup_precip_codes,
+    _precip_code_table,
     estimate_visibility_gultepe_rh_pr_numpy,
     map_canadian_precip_type_to_ptype,
     map_ensemble_precip_rates_to_ptype,
     map_wmo4677_to_ptype,
+    relative_humidity_from_dewpoint_c,
 )
+from API.constants.aqi_const import AQ_LEAD_IN_HOURS
 from API.constants.model_const import (
     DWD_MOSMIX,
     ECMWF,
@@ -23,6 +25,7 @@ from API.constants.model_const import (
     NBM,
     RAQDPS,
     REPS,
+    RRFS,
     SILAM,
     URMA,
 )
@@ -257,6 +260,13 @@ def _component_precip_type(snow, ice, freezing_rain, rain):
     return component_ptype
 
 
+# GRIB categorical precipitation type (NCEP table 4.201) to the internal
+# category: 1 snow, 2 ice pellets, 3 freezing rain, 4 rain
+GRIB_PTYPE_TABLE = _precip_code_table(
+    {1: [5, 6, 9], 2: [4, 8, 10], 3: [3, 12], 4: [1, 2, 7, 11]}, 13
+)
+
+
 def _map_grib_precip_type(ptype_values):
     if ptype_values is None:
         return None
@@ -265,14 +275,7 @@ def _map_grib_precip_type(ptype_values):
     ptype_nan_mask = np.isnan(ptype_vals)
     ptype_hour = np.zeros_like(ptype_vals, dtype=int)
     ptype_hour[~ptype_nan_mask] = ptype_vals[~ptype_nan_mask].astype(int)
-    conditions = [
-        np.isin(ptype_hour, [5, 6, 9]),
-        np.isin(ptype_hour, [4, 8, 10]),
-        np.isin(ptype_hour, [3, 12]),
-        np.isin(ptype_hour, [1, 2, 7, 11]),
-    ]
-    choices = [1, 2, 3, 4]
-    mapped_ptype = np.select(conditions, choices, default=0).astype(float)
+    mapped_ptype = _lookup_precip_codes(ptype_hour, GRIB_PTYPE_TABLE)
     mapped_ptype[ptype_nan_mask] = np.nan
     return mapped_ptype
 
@@ -294,6 +297,10 @@ def _stack_precip_with_priority(
         else:
             order = _PRECIP_PRIORITY_ORDER_ROW
 
+    # RRFS is only present for include=rrfs, which asks for it ahead of every
+    # other model
+    if source_data.get("rrfs") is not None:
+        order = ("rrfs", *order)
     return _stack_in_order(num_hours, order, source_data)
 
 
@@ -332,6 +339,10 @@ def _stack_with_priority(
 
     if source_data.get("urma") is not None:
         order = ("urma", *order)
+    # RRFS is only present for include=rrfs, which asks for it ahead of every
+    # other model (URMA is Time Machine only, where RRFS is never read)
+    if source_data.get("rrfs") is not None:
+        order = ("rrfs", *order)
     return _stack_in_order(num_hours, order, source_data)
 
 
@@ -355,6 +366,7 @@ def prepare_data_inputs(
     gdps_merged=None,
     geps_merged=None,
     urma_merged=None,
+    rrfs_merged=None,
 ):
     """
     Prepare data inputs for the hourly block.
@@ -363,6 +375,8 @@ def prepare_data_inputs(
         source_list: List of available data sources.
         nbm_merged: NBM merged data array.
         hrrr_merged: HRRR merged data array.
+        rrfs_merged: RRFS merged data array (include=rrfs only), which leads
+            every element it provides.
         dwd_mosmix_merged: DWD MOSMIX merged data array.
         ecmwf_merged: ECMWF merged data array.
         gefs_merged: GEFS merged data array.
@@ -427,6 +441,9 @@ def prepare_data_inputs(
 
     # --- prcipIntensity_inputs ---
     prcip_intensity_source_data = {
+        "rrfs": rrfs_merged[:, RRFS["intensity"]] * 3600
+        if rrfs_merged is not None
+        else None,
         "nbm": nbm_merged[:, NBM["intensity"]] if nbm_merged is not None else None,
         "hrrr": hrrr_merged[:, HRRR["intensity"]] * 3600
         if (
@@ -542,6 +559,14 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "rrfs": _component_precip_type(
+                rrfs_merged[:, RRFS["snow"]],
+                rrfs_merged[:, RRFS["ice"]],
+                rrfs_merged[:, RRFS["freezing_rain"]],
+                rrfs_merged[:, RRFS["rain"]],
+            )
+            if rrfs_merged is not None
+            else None,
             "nbm": _component_precip_type(
                 nbm_merged[:, NBM["snow"]] if nbm_merged is not None else None,
                 nbm_merged[:, NBM["ice"]] if nbm_merged is not None else None,
@@ -644,6 +669,7 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["temp"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["temp"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["temp"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["temp"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["temp"]]
             if hrdps_merged is not None
@@ -669,6 +695,7 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["dew"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["dew"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["dew"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["dew"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["dew"]]
             if hrdps_merged is not None
@@ -689,16 +716,14 @@ def prepare_data_inputs(
     )
 
     # --- humidity_inputs ---
-    # Note: ECMWF doesn't provide humidity directly
     # In North America, DWD MOSMIX should be below GFS for this variable
     era5_humidity = None
     if era5_valid:
         era5_humidity = (
-            relative_humidity_from_dewpoint(
-                era5_merged[:, ERA5["2m_temperature"]] * mp.units.units.degC,
-                era5_merged[:, ERA5["2m_dewpoint_temperature"]] * mp.units.units.degC,
-                phase="auto",
-            ).magnitude
+            relative_humidity_from_dewpoint_c(
+                era5_merged[:, ERA5["2m_temperature"]],
+                era5_merged[:, ERA5["2m_dewpoint_temperature"]],
+            )
             * 100
         )
 
@@ -709,6 +734,9 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["humidity"]] * 100 if urma_valid else None,
             "nbm": nbm_merged[:, NBM["humidity"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["humidity"]]
+            if rrfs_merged is not None
+            else None,
             "hrrr": hrrr_merged[:, HRRR["humidity"]]
             if hrrr_merged is not None
             else None,
@@ -716,6 +744,9 @@ def prepare_data_inputs(
             "gdps": gdps_merged[:, GDPS["rh"]] if gdps_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["humidity"]]
             if dwd_valid
+            else None,
+            "ecmwf": ecmwf_merged[:, ECMWF["humidity"]]
+            if ecmwf_merged is not None
             else None,
             "gfs": gfs_merged[:, GFS["humidity"]] if gfs_merged is not None else None,
             "era5": era5_humidity,
@@ -729,6 +760,9 @@ def prepare_data_inputs(
         lat,
         lon,
         source_data={
+            "rrfs": rrfs_merged[:, RRFS["pressure"]]
+            if rrfs_merged is not None
+            else None,
             "hrrr": hrrr_merged[:, HRRR["pressure"]]
             if hrrr_merged is not None
             else None,
@@ -764,6 +798,11 @@ def prepare_data_inputs(
             if urma_valid
             else None,
             "nbm": nbm_merged[:, NBM["wind"]] if nbm_merged is not None else None,
+            "rrfs": _wind_speed(
+                rrfs_merged[:, RRFS["wind_u"]], rrfs_merged[:, RRFS["wind_v"]]
+            )
+            if rrfs_merged is not None
+            else None,
             "hrrr": _wind_speed(
                 hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]]
             )
@@ -807,6 +846,7 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["gust"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["gust"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["gust"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["gust"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["gust"]]
             if hrdps_merged is not None
@@ -835,6 +875,11 @@ def prepare_data_inputs(
             if urma_valid
             else None,
             "nbm": nbm_merged[:, NBM["bearing"]] if nbm_merged is not None else None,
+            "rrfs": _bearing(
+                rrfs_merged[:, RRFS["wind_u"]], rrfs_merged[:, RRFS["wind_v"]]
+            )
+            if rrfs_merged is not None
+            else None,
             "hrrr": _bearing(
                 hrrr_merged[:, HRRR["wind_u"]], hrrr_merged[:, HRRR["wind_v"]]
             )
@@ -879,6 +924,9 @@ def prepare_data_inputs(
             "urma": urma_merged[:, URMA["cloud"]] * 0.01 if urma_valid else None,
             "nbm": nbm_merged[:, NBM["cloud"]] * 0.01
             if nbm_merged is not None
+            else None,
+            "rrfs": rrfs_merged[:, RRFS["cloud"]] * 0.01
+            if rrfs_merged is not None
             else None,
             "hrrr": hrrr_merged[:, HRRR["cloud"]] * 0.01
             if hrrr_merged is not None
@@ -934,6 +982,7 @@ def prepare_data_inputs(
         source_data={
             "urma": urma_merged[:, URMA["vis"]] if urma_valid else None,
             "nbm": nbm_merged[:, NBM["vis"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["vis"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["vis"]] if hrrr_merged is not None else None,
             "dwd_mosmix": dwd_mosmix_merged[:, DWD_MOSMIX["vis"]]
             if dwd_valid
@@ -966,6 +1015,7 @@ def prepare_data_inputs(
     # --- smoke_inputs ---
     smoke_inputs = _stack_fields(
         num_hours,
+        rrfs_merged[:, RRFS["smoke"]] if rrfs_merged is not None else None,
         hrrr_merged[:, HRRR["smoke"]] if hrrr_merged is not None else None,
     )
 
@@ -976,6 +1026,7 @@ def prepare_data_inputs(
         lon,
         source_data={
             "nbm": nbm_merged[:, NBM["accum"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["accum"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["accum"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["accum"]]
             if hrdps_merged is not None
@@ -1045,6 +1096,7 @@ def prepare_data_inputs(
         lon,
         source_data={
             "nbm": nbm_merged[:, NBM["solar"]] if nbm_merged is not None else None,
+            "rrfs": rrfs_merged[:, RRFS["solar"]] if rrfs_merged is not None else None,
             "hrrr": hrrr_merged[:, HRRR["solar"]] if hrrr_merged is not None else None,
             "hrdps": hrdps_merged[:, HRDPS["solar"]]
             if hrdps_merged is not None
@@ -1064,6 +1116,7 @@ def prepare_data_inputs(
     # --- cape_inputs ---
     cape_inputs = _stack_fields(
         num_hours,
+        rrfs_merged[:, RRFS["cape"]] if rrfs_merged is not None else None,
         nbm_merged[:, NBM["cape"]] if nbm_merged is not None else None,
         hrrr_merged[:, HRRR["cape"]] if hrrr_merged is not None else None,
         hrdps_merged[:, HRDPS["cape"]] if hrdps_merged is not None else None,
@@ -1075,24 +1128,63 @@ def prepare_data_inputs(
     )
 
     # --- lifted_index_inputs ---
-    lifted_index_inputs = _stack_fields(
+    # The thunderstorm indices use the usual regional priority: the Canadian
+    # models first in Canada, GFS ahead of GDPS elsewhere. HRDPS stores the
+    # surface-parcel LFTX, while GDPS (MU-VT) and GFS (4LFTX) store a
+    # most-unstable / best-layer lifted index. RRFS (include=rrfs) stores the
+    # 500-1000 mb layer lifted index.
+    lifted_index_inputs = _stack_with_priority(
         num_hours,
-        hrdps_merged[:, HRDPS["lifted_index"]] if hrdps_merged is not None else None,
+        lat,
+        lon,
+        source_data={
+            "rrfs": rrfs_merged[:, RRFS["lifted_index"]]
+            if rrfs_merged is not None
+            else None,
+            "hrdps": hrdps_merged[:, HRDPS["lifted_index"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["lifted_index"]]
+            if gdps_merged is not None
+            else None,
+            "gfs": gfs_merged[:, GFS["lifted_index"]]
+            if gfs_merged is not None
+            else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- vertical_velocity_inputs ---
-    vertical_velocity_inputs = _stack_fields(
+    # 500 hPa omega (Pa/s) from every source
+    vertical_velocity_inputs = _stack_with_priority(
         num_hours,
-        hrdps_merged[:, HRDPS["vertical_velocity"]]
-        if hrdps_merged is not None
-        else None,
-        gdps_merged[:, GDPS["vertical_velocity"]] if gdps_merged is not None else None,
+        lat,
+        lon,
+        source_data={
+            "hrdps": hrdps_merged[:, HRDPS["vertical_velocity"]]
+            if hrdps_merged is not None
+            else None,
+            "gdps": gdps_merged[:, GDPS["vertical_velocity"]]
+            if gdps_merged is not None
+            else None,
+            "gfs": gfs_merged[:, GFS["vertical_velocity"]]
+            if gfs_merged is not None
+            else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- convective_inhibition_inputs ---
-    convective_inhibition_inputs = _stack_fields(
+    convective_inhibition_inputs = _stack_with_priority(
         num_hours,
-        gdps_merged[:, GDPS["cin"]] if gdps_merged is not None else None,
+        lat,
+        lon,
+        source_data={
+            "rrfs": rrfs_merged[:, RRFS["cin"]] if rrfs_merged is not None else None,
+            "gdps": gdps_merged[:, GDPS["cin"]] if gdps_merged is not None else None,
+            "gfs": gfs_merged[:, GFS["cin"]] if gfs_merged is not None else None,
+        },
+        prioritize_ai_models=prioritize_ai_models,
     )
 
     # --- k_index_inputs ---
@@ -1154,9 +1246,13 @@ def prepare_aq_inputs(
 ):
     """Prepare air-quality concentration arrays aligned to the request hour grid.
 
-    Returns a dict with keys: pm25, pm10, o3, no2, so2, co, smoke_frp.
-    Each value is a 1-D numpy array of length ``num_hours`` in the model's native
-    units (µg/m³ for PM; ppb for gases).  Missing values are NaN.
+    Returns a dict with keys: pm25, pm10, o3, no2, so2, co, smoke_frp, lead_in.
+    Each value but lead_in is a 1-D numpy array of length ``num_hours`` in the model's
+    native units (µg/m³ for PM; ppb for gases).  Missing values are NaN.
+
+    ``lead_in`` holds the same pollutants for the AQ_LEAD_IN_HOURS before the grid
+    starts at local midnight, already in memory because the stores are read whole.
+    The AQI's averaging windows need them, or they are short for most of today.
 
     Priority: RAQDPS > SILAM per pollutant.
     RAQDPS does not have CO; it falls back to SILAM CO unconditionally.
@@ -1166,46 +1262,64 @@ def prepare_aq_inputs(
     """
     nan_row = np.full(num_hours, np.nan)
 
-    def _extract(data, var_idx):
-        """Extract ``var_idx`` column from a zarr read result and align to ``hour_array_grib``."""
-        if not isinstance(data, np.ndarray):
+    def _match_hours(data, request_times):
+        """For each requested hour, the row of ``data`` nearest in time, and
+        whether it is close enough to use."""
+        # Time column is column 0 (unix seconds); match to hour_array_grib.
+        # SILAM timestamps are stored as float32 (±64 s rounding at ~1.75e9).
+        # Locations in fractional UTC-offset timezones (e.g. UTC±3:30, UTC+5:30)
+        # produce request timestamps that are exactly 1800 s from the nearest
+        # SILAM hour.  Float32 rounding can push the stored SILAM timestamp
+        # ~64 s away, making diff > 1800 for ~44 % of hours.
+        # Using a tolerance of one full SILAM time-step (3600 s) ensures the
+        # nearest available hour is always matched while still rejecting gaps
+        # larger than one hour.
+        time_col = data[:, 0].astype(float)
+        request_hours = np.asarray(request_times, dtype=float)
+        diff = np.abs(time_col[np.newaxis, :] - request_hours[:, np.newaxis])
+        best = np.argmin(diff, axis=1)
+        matched = diff[np.arange(len(best)), best] < 3600  # within one SILAM time-step
+        return best, matched
+
+    # The time matching is the same for every variable of a model, so do it once
+    raqdps_match = (
+        _match_hours(dataOut_raqdps, hour_array_grib)
+        if isinstance(dataOut_raqdps, np.ndarray)
+        else None
+    )
+    silam_match = (
+        _match_hours(dataOut_silam, hour_array_grib)
+        if isinstance(dataOut_silam, np.ndarray)
+        else None
+    )
+
+    def _extract(data, match, var_idx):
+        """Extract ``var_idx`` column from a zarr read result, aligned to ``hour_array_grib``."""
+        if match is None:
             return None
+        best, matched = match
         try:
             col = data[:, var_idx].astype(float)
-            # Time column is column 0 (unix seconds); match to hour_array_grib.
-            # SILAM timestamps are stored as float32 (±64 s rounding at ~1.75e9).
-            # Locations in fractional UTC-offset timezones (e.g. UTC±3:30, UTC+5:30)
-            # produce request timestamps that are exactly 1800 s from the nearest
-            # SILAM hour.  Float32 rounding can push the stored SILAM timestamp
-            # ~64 s away, making diff > 1800 for ~44 % of hours.
-            # Using a tolerance of one full SILAM time-step (3600 s) ensures the
-            # nearest available hour is always matched while still rejecting gaps
-            # larger than one hour.
-            time_col = data[:, 0].astype(float)
-            out = np.full(num_hours, np.nan)
-            for hi, t in enumerate(hour_array_grib):
-                diff = np.abs(time_col - float(t))
-                best = np.argmin(diff)
-                if diff[best] < 3600:  # within one SILAM time-step (1 h)
-                    out[hi] = col[best]
-            return out
-        except (IndexError, ValueError, TypeError):
+        except IndexError:
             return None
+        out = np.full(len(best), np.nan)
+        out[matched] = col[best[matched]]
+        return out
 
-    raqdps_pm25 = _extract(dataOut_raqdps, RAQDPS["pm25"])
-    raqdps_pm10 = _extract(dataOut_raqdps, RAQDPS["pm10"])
-    raqdps_no2 = _extract(dataOut_raqdps, RAQDPS["no2"])
-    raqdps_o3 = _extract(dataOut_raqdps, RAQDPS["o3"])
-    raqdps_so2 = _extract(dataOut_raqdps, RAQDPS["so2"])
+    raqdps_pm25 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["pm25"])
+    raqdps_pm10 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["pm10"])
+    raqdps_no2 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["no2"])
+    raqdps_o3 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["o3"])
+    raqdps_so2 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["so2"])
 
-    silam_pm25 = _extract(dataOut_silam, SILAM["pm25"])
-    silam_pm10 = _extract(dataOut_silam, SILAM["pm10"])
-    silam_no2 = _extract(dataOut_silam, SILAM["no2"])
-    silam_o3 = _extract(dataOut_silam, SILAM["o3"])
-    silam_so2 = _extract(dataOut_silam, SILAM["so2"])
-    silam_co = _extract(dataOut_silam, SILAM["co"])
-    silam_smoke_frp = _extract(dataOut_silam, SILAM["pm_frp_column"])
-    silam_blh = _extract(dataOut_silam, SILAM["blh"])
+    silam_pm25 = _extract(dataOut_silam, silam_match, SILAM["pm25"])
+    silam_pm10 = _extract(dataOut_silam, silam_match, SILAM["pm10"])
+    silam_no2 = _extract(dataOut_silam, silam_match, SILAM["no2"])
+    silam_o3 = _extract(dataOut_silam, silam_match, SILAM["o3"])
+    silam_so2 = _extract(dataOut_silam, silam_match, SILAM["so2"])
+    silam_co = _extract(dataOut_silam, silam_match, SILAM["co"])
+    silam_smoke_frp = _extract(dataOut_silam, silam_match, SILAM["pm_frp_column"])
+    silam_blh = _extract(dataOut_silam, silam_match, SILAM["blh"])
 
     def _prefer(primary, fallback):
         """Return primary where not-NaN, else fallback."""
@@ -1282,7 +1396,40 @@ def prepare_aq_inputs(
     else:
         smoke_frp_m3 = nan_row.copy()
 
+    # The hours before the grid. RAQDPS only reaches back to its latest run, so
+    # within an averaging window earlier hours can come from SILAM, like any other
+    # hour RAQDPS doesn't have.
+    lead_in = {}
+    if len(hour_array_grib):
+        lead_in_times = (
+            np.asarray(hour_array_grib, dtype=float)[0]
+            - np.arange(AQ_LEAD_IN_HOURS, 0, -1) * 3600.0
+        )
+        raqdps_lead_match = (
+            _match_hours(dataOut_raqdps, lead_in_times)
+            if raqdps_match is not None
+            else None
+        )
+        silam_lead_match = (
+            _match_hours(dataOut_silam, lead_in_times)
+            if silam_match is not None
+            else None
+        )
+        for pollutant in ("pm25", "pm10", "o3", "no2", "so2", "co"):
+            # RAQDPS has no CO; SILAM only
+            raqdps_values = (
+                _extract(dataOut_raqdps, raqdps_lead_match, RAQDPS[pollutant])
+                if pollutant != "co"
+                else None
+            )
+            silam_values = _extract(dataOut_silam, silam_lead_match, SILAM[pollutant])
+            if raqdps_values is None and silam_values is None:
+                lead_in[pollutant] = np.full(AQ_LEAD_IN_HOURS, np.nan)
+            else:
+                lead_in[pollutant] = _prefer(raqdps_values, silam_values)
+
     return {
+        "lead_in": lead_in,
         "pm25": _prefer(raqdps_pm25, silam_pm25),
         "pm10": _prefer(raqdps_pm10, silam_pm10),
         "o3": _prefer(raqdps_o3, silam_o3),

@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import datetime
+import functools
 import math
-from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
+
+import reverse_geocode
+from timezonefinder import TimezoneFinder
 
 from API.constants.api_const import (
     DEFAULT_ROUNDING_INTERVAL,
@@ -15,8 +19,42 @@ from API.constants.api_const import (
 )
 from API.constants.grid_const import US_BOUNDING_BOX
 
-if TYPE_CHECKING:
-    from timezonefinder import TimezoneFinder
+# Time zones that are only in Canada (tz database zone.tab). Canadian-first source
+# priority is decided from these.
+CANADA_TIMEZONES = frozenset(
+    {
+        "America/Atikokan",
+        "America/Blanc-Sablon",
+        "America/Cambridge_Bay",
+        "America/Creston",
+        "America/Dawson",
+        "America/Dawson_Creek",
+        "America/Edmonton",
+        "America/Fort_Nelson",
+        "America/Glace_Bay",
+        "America/Goose_Bay",
+        "America/Halifax",
+        "America/Inuvik",
+        "America/Iqaluit",
+        "America/Moncton",
+        "America/Rankin_Inlet",
+        "America/Regina",
+        "America/Resolute",
+        "America/St_Johns",
+        "America/Swift_Current",
+        "America/Toronto",
+        "America/Vancouver",
+        "America/Whitehorse",
+        "America/Winnipeg",
+    }
+)
+# Alaska west of the North America box: the western Aleutians, across the
+# antimeridian to Attu (172.4 E), and St Lawrence Island.
+ALASKA_WEST_TIMEZONES = frozenset({"America/Adak", "America/Nome"})
+ALASKA_WEST_MIN_LAT = 50.0
+ALASKA_WEST_MIN_EAST_LON = 170.0
+# is_in_canada is called many times per request, for a few points at a time
+REGION_CACHE_POINTS = 256
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -68,18 +106,20 @@ def get_offset(*, lat, lng, utc_time, tf: TimezoneFinder):
         tf (TimezoneFinder): TimezoneFinder instance.
 
     Returns:
-        tuple: (offset_minutes (float), tz_target (pytz.timezone))
+        tuple: (offset_minutes (float), tz_target (ZoneInfo))
             offset_minutes: The time zone offset from UTC in minutes.
-            tz_target: The pytz timezone object for the location.
+            tz_target: The ZoneInfo of the location.
     """
 
-    from pytz import timezone, utc
-
     today = utc_time
-    tz_target = timezone(tf.timezone_at(lng=lng, lat=lat))
-    today_target = tz_target.localize(today)
-    today_utc = utc.localize(today)
-    return (today_utc - today_target).total_seconds() / UNIT_CONVERSION_CONST[
+    tz_target = ZoneInfo(tf.timezone_at(lng=lng, lat=lat))
+    # The wall clock is read as local time. Where that time happens twice or never
+    # the two readings differ, and the smaller offset is the standard-time one.
+    offset = min(
+        today.replace(tzinfo=tz_target, fold=0).utcoffset(),
+        today.replace(tzinfo=tz_target, fold=1).utcoffset(),
+    )
+    return offset.total_seconds() / UNIT_CONVERSION_CONST[
         "seconds_to_minutes"
     ], tz_target
 
@@ -273,11 +313,15 @@ def solar_irradiance(latitude, longitude, unix_time):
     return G
 
 
+@functools.cache
+def get_timezone_finder() -> TimezoneFinder:
+    """The process's TimezoneFinder (about 34 MB in memory, read-only once built)."""
+    return TimezoneFinder(in_memory=True)
+
+
 def is_in_north_america(lat: float, lon: float) -> bool:
     """
     Determine if a location is within North America (USA, Canada, Mexico).
-
-    Excludes US Minor Outlying Islands which are small Pacific and Caribbean territories.
 
     Args:
         lat (float): Latitude in degrees (-90 to 90).
@@ -293,24 +337,36 @@ def is_in_north_america(lat: float, lon: float) -> bool:
     # Includes USA (including Alaska), Canada, and Mexico
     # Latitude: 14°N (southern Mexico) to 83°N (northern Canada/Greenland)
     # Longitude: -168°W (western Alaska) to -52°W (eastern Newfoundland)
+    # Small Caribbean territories (e.g., Navassa Island) are within the box.
     if 14.0 <= lat <= 83.0 and -168.0 <= lon_normalized <= -52.0:
-        # Exclude US Minor Outlying Islands in the Pacific
-        # Wake Island, Midway Atoll, Johnston Atoll, etc. are around 160°W to 180°W
-        # These are far west of the main continental area
-        if lon_normalized < -170.0:
-            # Only include Alaska region (50°N and north)
-            # Alaska's southernmost point is around 51.2°N, but we use 50°N
-            # to ensure coverage of the Aleutian Islands and coastal areas
-            return lat >= 50.0
-
-        # Note: Small Caribbean territories (e.g., Navassa Island) are within
-        # the main bounding box and are included as part of North America
         return True
 
-    return False
+    # Alaska continues west of the box, across the antimeridian to Attu. A box
+    # can't separate it from Chukotka and the US Minor Outlying Islands (Midway,
+    # Wake), but their time zones do.
+    return (
+        lat >= ALASKA_WEST_MIN_LAT
+        and (lon_normalized < -168.0 or lon_normalized >= ALASKA_WEST_MIN_EAST_LON)
+        and get_timezone_finder().timezone_at(lat=lat, lng=lon_normalized)
+        in ALASKA_WEST_TIMEZONES
+    )
 
 
+@functools.lru_cache(maxsize=REGION_CACHE_POINTS)
 def is_in_canada(lat: float, lon: float) -> bool:
-    """Determine if a location falls within the Canadian landmass."""
+    """Determine if a location is in Canada, for Canadian-first source priority.
+
+    Time zone polygons follow the national borders, including the Great Lakes, and
+    the API already looks them up on every request (about 2 us), so this needs no
+    other geometry. Open water is in an Etc/GMT zone, so offshore points take the
+    country of the nearest city. The bounding box skips both lookups for most of
+    the world. Called many times per request, hence the cache.
+    """
     lon_normalized = ((lon + 180) % 360) - 180
-    return 41.7 <= lat <= 83.0 and -141.0 <= lon_normalized <= -52.0
+    if not (41.7 <= lat <= 83.0 and -141.0 <= lon_normalized <= -52.0):
+        return False
+
+    zone = get_timezone_finder().timezone_at(lat=lat, lng=lon_normalized)
+    if zone is None or zone.startswith("Etc/"):
+        return reverse_geocode.get((lat, lon_normalized))["country_code"] == "CA"
+    return zone in CANADA_TIMEZONES

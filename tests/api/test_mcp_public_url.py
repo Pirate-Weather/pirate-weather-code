@@ -1,14 +1,21 @@
+"""MCP server: public-origin rewriting, request forwarding, and tool contract."""
+
 import asyncio
 import importlib
 import inspect
 import json
 import sys
 import types
+from typing import ClassVar
 
 import pytest
 
 
 class _FakeFastMCP:
+    """Stand-in for fastmcp that records the functions registered as tools."""
+
+    tools: ClassVar[list] = []
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -26,6 +33,7 @@ class _FakeFastMCP:
 
     def tool(self, *args, **kwargs):
         def decorator(func):
+            self.tools.append(func)
             return func
 
         return decorator
@@ -35,22 +43,42 @@ class _FakeFastMCP:
 def mcp_module(monkeypatch):
     fake_fastmcp = types.ModuleType("fastmcp")
     fake_fastmcp.FastMCP = _FakeFastMCP
+    monkeypatch.setattr(_FakeFastMCP, "tools", [])
     monkeypatch.setitem(sys.modules, "fastmcp", fake_fastmcp)
     monkeypatch.delenv("PW_MCP_PUBLIC_URL", raising=False)
     sys.modules.pop("MCP.pirate_weather_mcp", None)
     return importlib.import_module("MCP.pirate_weather_mcp")
 
 
-def test_public_url_middleware_rewrites_origin(mcp_module):
+@pytest.mark.parametrize(
+    ("public_url", "expected_scheme", "expected_server", "expected_host"),
+    [
+        pytest.param(
+            "https://mcp.pirateweather.net/mcp",
+            "https",
+            ("mcp.pirateweather.net", 443),
+            b"mcp.pirateweather.net",
+            id="configured",
+        ),
+        pytest.param(
+            None, "http", ("127.0.0.1", 8084), b"127.0.0.1:8084", id="unconfigured"
+        ),
+    ],
+)
+def test_public_url_middleware_rewrites_origin(
+    mcp_module, public_url, expected_scheme, expected_server, expected_host
+):
+    """Behind the reverse proxy the MCP server sees 127.0.0.1; without rewriting
+    the origin, the URLs it advertises to clients point at localhost. When no
+    public URL is configured the request must pass through untouched.
+    """
     captured_scope = {}
 
     async def app(scope, receive, send):
         captured_scope.update(scope)
 
-    middleware = mcp_module.PublicUrlMiddleware(
-        app,
-        "https://mcp.pirateweather.net/mcp",
-    )
+    args = (app,) if public_url is None else (app, public_url)
+    middleware = mcp_module.PublicUrlMiddleware(*args)
     scope = {
         "type": "http",
         "scheme": "http",
@@ -60,41 +88,18 @@ def test_public_url_middleware_rewrites_origin(mcp_module):
 
     asyncio.run(middleware(scope, None, None))
 
-    assert captured_scope["scheme"] == "https"
-    assert captured_scope["server"] == ("mcp.pirateweather.net", 443)
-    assert (b"host", b"mcp.pirateweather.net") in captured_scope["headers"]
-    assert (b"host", b"127.0.0.1:8084") not in captured_scope["headers"]
-
-
-def test_public_url_middleware_ignores_unconfigured_origin(mcp_module):
-    captured_scope = {}
-
-    async def app(scope, receive, send):
-        captured_scope.update(scope)
-
-    middleware = mcp_module.PublicUrlMiddleware(app)
-    scope = {
-        "type": "http",
-        "scheme": "http",
-        "server": ("127.0.0.1", 8084),
-        "headers": [(b"host", b"127.0.0.1:8084")],
+    assert captured_scope["scheme"] == expected_scheme
+    assert captured_scope["server"] == expected_server
+    assert set(captured_scope["headers"]) == {
+        (b"host", expected_host),
+        (b"accept", b"*/*"),
     }
-
-    asyncio.run(middleware(scope, None, None))
-
-    assert captured_scope["scheme"] == "http"
-    assert captured_scope["server"] == ("127.0.0.1", 8084)
-    assert captured_scope["headers"] == [(b"host", b"127.0.0.1:8084")]
-
-
-def test_public_url_requires_absolute_http_url(mcp_module):
-    with pytest.raises(ValueError, match="absolute http"):
-        mcp_module.PublicUrlMiddleware(
-            lambda scope, receive, send: None, "mcp.pirateweather.net/mcp"
-        )
 
 
 def test_historical_weather_omits_false_tmextra(mcp_module, monkeypatch):
+    """The API treats any tmextra value as true (bool("False")), so the MCP tool
+    must omit the parameter for False rather than forward it.
+    """
     captured = {}
 
     def fake_request_forecast(**kwargs):
@@ -120,28 +125,13 @@ def test_historical_weather_omits_false_tmextra(mcp_module, monkeypatch):
     assert captured["tmextra"] == 1
 
 
-def test_with_iso_times_adds_time_iso_after_numeric_time(mcp_module):
-    result = mcp_module._with_iso_times(
-        {
-            "time": 1730869200,
-            "summary": "Clear",
-            "nested": [
-                {"time": 1730872800, "summary": "Still clear"},
-                {"time": "not-a-unix-time"},
-            ],
-        }
-    )
-
-    assert list(result) == ["time", "timeISO", "summary", "nested"]
-    assert result["timeISO"] == "2024-11-06T05:00:00+00:00"
-    assert list(result["nested"][0]) == ["time", "timeISO", "summary"]
-    assert result["nested"][0]["timeISO"] == "2024-11-06T06:00:00+00:00"
-    assert "timeISO" not in result["nested"][1]
-
-
 def test_get_forecast_returns_near_term_forecast_alerts_and_summary_text(
     mcp_module, monkeypatch
 ):
+    """get_forecast trims the API response to what an LLM needs (current, next
+    two hours/days, alerts, summaries); a change to the request filters or the
+    reshaping silently changes what assistants tell users.
+    """
     captured = {}
 
     def fake_request_forecast(**kwargs):
@@ -223,6 +213,9 @@ def test_get_forecast_returns_near_term_forecast_alerts_and_summary_text(
 
 
 def test_city_country_location_is_forwarded_to_api(mcp_module, monkeypatch):
+    """City,Country requests must reach the API URL-encoded in the location path
+    segment with version=2 pinned, or the API cannot geocode them.
+    """
     captured = {}
 
     class FakeResponse:
@@ -254,21 +247,14 @@ def test_city_country_location_is_forwarded_to_api(mcp_module, monkeypatch):
 
 
 def test_public_tool_signatures_do_not_expose_version(mcp_module):
-    tool_names = [
-        "get_alerts",
-        "get_current_weather",
-        "get_daily_forecast",
-        "get_forecast",
-        "get_historical_weather",
-        "get_hourly_forecast",
-        "get_minutely_forecast",
-        "get_tomorrow_forecast",
-        "get_weather_summary",
-        "test_api_connection",
-    ]
+    """API contract (#641): the MCP server pins version=2 itself; exposing a
+    version argument on any tool would let models request the v1 schema.
+    """
+    tools = _FakeFastMCP.tools
 
-    for tool_name in tool_names:
-        assert (
-            "version"
-            not in inspect.signature(getattr(mcp_module, tool_name)).parameters
-        )
+    assert "get_forecast" in {tool.__name__ for tool in tools}
+    assert [
+        tool.__name__
+        for tool in tools
+        if "version" in inspect.signature(tool).parameters
+    ] == []

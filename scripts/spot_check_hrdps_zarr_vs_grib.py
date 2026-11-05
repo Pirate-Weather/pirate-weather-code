@@ -9,6 +9,7 @@ and the NaN-aware temporal interpolation used by the production ingest.
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import pickle
 import random
@@ -21,12 +22,13 @@ import pandas as pd
 import xarray as xr
 import zarr
 
-DEFAULT_ZARR_PATH = Path("/mnt/nvme/data/Prod/v30/HRDPS.zarr")
+DEFAULT_ZARR_PATH = Path("/mnt/nvme/data/Prod/v31/HRDPS.zarr")
 DEFAULT_GRIB_ROOT = Path("/mnt/nvme/data/Process/HRDPS/Downloads/herbie/hrdps")
-DEFAULT_BASE_TIME_PICKLE = Path("/mnt/nvme/data/Prod/v30/HRDPS.time.pickle")
+DEFAULT_BASE_TIME_PICKLE = Path("/mnt/nvme/data/Prod/v31/HRDPS.time.pickle")
 
+# Axis 0 of the store (HRDPS_Local_Ingest zarr_vars); the valid times are the array's "time"
+# attribute, not a variable.
 ZARR_VARS = (
-    "time",
     "GUST_10maboveground",
     "PRMSL_meansealevel",
     "TMP_2maboveground",
@@ -272,20 +274,36 @@ def grib_grid(path: Path) -> tuple[tuple[int, int], np.ndarray, np.ndarray]:
         dataset.close()
 
 
+def resolve_current_store(path: Path) -> Path:
+    """Return ``path`` if it is a zarr store, else the version named by the
+    sibling ``<MODEL>.current.json`` pointer (``API.ingest_utils.publish_store``)."""
+    if (path / "zarr.json").exists():
+        return path
+    pointer = path.parent / (path.name.removesuffix(".zarr") + ".current.json")
+    with open(pointer) as fh:
+        return path.parent / json.load(fh)["store"]
+
+
 def validate_root_array(root: zarr.Array) -> None:
     """Validate the final Zarr layout expected by HRDPS ingest."""
     if not isinstance(root, zarr.Array):
         raise TypeError("Expected final HRDPS Zarr to be a root zarr.Array.")
     if root.ndim != 4:
         raise ValueError("Expected final HRDPS Zarr shape (variable, time, y, x).")
-    if root.shape[0] != len(ZARR_VARS):
-        raise ValueError(f"Expected {len(ZARR_VARS)} variables, found {root.shape[0]}.")
+    if tuple(root.attrs.get("variables", ())) != ZARR_VARS:
+        raise ValueError(
+            f"Expected variables {ZARR_VARS}, found {root.attrs.get('variables')}."
+        )
 
 
 def infer_forecast_offset(final_time_len: int) -> int:
-    """Infer the final-array index where forecast hour zero would sit."""
+    """Infer the final-array index where forecast hour zero would sit.
+
+    Forecast-only stores start at the first forecast hour, so the offset is
+    negative (hour zero sits before index 0).
+    """
     offset = final_time_len - max(HRDPS_SOURCE_HOURS) - 1
-    if offset < 0:
+    if offset < -min(HRDPS_SOURCE_HOURS):
         raise ValueError(
             f"Final time length {final_time_len} is too short for HRDPS hour 48."
         )
@@ -576,7 +594,7 @@ def check_time_axis(
 ) -> bool:
     """Check the final time variable against the expected hourly cadence."""
     expected = expected_unix_seconds(base_time, forecast_offset, root.shape[1])
-    actual = np.asarray(root[ZARR_VARS.index("time"), :, 0, 0], dtype=np.float64)
+    actual = np.asarray(root.attrs["time"], dtype=np.float64)
     max_diff = float(np.nanmax(np.abs(actual - expected)))
     passed = max_diff <= tolerance_seconds
     print(
@@ -769,7 +787,8 @@ def main() -> None:
 
     base_time = load_base_time(args.base_time_pickle)
     run_dir = resolve_grib_run_dir(args.grib_root, base_time)
-    root = zarr.open(str(args.zarr_path), mode="r")
+    zarr_path = resolve_current_store(args.zarr_path)
+    root = zarr.open(str(zarr_path), mode="r")
     validate_root_array(root)
     forecast_offset = infer_forecast_offset(root.shape[1])
 
@@ -791,7 +810,7 @@ def main() -> None:
         *[point for point in random_points if point not in selected_tuples],
     ]
 
-    print(f"Final Zarr: {args.zarr_path} shape={root.shape} chunks={root.chunks}")
+    print(f"Final Zarr: {zarr_path} shape={root.shape} chunks={root.chunks}")
     print(f"GRIB run dir: {run_dir}")
     print(f"Base time: {base_time}")
     print(f"Forecast hour offset: {forecast_offset}")

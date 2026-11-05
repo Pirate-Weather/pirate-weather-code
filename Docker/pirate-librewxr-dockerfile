@@ -1,0 +1,50 @@
+# ======================================================================
+# LibreWXR data pipeline image with the Pirate Weather nowcast export.
+#
+# Built on the LibreWXR image so the pipeline is LibreWXR's own, plus the
+# Pirate Weather code and the store writer's dependencies, so LibreWXR's
+# nowcast hook can run ingest/LibreWXR_Local_Ingest.py in the same
+# container (the GRIB stack of the ingest image is not needed). Use it as
+# the image of LibreWXR's pipeline service (docker-compose.yml in the
+# LibreWXR repository) with, in its environment:
+#
+#   LIBREWXR_HOOK_NOWCAST_CMD=python3 /app/ingest/LibreWXR_Local_Ingest.py
+#   save_type=Download|S3, forecast_path, forecast_process_dir,
+#   AWS_KEY / AWS_SECRET / s3_endpoint / s3_region for S3
+#
+# and the Pirate Weather Prod and work volumes mounted at forecast_path /
+# forecast_process_dir. The render workers keep the plain LibreWXR image.
+#
+#   docker build -f Docker/pirate-librewxr-dockerfile -t pirate-librewxr \
+#       --build-arg LIBREWXR_IMAGE=<librewxr image> .
+# ======================================================================
+
+# The LibreWXR image to build on. The hooks and snapshot sync this image
+# relies on live on the Pirate-Weather/LibreWXR fork until they are merged
+# upstream, so CI builds that fork first and passes it here; once upstream
+# ships them, point this at ghcr.io/joshuakimsey/librewxr:<release>.
+ARG LIBREWXR_IMAGE=ghcr.io/joshuakimsey/librewxr:latest
+FROM ${LIBREWXR_IMAGE}
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+# Only what API/ingest_utils.py and the export import: the zarr writer and
+# publisher (dask, zarr, obstore), cartopy/xarray/requests for ingest_utils'
+# module-level imports, pandas for timestamps.
+RUN pip install --no-cache-dir \
+    "cartopy>=0.24" \
+    "dask>=2026.1" \
+    "obstore>=0.12" \
+    "pandas>=2.2" \
+    "requests>=2.32" \
+    "xarray>=2024.1" \
+    "zarr>=3.1"
+
+COPY API /app/API
+COPY ingest /app/ingest
+
+# LibreWXR's own WORKDIR and CMD (python -m librewxr.main) stay in place; the
+# pipeline service overrides the command as LibreWXR's compose file does.
+WORKDIR /app

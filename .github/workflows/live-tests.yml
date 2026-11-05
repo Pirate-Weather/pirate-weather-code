@@ -1,0 +1,30 @@
+name: Live tests
+
+# Tests in tests/live depend on external data (live S3 stores, the production API,
+# NOAA downloads, GribStream). Their results change with upstream data, so they
+# never run automatically; trigger this workflow by hand when needed.
+on:
+  workflow_dispatch:
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.14'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r Docker/requirements-ingest.txt
+          pip install -r Docker/requirements-api.txt
+          pip install pytest pytest-asyncio
+      - name: Run live tests
+        env:
+          PW_RUN_LIVE_TESTS: '1'
+          PW_API: ${{ secrets.PW_API }}
+          GRIBSTREAM_API_KEY: ${{ secrets.GRIBSTREAM_API_KEY }}
+        run: python -m pytest -q -rs tests/live

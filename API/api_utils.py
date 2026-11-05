@@ -1,10 +1,16 @@
 # %% Script to contain the helper functions as part of the API for Pirate Weather
 # Alexander Rey. October 2025
 import logging
+import math
 from collections.abc import MutableMapping
 
 import metpy as mp
 import numpy as np
+from metpy.calc.thermo import (
+    _saturation_vapor_pressure_liquid,
+    _saturation_vapor_pressure_solid,
+)
+from metpy.constants import nounit as metpy_nounit
 
 from API.constants.api_const import (
     APPARENT_TEMP_CONSTS,
@@ -17,6 +23,33 @@ from API.constants.api_const import (
 from API.constants.shared_const import MISSING_DATA
 
 logger = logging.getLogger(__name__)
+
+# metpy's degC -> kelvin conversion, exactly (see relative_humidity_from_dewpoint_c)
+KELVIN_OFFSET = 273.15
+
+
+def relative_humidity_from_dewpoint_c(temperature_c, dewpoint_c):
+    """Relative humidity (0-1) from air and dew point temperatures in Celsius.
+
+    This is metpy's ``relative_humidity_from_dewpoint(..., phase="auto")``
+    (Ambaum 2020 saturation vapour pressure over water above the triple point,
+    over ice below) called through its unit-free internals: wrapping two
+    scalars in pint quantities costs ~0.3 ms per call on the current-conditions
+    path, the arithmetic ~0.03 ms, and the results are bit-identical.
+    """
+    temperature_k = np.asarray(temperature_c, dtype=float) + KELVIN_OFFSET
+    dewpoint_k = np.asarray(dewpoint_c, dtype=float) + KELVIN_OFFSET
+
+    def saturation_vapor_pressure(kelvin):
+        return np.where(
+            kelvin > metpy_nounit.T0,
+            _saturation_vapor_pressure_liquid._nounit(kelvin),
+            _saturation_vapor_pressure_solid._nounit(kelvin),
+        )
+
+    return saturation_vapor_pressure(dewpoint_k) / saturation_vapor_pressure(
+        temperature_k
+    )
 
 
 def fast_nearest_interp(xi, x, y):
@@ -49,15 +82,36 @@ def fast_nearest_interp(xi, x, y):
 
 
 def replace_nan(obj, replacement=MISSING_DATA):
-    """Recursively replace np.nan with a given value in a dict/list."""
+    """Recursively replace np.nan with a given value in a dict/list.
+
+    Returns new containers; the inputs are not modified (the response holds
+    shared objects such as the DWD station map entries).
+    """
+    # Leaf values are checked inline rather than by a call each: a response
+    # holds ~5,000 of them.
     if isinstance(obj, dict):
-        return {k: replace_nan(v, replacement) for k, v in obj.items()}
+        return {
+            k: (
+                (replacement if math.isnan(v) else v)
+                if isinstance(v, float)
+                else replace_nan(v, replacement)
+                if isinstance(v, (dict, list))
+                else v
+            )
+            for k, v in obj.items()
+        }
     elif isinstance(obj, list):
-        return [replace_nan(v, replacement) for v in obj]
-    elif isinstance(obj, float) and np.isnan(obj):
+        return [
+            (replacement if math.isnan(v) else v)
+            if isinstance(v, float)
+            else replace_nan(v, replacement)
+            if isinstance(v, (dict, list))
+            else v
+            for v in obj
+        ]
+    elif isinstance(obj, float) and math.isnan(obj):
         return replacement
-    else:
-        return obj
+    return obj
 
 
 def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
@@ -115,50 +169,37 @@ def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
 
 
 def clipLog(data, min_val, max_val, name):
+    """Clip data to min_val and max_val, replacing implausible values as missing.
+
+    A value a little out of range (up to 25 % past the limit, plus 2 below the
+    minimum) is model noise and is clamped to the limit. Anything further is bad
+    data: only that value becomes MISSING_DATA and is logged, so one bad hour
+    doesn't blank plausible values beside it.
     """
-    Clip the data between min and max. Log if there is an error
-    """
+    lowest_plausible = min(min_val, min_val * 0.75 - 2)
+    highest_plausible = max(max_val, max_val * 1.25)
 
-    # Print if the clipping is larger than 25 of the min
-    if np.min(data) < (min_val * 0.75) - 2:
-        # Print the data and the index it occurs
-        logger.error("Min clipping required for " + name)
-        logger.error("Min Value: " + str(np.min(data)))
-        if isinstance(data, np.ndarray):
-            logger.error("Min Index: " + str(np.where(data == data.min())))
+    clipped = np.clip(data, min_val, max_val)
+    too_low = np.less(data, lowest_plausible)
+    too_high = np.greater(data, highest_plausible)
 
-        # Replace values below the threshold with MISSING_DATA
-        if np.isscalar(data):
-            if data < min_val:
-                data = MISSING_DATA
-        else:
-            data = np.array(data, dtype=float)
-            data[data < min_val] = MISSING_DATA
+    if not (np.any(too_low) or np.any(too_high)):
+        return clipped
 
-    else:
-        data = np.clip(data, a_min=min_val, a_max=None)
+    if np.any(too_low):
+        logger.error("Min clipping required for %s", name)
+        logger.error("Min Value: %s", np.nanmin(data))
+        logger.error("Min Index: %s", np.where(np.atleast_1d(too_low)))
+    if np.any(too_high):
+        logger.error("Max clipping required for %s", name)
+        logger.error("Max Value: %s", np.nanmax(data))
+        logger.error("Max Index: %s", np.where(np.atleast_1d(too_high)))
 
-    # Same for max
-    if np.max(data) > (max_val * 1.25):
-        logger.error("Max clipping required for " + name)
-        logger.error("Max Value: " + str(np.max(data)))
-
-        # Print the data and the index it occurs
-        if isinstance(data, np.ndarray):
-            logger.error("Max Index: " + str(np.where(data == data.max())))
-
-        # Replace values above the threshold with MISSING_DATA
-        if np.isscalar(data):
-            if data > max_val:
-                data = MISSING_DATA
-        else:
-            data = np.array(data, dtype=float)
-            data[data > max_val] = MISSING_DATA
-
-    else:
-        data = np.clip(data, a_min=None, a_max=max_val)
-
-    return data
+    if np.isscalar(data):
+        return MISSING_DATA
+    clipped = np.array(clipped, dtype=float)
+    clipped[too_low | too_high] = MISSING_DATA
+    return clipped
 
 
 ## Estimate Visibility for ERA5
@@ -370,29 +411,81 @@ def select_daily_precip_type(
     type_map = np.array([PRECIP_IDX["rain"], PRECIP_IDX["snow"], PRECIP_IDX["ice"]])
     dominant_type = type_map[np.argmax(precip_accum, axis=1)]
 
+    # Accumulation only has one ice column, shared by sleet and freezing rain, so the
+    # hourly type (most common on the day) is what tells them apart.
+    hourly_type = maxPchanceDay.copy()
+
     # Only update where not all types are present and some precip exists
     not_all_types = ~all_types
     has_precip = np.max(precip_accum, axis=1) > 0
-    update_mask = not_all_types & has_precip
+    # A mixed hour's accumulation is stored as ice, so the dominant accumulation
+    # can't overrule a day that is already mixed
+    already_mixed = maxPchanceDay == PRECIP_IDX["mixed"]
+    update_mask = not_all_types & has_precip & ~already_mixed
     maxPchanceDay[update_mask] = dominant_type[update_mask]
+    maxPchanceDay[
+        (maxPchanceDay == PRECIP_IDX["ice"]) & (hourly_type == PRECIP_IDX["sleet"])
+    ] = PRECIP_IDX["sleet"]
 
-    # For ice accumulation, preserve the distinction between ice (freezing rain)
-    # and sleet (ice pellets) by only overriding if the current type is not already
-    # ice or sleet. This ensures that the hourly-based determination is preserved.
-    # When defaulting is needed (type is not ice/sleet but ice accumulation exists),
-    # we choose ice (freezing rain) as it's generally more common than sleet globally.
     # If significant ice accumulation exists and type is not already ice/sleet,
-    # default to ice (freezing rain)
+    # default to ice (freezing rain), which is more common than sleet globally.
     maxPchanceDay[
         (InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit))
         & (maxPchanceDay != PRECIP_IDX["ice"])
         & (maxPchanceDay != PRECIP_IDX["sleet"])
+        & ~already_mixed
     ] = PRECIP_IDX["ice"]
 
     # If we have all types map the type to mixed
     maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
 
     return maxPchanceDay
+
+
+def _precip_code_table(groups: dict[float, list[int]], size: int) -> np.ndarray:
+    """A lookup table from a source's precipitation code to the internal
+    precipitation category (0 for codes in no group)."""
+    table = np.zeros(size, dtype=float)
+    for category, codes in groups.items():
+        table[codes] = category
+    return table
+
+
+def _lookup_precip_codes(codes: np.ndarray, table: np.ndarray) -> np.ndarray:
+    """Categories for integer codes through a lookup table; codes outside the
+    table are category 0. One array index instead of an np.isin per group,
+    which cost ~0.1 ms per source and request."""
+    in_table = (codes >= 0) & (codes < table.size)
+    return np.where(in_table, table[np.clip(codes, 0, table.size - 1)], 0.0)
+
+
+# WMO 4677 present-weather codes (50-99) grouped as documented in
+# map_wmo4677_to_ptype: 1 snow, 2 ice, 3 freezing, 4 rain.
+WMO4677_PTYPE_TABLE = _precip_code_table(
+    {
+        1: list(range(70, 76)) + [83, 84, 85, 86, 93, 94],
+        2: list(range(76, 80)) + [87, 88, 89, 90, 96, 99],
+        3: [56, 57, 66, 67],
+        4: (
+            list(range(50, 56))
+            + list(range(58, 65))
+            + [68, 69]
+            + list(range(80, 83))
+            + [91, 92, 95, 97, 98]
+        ),
+    },
+    100,
+)
+# Canadian (HRDPS/GDPS) precipitation type codes, see map_canadian_precip_type_to_ptype
+CANADIAN_PTYPE_TABLE = _precip_code_table(
+    {
+        PRECIP_IDX["snow"]: [5],
+        PRECIP_IDX["sleet"]: [4, 9],
+        PRECIP_IDX["ice"]: [3, 8],
+        PRECIP_IDX["rain"]: [1, 2, 7],
+    },
+    10,
+)
 
 
 def map_wmo4677_to_ptype(
@@ -435,28 +528,10 @@ def map_wmo4677_to_ptype(
 
     nan_mask = np.isnan(codes)
 
-    # Define code groups (inclusive ranges/lists)
-    freezing_codes = [56, 57, 66, 67]
-    ice_codes = list(range(76, 80)) + [87, 88, 89, 90, 96, 99]
-    snow_codes = list(range(70, 76)) + [83, 84, 85, 86, 93, 94]
-    rain_codes = (
-        list(range(50, 56))
-        + list(range(58, 65))
-        + [68, 69]
-        + list(range(80, 83))
-        + [91, 92, 95, 97, 98]
-    )
-
-    # Assign categories; order does not matter because groups are disjoint in our choice
     if codes.size > 0:
         vals = codes.copy()
         vals[nan_mask] = -999
-        vals = vals.astype(int)
-
-        out[np.isin(vals, snow_codes)] = 1
-        out[np.isin(vals, ice_codes)] = 2
-        out[np.isin(vals, freezing_codes)] = 3
-        out[np.isin(vals, rain_codes)] = 4
+        out[:] = _lookup_precip_codes(vals.astype(int), WMO4677_PTYPE_TABLE)
 
         # Temperature validation: Override snow/ice/freezing codes to rain when too warm
         # Use TEMP_THRESHOLD_WMO_FROZEN_C as threshold - well above freezing to account for observation errors
@@ -516,21 +591,10 @@ def map_canadian_precip_type_to_ptype(
 
     nan_mask = np.isnan(codes)
 
-    freezing_codes = [3, 8]
-    ice_codes = [4, 9]
-    snow_codes = [5]
-    rain_codes = [1, 2, 7]
-
-    # Assign categories; order does not matter because groups are disjoint in our choice
     if codes.size > 0:
         vals = codes.copy()
         vals[nan_mask] = -999
-        vals = vals.astype(int)
-
-        out[np.isin(vals, snow_codes)] = PRECIP_IDX["snow"]
-        out[np.isin(vals, ice_codes)] = PRECIP_IDX["sleet"]
-        out[np.isin(vals, freezing_codes)] = PRECIP_IDX["ice"]
-        out[np.isin(vals, rain_codes)] = PRECIP_IDX["rain"]
+        out[:] = _lookup_precip_codes(vals.astype(int), CANADIAN_PTYPE_TABLE)
 
     # Use MISSING_DATA for NaNs
     out[nan_mask] = MISSING_DATA
@@ -604,7 +668,7 @@ def map_ensemble_precip_rates_to_ptype(
     out = np.full(n_hours, np.nan, dtype=float)
 
     mixed_mask = strong_count > 1
-    out[mixed_mask] = PRECIP_IDX["sleet"]
+    out[mixed_mask] = PRECIP_IDX["mixed"]
 
     strong_mask = strong_count == 1
     if np.any(strong_mask):
@@ -787,20 +851,16 @@ def remove_conditional_fields(
 
         def _downgrade_precip(obj):
             if isinstance(obj, dict):
-                for key, value in obj.items():
-                    if (
-                        key == "precipType"
-                        and isinstance(value, str)
-                        and value in ("ice", "mixed")
-                    ):
-                        obj[key] = PRECIP_TYPES["sleet"]
-                    elif isinstance(
-                        value, (dict, list)
-                    ):  # Only recurse if it's a dict or list
+                precip_type = obj.get("precipType")
+                if isinstance(precip_type, str) and precip_type in ("ice", "mixed"):
+                    obj["precipType"] = PRECIP_TYPES["sleet"]
+                for value in obj.values():
+                    if isinstance(value, (dict, list)):
                         _downgrade_precip(value)
             elif isinstance(obj, list):
                 for item in obj:
-                    _downgrade_precip(item)
+                    if isinstance(item, (dict, list)):
+                        _downgrade_precip(item)
 
         _downgrade_precip(data)
 
@@ -809,4 +869,5 @@ def remove_conditional_fields(
 
 def _safe_int(val):
     """Safely convert a value to int, returning np.nan for NaN."""
-    return int(val) if not np.isnan(val) else np.nan  # or None / np.nan
+    # math.isnan is several times cheaper than np.isnan on the per-hour path
+    return int(val) if not math.isnan(val) else np.nan

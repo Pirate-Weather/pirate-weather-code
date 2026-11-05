@@ -3,15 +3,14 @@
 
 import logging
 import os
+import pickle
 import re
 import resource
 import shlex
 import shutil
 import subprocess
-import sys
-import tarfile
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
@@ -32,16 +31,22 @@ from API.constants.shared_const import (
 
 # Logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO)
 
 # Shared ingest constants
 CHUNK_SIZES = {
     "NBM": 200,
     "HRRR": 200,
     "HRRR_6H": 200,
+    "RRFS": 200,
+    "RRFS_6H": 200,
+    "RRFS_NA": 200,
+    "RRFS_NA_6H": 200,
     "GFS": 100,
     "GEFS": 200,
     "ECMWF": 200,
+    # IFS at 0.1 degrees: twice the 99-cell final shard, so a tile splits into whole
+    # shards and the final write never holds a row of part-used tiles in memory.
+    "ECMWF_IFS": 198,
     "NBM_Fire": 200,
     "RTMA": 200,
     "DWD": 200,
@@ -56,27 +61,210 @@ CHUNK_SIZES = {
     "URMA": 200,
 }
 
+# Inner chunk edge, in grid cells, of each final store. One chunk holds every
+# variable and time step, so a point forecast is a single chunk read.
 FINAL_CHUNK_SIZES = {
     "NBM": 3,
     "HRRR": 5,
     "HRRR_6H": 5,
+    "RRFS": 5,
+    "RRFS_6H": 5,
+    # The NA 2D fields are on a 13 km grid (1127 x 683, smaller than CONUS), so
+    # the regional 5-cell chunk keeps a point read to one small chunk
+    "RRFS_NA": 5,
+    "RRFS_NA_6H": 5,
+    "SubH": 5,
+    "RRFS_SubH": 5,
+    # Global 0.04 deg radar composite (LibreWXR nowcast): one variable and ~10
+    # steps, so a 25-cell chunk is still under 1 KB compressed (far below an
+    # HRRR chunk) while the 1.6 M chunks a 5-cell layout needs took 530 s to
+    # write per 10-minute cycle against 36 s with 25 (measured, 2026-11)
+    "LibreWXR": 25,
     "GFS": 3,
     "GEFS": 3,
-    "HGEFS": 3,
     "ECMWF": 3,
-    "NBM_Fire": 5,
     "RTMA": 25,
+    # Hourly RTMA keeps 48 rows; small tiles keep a point read to one small chunk
+    "RTMA_HOURLY": 5,
     "DWD": 5,
     # These divide evenly into the Canadian weather ingests' 200-cell processing tiles.
     "HRDPS": 5,
-    "RDPS": 5,
     "REPS": 5,
     "GDPS": 5,
     "GEPS": 5,
-    "RDAQA": 25,
     "RAQDPS": 25,
     "SILAM": 5,
-    "URMA": 25,
+    # Same layout as the other models; with ~283 hours one chunk is 283 KB
+    "URMA": 5,
+    # The alert grids are string arrays of (y, x)
+    "ALERTS": 10,
+}
+
+# Shard edge, in grid cells, of each final store: a multiple of its chunk size.
+# A shard is one file holding many chunks plus an index, so a store is a few
+# hundred files instead of 10^5 (HRRR: 199 instead of 76,321), which makes
+# publishing and syncing take seconds. With tensorstore reading, 100x100 shards
+# served 5-6x the requests of the unsharded zarr-python setup
+# (Notes/STORAGE_AND_READ_BENCHMARKS.md). Dask builds a whole shard in memory
+# per write task, so stores with many variables x times use smaller shards to
+# keep a shard under ~150 MB uncompressed (GFS, 28 x 528 steps, is ~590 MB at
+# 100x100). Sizes in the comments are uncompressed MB per shard.
+FINAL_SHARD_SIZES = {
+    "HRRR": 100,  # 14
+    "HRRR_6H": 100,  # 25
+    "SubH": 100,  # 14
+    "RRFS": 100,  # 15
+    "RRFS_6H": 100,  # 55
+    "RRFS_NA": 100,  # 15
+    "RRFS_NA_6H": 100,  # 55
+    "RRFS_SubH": 100,  # 13
+    "LibreWXR": 100,  # < 1 (10 steps x 1 variable)
+    "HRDPS": 100,  # 35
+    "REPS": 100,  # 22
+    "GEPS": 100,  # 76
+    "RTMA": 100,  # RTMA-RU, < 1
+    "RTMA_HOURLY": 100,  # 21
+    "RAQDPS": 100,  # 18
+    "DWD": 100,  # 115
+    "SILAM": 100,  # 78
+    "URMA": 100,  # 113
+    "GDPS": 75,  # 113 (202 at 100)
+    "GEFS": 99,  # 75 (also AIGEFS)
+    "ECMWF": 99,  # 146 (also ECMWF_AIFS, 101)
+    "NBM": 99,  # 151
+    "GFS": 48,  # 136 (also AIGFS, which would fit 99 but shares GFS's chunk keys)
+    "ALERTS": 100,
+}
+
+# Mantissa bits kept per stored variable (float32 has 23). Bitround's error is at
+# most value * 2^-(bits + 1), so each type keeps the fewest bits that hold the
+# error at its typical maximum within twice its output step (e.g. 0.2 K for
+# temperatures shown to 0.1); wind, gust and humidity are one bit coarser still.
+# On HRRR this made the store 42% smaller than rounding to 5 decimals, with no
+# change in point-read time. Coded fields stay exact.
+_TEMPERATURE_BITS = 10  # 0.1 C step, to 330 K
+_PRESSURE_BITS = 12  # 0.1 hPa step, to 1080 hPa
+_WIND_BITS = 7  # 0.1 m/s step, to 60 m/s
+_DIRECTION_BITS = 7  # 1 degree step
+_VISIBILITY_BITS = 7  # 0.1 km step, to 50 km
+_HUMIDITY_BITS = 4  # 1 % step
+_FRACTION_BITS = 5  # cloud cover, probabilities, precipitation-type flags: 1 % step
+_PRECIPITATION_BITS = 11  # 0.01 mm (or mm/h) step, to 50
+_AIR_QUALITY_BITS = 11  # 0.1 ug/m3 step, to 500
+EXACT_BITS = 23
+KEEPBITS = {
+    "PTYPE_surface": EXACT_BITS,
+    "ptype": EXACT_BITS,
+    "PWTHER_surfaceMreserved": EXACT_BITS,
+    **dict.fromkeys(
+        ("TMP_2maboveground", "DPT_2maboveground", "APTMP_2maboveground", "t2m", "d2m"),
+        _TEMPERATURE_BITS,
+    ),
+    **dict.fromkeys(
+        (
+            "MSLMA_meansealevel",
+            "MSLET_meansealevel",
+            "PRMSL_meansealevel",
+            "PRES_meansealevel",
+            "PRES_surface",
+            "PRES_station",
+            "msl",
+            "sp",
+        ),
+        _PRESSURE_BITS,
+    ),
+    **dict.fromkeys(
+        (
+            "UGRD_10maboveground",
+            "VGRD_10maboveground",
+            "WIND_10maboveground",
+            "u10",
+            "v10",
+            "GUST_surface",
+            "GUST_10maboveground",
+            "i10fg",
+        ),
+        _WIND_BITS,
+    ),
+    **dict.fromkeys(("WDIR_10maboveground", "Storm_Direction"), _DIRECTION_BITS),
+    **dict.fromkeys(("VIS_surface", "vis"), _VISIBILITY_BITS),
+    **dict.fromkeys(("RH_2maboveground", "rh"), _HUMIDITY_BITS),
+    "SPFH_2maboveground": 5,  # 2 % relative
+    **dict.fromkeys(
+        (
+            "CSNOW_surface",
+            "CICEP_surface",
+            "CFRZR_surface",
+            "CRAIN_surface",
+            "CSNOW_Prob",
+            "CICEP_Prob",
+            "CFRZR_Prob",
+            "CRAIN_Prob",
+            "TCDC_entireatmosphere",
+            "TCDC_entireatmosphere_consideredasasinglelayer_",
+            "TCDC_surface",
+            "tcc",
+            "Precipitation_Prob",
+            "PPROB",
+            "PTYPE_prob_GE_1_LT_2_prob_fcst_1_1_surface",
+            "PTYPE_prob_GE_3_LT_4_prob_fcst_1_1_surface",
+            "PTYPE_prob_GE_5_LT_7_prob_fcst_1_1_surface",
+            "PTYPE_prob_GE_8_LT_9_prob_fcst_1_1_surface",
+        ),
+        _FRACTION_BITS,
+    ),
+    **dict.fromkeys(
+        (
+            "PRATE_surface",
+            "APCP_surface",
+            "tprate",
+            "tp",
+            "APCP_Mean",
+            "APCP_StdDev",
+            "PACCUM",
+            "AFRAIN_Mean",
+            "AICEP_Mean",
+            "ARAIN_Mean",
+            "ASNOW_Mean",
+        ),
+        _PRECIPITATION_BITS,
+    ),
+    **dict.fromkeys(
+        (
+            "MASSDEN_8maboveground",
+            "cnc_PM2_5",
+            "cnc_PM10",
+            "cnc_O3",
+            "cnc_NO2",
+            "cnc_SO2",
+            "cnc_CO",
+            "PM_FRP_column",
+            "PM2.5",
+            "PM10",
+            "NO2",
+            "O3",
+            "SO2",
+        ),
+        _AIR_QUALITY_BITS,
+    ),
+    "DSWRF_surface": 9,  # 1 W/m2 step, to 1200
+    "UVI_surface": 6,  # 0.1 step, to 15
+    "DUVB_surface": 6,
+    "TOZNE_entireatmosphere_consideredasasinglelayer_": 7,  # 1 DU step, to 500
+    "TCIOZ_surface": 7,
+    "CAPE_surface": 11,  # 1 J/kg step, to 5000
+    "CIN_surface": 7,  # 1 J/kg step, to 500
+    "N4LFTX_surface": 3,  # lifted index, 1 K step, to 20
+    "N4LFTX_500mb": 3,
+    "LFTX_500mb": 3,
+    "LFTX_500M1000mb": 3,
+    "KX_surface": 4,  # 1 K step, to 50
+    "REFD_1000maboveground": 8,  # 0.1 dBZ step, to 75
+    "REFC_entireatmosphere": 8,
+    "REFC_composite": 8,  # LibreWXR radar composite, same step as HRRR
+    "BLH": 10,  # 1 m step, to 4000 m
+    "Storm_Distance": 11,  # 1 km step, to 5000 km
+    "VVEL_500mb": 8,  # 0.01 Pa/s step, to 10
 }
 
 FORECAST_LEAD_RANGES = {
@@ -88,6 +276,10 @@ FORECAST_LEAD_RANGES = {
     "NBM_FIRE": list(range(6, 192, 6)),
     "HRRR_1H": list(range(1, 19)),
     "HRRR_6H": list(range(18, 49)),
+    "RRFS_1H": list(range(1, 19)),
+    "RRFS_6H": list(range(18, 84)),
+    "RRFS_NA_1H": list(range(1, 19)),
+    "RRFS_NA_6H": list(range(18, 84)),
     "ECMWF_AIFS": list(range(6, 241, 6)),
     "ECMWF_IFS_1": list(range(3, 144, 3)),
     "ECMWF_IFS_2": list(range(144, 241, 6)),
@@ -104,6 +296,10 @@ DWD_RADIUS = 50
 
 VALID_DATA_MIN = -100
 VALID_DATA_MAX = 120000
+
+# Cached CMC GRIB downloads older than this are pruned at the start of a run.
+# REPS history reuses files from cycles up to ~48 h old, so keep a margin.
+DOWNLOAD_CACHE_MAX_AGE_HOURS = 72
 
 
 def deaccumulate_to_hourly_rate(
@@ -235,9 +431,9 @@ def tune_nofile_limit(target: int = 65535) -> None:
             new_soft = min(max(soft, target), hard)
         if new_soft > soft:
             resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
-            print(f"Raised nofile soft limit from {soft} to {new_soft}")
+            logger.info("Raised nofile soft limit from %s to %s", soft, new_soft)
     except (ValueError, OSError) as exc:
-        print(f"Warning: unable to tune nofile limit: {exc}")
+        logger.warning("Unable to tune nofile limit: %s", exc)
 
 
 def positive_int_env(name: str, default: int) -> int:
@@ -246,10 +442,10 @@ def positive_int_env(name: str, default: int) -> int:
     try:
         value = int(raw)
     except ValueError:
-        print(f"Warning: invalid {name}={raw!r}; using {default}")
+        logger.warning("Invalid %s=%r; using %s", name, raw, default)
         return default
     if value < 1:
-        print(f"Warning: {name}={value} must be >= 1; using {default}")
+        logger.warning("%s=%s must be >= 1; using %s", name, value, default)
         return default
     return value
 
@@ -270,29 +466,49 @@ def configure_zarr_limits(
             workers = min(workers, worker_cap)
             async_concurrency = min(async_concurrency, async_cap)
     except (ValueError, OSError) as exc:
-        print(f"Warning: unable to read nofile limit for zarr tuning: {exc}")
+        logger.warning("Unable to read nofile limit for zarr tuning: %s", exc)
 
     async_concurrency = min(async_concurrency, workers)
     if workers < requested_workers:
-        print(
-            "Clamped zarr_store_workers from "
-            f"{requested_workers} to {workers} based on nofile limits"
+        logger.info(
+            "Clamped zarr_store_workers from %s to %s based on nofile limits",
+            requested_workers,
+            workers,
         )
     if async_concurrency < requested_async_concurrency:
-        print(
-            "Clamped zarr_async_concurrency from "
-            f"{requested_async_concurrency} to {async_concurrency} based on nofile limits"
+        logger.info(
+            "Clamped zarr_async_concurrency from %s to %s based on nofile limits",
+            requested_async_concurrency,
+            async_concurrency,
         )
 
     # Local import keeps helper lightweight for non-zarr callers.
     import zarr
 
     zarr.config.set({"async.concurrency": async_concurrency})
-    print(
-        f"Configured zarr write parallelism: workers={workers}, "
-        f"async_concurrency={async_concurrency}"
+    logger.info(
+        "Configured zarr write parallelism: workers=%s, async_concurrency=%s",
+        workers,
+        async_concurrency,
     )
     return workers, async_concurrency
+
+
+def configure_zarr_writes(
+    default_workers: int = 2, default_async_concurrency: int = 2
+) -> int:
+    """Set up zarr write parallelism for an ingest run and return the worker count.
+
+    Reads ``zarr_store_workers`` / ``zarr_async_concurrency`` from the environment,
+    raises the open-file limit, and clamps both so large local stores do not run
+    out of file descriptors.
+    """
+    tune_nofile_limit()
+    zarr_store_workers, _ = configure_zarr_limits(
+        positive_int_env("zarr_store_workers", default_workers),
+        positive_int_env("zarr_async_concurrency", default_async_concurrency),
+    )
+    return zarr_store_workers
 
 
 def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
@@ -302,16 +518,37 @@ def make_herbie_save_dir(tmp_dir: str, prefix: str = "herbie") -> str:
     return save_dir
 
 
+# NOMADS pacing adapts: it starts at the configured interval, doubles (up to
+# NOMADS_MAX_INTERVAL_S) whenever NOMADS answers like a rate-limited client
+# (a redirect to its HTML block page, 429, 503, or a timeout), and eases back
+# by NOMADS_INTERVAL_DECAY per normal answer, never below the configured value.
+NOMADS_MAX_INTERVAL_S = 60.0
+NOMADS_INTERVAL_DECAY = 0.95
+NOMADS_THROTTLE_STATUS = {429, 503}
+
+
 class _HerbieRequests:
-    """Pace NOMADS probes, index reads, and GRIB byte-range requests together."""
+    """Pace NOMADS probes, index reads, and GRIB requests together, backing off
+    when NOMADS signals a rate limit."""
 
     RequestException = requests.RequestException
 
     def __init__(self, interval_s: float, timeout_s: int) -> None:
+        self.min_interval_s = interval_s
         self.interval_s = interval_s
         self.timeout_s = timeout_s
         self._lock = Lock()
         self._last_request: float | None = None
+
+    def _back_off(self, reason: str) -> None:
+        previous = self.interval_s
+        self.interval_s = min(NOMADS_MAX_INTERVAL_S, self.interval_s * 2)
+        logger.warning(
+            "NOMADS %s; request interval %.1f s -> %.1f s",
+            reason,
+            previous,
+            self.interval_s,
+        )
 
     def _request(self, method: str, url: str, **kwargs) -> requests.Response:
         kwargs.setdefault("timeout", (10, self.timeout_s))
@@ -327,7 +564,21 @@ class _HerbieRequests:
                 if delay > 0:
                     time.sleep(delay)
             self._last_request = time.monotonic()
-            response = request(url, **kwargs)
+            try:
+                response = request(url, **kwargs)
+            except (requests.Timeout, requests.ConnectionError):
+                self._back_off("timed out or dropped the connection")
+                raise
+            throttled = (
+                300 <= response.status_code < 400
+                or response.status_code in NOMADS_THROTTLE_STATUS
+            )
+            if throttled:
+                self._back_off(f"returned HTTP {response.status_code}")
+            else:
+                self.interval_s = max(
+                    self.min_interval_s, self.interval_s * NOMADS_INTERVAL_DECAY
+                )
         if 300 <= response.status_code < 400:
             response.close()
             raise requests.HTTPError(
@@ -348,23 +599,35 @@ def configure_herbie_request_timeouts(
     *,
     nomads_request_interval_s: float | None = None,
 ) -> None:
-    """Bound Herbie requests and optionally pace requests to NOMADS."""
+    """Bound Herbie request times and pace every Herbie request to NOMADS.
+
+    NOMADS rate-limits by client IP across all ingests, answering aggressive
+    clients with redirects to an HTML page (#772), so pacing is always on. The
+    starting (and minimum) interval comes from ``nomads_request_interval_seconds``
+    (default 1 s) unless given, and it backs off when NOMADS pushes back (see
+    ``_HerbieRequests``); calling again without an interval keeps the pacing
+    already set up.
+    Requests to other sources (AWS, Google, MSC, ECMWF) are not slowed down.
+    """
     if request_timeout_s is None:
         request_timeout_s = positive_int_env("herbie_request_timeout_seconds", 120)
 
     from herbie import core
 
     Herbie = core.Herbie
-    if nomads_request_interval_s is not None:
-        if nomads_request_interval_s <= 0:
-            raise ValueError("NOMADS request interval must be positive")
-        if isinstance(core.requests, _HerbieRequests):
+    if nomads_request_interval_s is not None and nomads_request_interval_s <= 0:
+        raise ValueError("NOMADS request interval must be positive")
+    if isinstance(core.requests, _HerbieRequests):
+        if nomads_request_interval_s is not None:
+            core.requests.min_interval_s = nomads_request_interval_s
             core.requests.interval_s = nomads_request_interval_s
-            core.requests.timeout_s = request_timeout_s
-        else:
-            core.requests = _HerbieRequests(
-                nomads_request_interval_s, request_timeout_s
+        core.requests.timeout_s = request_timeout_s
+    else:
+        if nomads_request_interval_s is None:
+            nomads_request_interval_s = positive_int_env(
+                "nomads_request_interval_seconds", 1
             )
+        core.requests = _HerbieRequests(nomads_request_interval_s, request_timeout_s)
 
     if getattr(Herbie, "_pirate_weather_request_timeout_s", None) == request_timeout_s:
         return
@@ -436,12 +699,34 @@ def _download_full_herbie_file(
 ) -> str:
     """Download a full Herbie GRIB with request timeouts and atomic replacement."""
     out_file = Path(herbie_ref.get_localFilePath(None)).expanduser()
-    if out_file.exists() and out_file.stat().st_size > 0 and not overwrite:
-        return str(out_file)
-
     grib_source = getattr(herbie_ref, "grib", None)
     if grib_source is None:
         raise RuntimeError(f"GRIB2 file not found: {herbie_ref!r}")
+    return download_grib_file(
+        grib_source,
+        out_file,
+        overwrite=overwrite,
+        request_timeout_s=request_timeout_s,
+        chunk_size=chunk_size,
+    )
+
+
+def download_grib_file(
+    source: str | Path,
+    out_file: str | Path,
+    *,
+    overwrite: bool,
+    request_timeout_s: int,
+    chunk_size: int = 1024 * 1024,
+) -> str:
+    """Download one whole GRIB file (or copy a local one) atomically.
+
+    NOMADS URLs go through the paced Herbie client, so direct downloads share
+    the same rate limit as Herbie's own requests.
+    """
+    out_file = Path(out_file).expanduser()
+    if out_file.exists() and out_file.stat().st_size > 0 and not overwrite:
+        return str(out_file)
 
     out_file.parent.mkdir(parents=True, exist_ok=True)
     tmp_file = out_file.with_name(f"{out_file.name}.tmp.{os.getpid()}")
@@ -449,16 +734,14 @@ def _download_full_herbie_file(
         tmp_file.unlink()
 
     try:
-        if _is_remote_url(grib_source):
+        if _is_remote_url(source):
             request_client = requests
-            if (
-                urlparse(str(grib_source)).hostname or ""
-            ).lower() == "nomads.ncep.noaa.gov":
+            if (urlparse(str(source)).hostname or "").lower() == "nomads.ncep.noaa.gov":
                 from herbie import core
 
                 request_client = core.requests
             with request_client.get(
-                str(grib_source),
+                str(source),
                 stream=True,
                 timeout=(10, request_timeout_s),
             ) as response:
@@ -468,7 +751,7 @@ def _download_full_herbie_file(
                         if chunk:
                             file.write(chunk)
         else:
-            source_path = Path(grib_source).expanduser()
+            source_path = Path(source).expanduser()
             if source_path.resolve() == out_file.resolve():
                 if out_file.exists() and out_file.stat().st_size > 0:
                     return str(out_file)
@@ -641,7 +924,9 @@ def safe_herbie_local_file_path(
         except FileExistsError as exc:
             conflict_path = getattr(exc, "filename", None)
             if conflict_path and os.path.isfile(conflict_path):
-                print(f"Repairing Herbie cache path collision at: {conflict_path}")
+                logger.info(
+                    "Repairing Herbie cache path collision at: %s", conflict_path
+                )
                 os.remove(conflict_path)
                 os.makedirs(conflict_path, exist_ok=True)
             elif conflict_path and not os.path.exists(conflict_path):
@@ -671,127 +956,649 @@ def close_store(store: object) -> None:
         close_fn()
 
 
-def archive_tmp_zarr_and_upload(
-    *,
-    tmp_zarr_path: str,
-    s3_path: str,
-    archive_member_name: str,
-    s3,
-) -> None:
-    """Tar/gzip a temporary zarr directory, upload to S3, and write done marker."""
-    tmp_tar_path = f"{tmp_zarr_path}.tar.gz"
-    with tarfile.open(tmp_tar_path, "w:gz") as tar:
-        tar.add(tmp_zarr_path, arcname=archive_member_name)
+def clear_directory(path: str, keep: str | None = None) -> None:
+    """Empty ``path`` (creating it if needed), optionally keeping one entry.
 
-    s3.put_file(tmp_tar_path, s3_path)
-    if os.path.exists(tmp_tar_path):
-        os.remove(tmp_tar_path)
-    shutil.rmtree(tmp_zarr_path, ignore_errors=True)
-    s3.touch(s3_path.replace(".tar.gz", ".done"))
+    The CMC ingests keep their Herbie download cache (``keep``) between runs so
+    unchanged GRIB files are not downloaded again.
+    """
+    os.makedirs(path, exist_ok=True)
+    keep_path = os.path.abspath(keep) if keep else None
+    for entry in os.scandir(path):
+        if os.path.abspath(entry.path) == keep_path:
+            continue
+        if entry.is_dir(follow_symlinks=False):
+            shutil.rmtree(entry.path)
+        else:
+            os.remove(entry.path)
 
 
-def _delete_historic_archive_from_s3(s3, s3_tar_path: str) -> None:
-    """Delete a historic zarr archive and its completion marker from S3."""
-    s3_zarr_path = s3_tar_path.removesuffix(".tar.gz")
-    for path in (
-        s3_tar_path,
-        s3_zarr_path,
-        s3_tar_path.replace(".tar.gz", ".done"),
-    ):
-        if s3.exists(path):
-            s3.rm(path, recursive=True)
+def prune_old_files(path: str, max_age_hours: float) -> None:
+    """Delete files under ``path`` last modified more than ``max_age_hours`` ago.
+
+    The CMC ingests keep their Herbie download cache between runs so unchanged
+    GRIB files are not downloaded again; without pruning, one directory per
+    run date accumulates forever. Directories left empty are removed too.
+    """
+    cutoff = time.time() - max_age_hours * 3600
+    removed = 0
+    for root, dirs, files in os.walk(path, topdown=False):
+        for name in files:
+            file_path = os.path.join(root, name)
+            if os.path.getmtime(file_path) < cutoff:
+                os.remove(file_path)
+                removed += 1
+        for name in dirs:
+            dir_path = os.path.join(root, name)
+            if not os.listdir(dir_path):
+                os.rmdir(dir_path)
+    if removed:
+        logger.info(
+            "Pruned %d cached files older than %s h from %s",
+            removed,
+            max_age_hours,
+            path,
+        )
 
 
-def _validate_historic_zarr_variables(
-    zarr_path: str,
-    expected_vars: Iterable[str] | None,
-) -> None:
-    """Validate that a local historic zarr contains every expected variable."""
-    if expected_vars is None:
+# Published stores are uploaded this many objects at a time. A 9,601-object store
+# (8 KiB chunks) took 43 / 27 / 22 / 32 s to OVH at 64 / 128 / 256 / 512.
+UPLOAD_CONCURRENCY = positive_int_env("upload_concurrency", 256)
+# ...and at most about this many bytes at a time: 256 multi-MB shards at once
+# (GFS) starved every request until obstore's 180 s retry budget ran out.
+UPLOAD_INFLIGHT_BYTES = positive_int_env("upload_inflight_mib", 512) * 2**20
+# Optional storage class for every S3 object, e.g. EXPRESS_ONEZONE for OVH High
+# Performance (a default header is not signed, so it is set per upload).
+S3_STORAGE_CLASS = os.getenv("s3_storage_class") or None
+
+
+def open_remote(path: str, save_type: str, key: str = "", secret: str = ""):
+    """Open the place an ingest publishes to as an obstore store.
+
+    With ``save_type`` "S3", ``path`` is ``bucket/prefix``; ``s3_endpoint`` and
+    ``s3_region`` point it at a non-AWS store such as OVH, and empty keys fall
+    back to obstore's ``AWS_*`` environment variables. Anything else is a local
+    directory (created if missing), so publishing and history use one code path
+    whether the remote is a bucket or a disk.
+    """
+    import obstore.store
+
+    if save_type == "S3":
+        bucket, _, prefix = path.strip("/").partition("/")
+        options = {
+            "endpoint": os.getenv("s3_endpoint"),
+            "region": os.getenv("s3_region"),
+            "access_key_id": key,
+            "secret_access_key": secret,
+        }
+        return obstore.store.S3Store(
+            bucket,
+            prefix=prefix or None,
+            **{name: value for name, value in options.items() if value},
+        )
+    os.makedirs(path, exist_ok=True)
+    return obstore.store.LocalStore(path)
+
+
+def _put_attributes(remote) -> dict | None:
+    import obstore.store
+
+    if S3_STORAGE_CLASS and isinstance(remote, obstore.store.S3Store):
+        return {"Storage-Class": S3_STORAGE_CLASS}
+    return None
+
+
+def _put_files(remote, uploads: list[tuple[str, str]]) -> None:
+    """Upload ``(local_file, key)`` pairs, ``UPLOAD_CONCURRENCY`` at a time, or
+    fewer for large files so about ``UPLOAD_INFLIGHT_BYTES`` are in flight.
+
+    obstore retries each request itself (bounded by its default retry config).
+    """
+    import asyncio
+
+    import obstore
+
+    attributes = _put_attributes(remote)
+    if not uploads:
         return
+    mean_size = sum(os.path.getsize(local) for local, _ in uploads) / len(uploads)
+    concurrency = max(
+        1, min(UPLOAD_CONCURRENCY, int(UPLOAD_INFLIGHT_BYTES // max(mean_size, 1)))
+    )
 
-    import zarr
+    async def put_all() -> None:
+        semaphore = asyncio.Semaphore(concurrency)
 
-    z = zarr.open(zarr_path, mode="r")
-    store_vars = set(z.keys())
-    expected_set = set(expected_vars)
-    missing_vars = sorted(expected_set - store_vars)
-    if missing_vars:
-        raise ValueError(
-            f"Missing variables in extracted historic zarr {zarr_path}: "
-            f"{missing_vars}. Found variables: {sorted(store_vars)}"
-        )
+        async def put(local_file: str, key: str) -> None:
+            async with semaphore:
+                await obstore.put_async(
+                    remote, key, Path(local_file), attributes=attributes
+                )
+
+        await asyncio.gather(*(put(local, key) for local, key in uploads))
+
+    asyncio.run(put_all())
 
 
-def download_extract_historic_archive(
-    *,
-    s3,
-    historic_path: str,
-    final_zarr_name: str,
-    extracted_store_name: str,
-    local_temp_dir: str,
-    expected_vars: Iterable[str] | None = None,
-) -> str | None:
-    """Helper to download and extract a historic archive to a local zarr path."""
-    if "://" in local_temp_dir:
-        raise ValueError(
-            f"local_temp_dir must be a local filesystem path, got {local_temp_dir!r}"
-        )
+def upload_store(local_path: str, remote, name: str) -> None:
+    """Upload a local zarr directory store to ``name`` on the remote.
 
-    os.makedirs(local_temp_dir, exist_ok=True)
-    local_zarr_path = os.path.join(local_temp_dir, final_zarr_name)
+    Chunks go first, then the arrays' ``zarr.json``, then the store's root
+    ``zarr.json``, so a store whose root metadata exists is complete (the history
+    ingests check that). It overwrites in place and is not atomic, which is only
+    safe for the history stores; final stores go through ``publish_store``.
+    """
+    chunk_files, array_metadata, root_metadata = [], [], []
+    for dirpath, _, filenames in os.walk(local_path):
+        for filename in filenames:
+            local_file = os.path.join(dirpath, filename)
+            relative = Path(local_file).relative_to(local_path).as_posix()
+            if relative == "zarr.json":
+                group = root_metadata
+            elif filename == "zarr.json":
+                group = array_metadata
+            else:
+                group = chunk_files
+            group.append((local_file, f"{name}/{relative}"))
+    for uploads in (chunk_files, array_metadata, root_metadata):
+        _put_files(remote, uploads)
 
-    tar_name = f"{final_zarr_name}.tar.gz"
-    s3_tar_path = f"{historic_path}/{tar_name}"
 
-    if os.path.exists(local_zarr_path):
-        try:
-            _validate_historic_zarr_variables(local_zarr_path, expected_vars)
-        except Exception:
-            shutil.rmtree(local_zarr_path, ignore_errors=True)
-            _delete_historic_archive_from_s3(s3, s3_tar_path)
-            raise
-        return local_zarr_path
+def current_pointer_name(store_name: str) -> str:
+    """The pointer object naming the current version of a final store
+    (``HRRR.zarr`` -> ``HRRR.current.json``)."""
+    return store_name.removesuffix(".zarr") + ".current.json"
 
-    if not s3.exists(s3_tar_path):
-        return None
 
-    local_tar_path = os.path.join(local_temp_dir, tar_name)
-    timestamp_tag = final_zarr_name.replace(".zarr", "")
-    extract_dir = os.path.join(local_temp_dir, f"extract_{timestamp_tag}")
+def publish_store(local_path: str, remote, name: str, run_time: Any = None) -> str:
+    """Publish a final store as a new version, then point readers at it.
+
+    The store is uploaded to ``<MODEL>/<UTC publish stamp>.zarr`` and only then
+    is ``<MODEL>.current.json`` rewritten to name it, so the sync never copies a
+    half-uploaded store or mixes shards (and their ``time`` attribute) from two
+    runs. Versions older than the previous one are deleted afterwards; the
+    previous one is kept so a sync that is copying it when the pointer moves
+    can finish. Returns the published version path.
+    """
+    import json
+
+    import obstore
+
+    model = name.removesuffix(".zarr")
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    version_path = f"{model}/{stamp}.zarr"
+    upload_store(local_path, remote, version_path)
+
+    pointer = {
+        "store": version_path,
+        "run_time": None if run_time is None else str(run_time),
+    }
+    obstore.put(
+        remote,
+        current_pointer_name(name),
+        json.dumps(pointer).encode(),
+        attributes=_put_attributes(remote),
+    )
+
+    versions = sorted(
+        prefix.rstrip("/")
+        for prefix in obstore.list_with_delimiter(remote, prefix=f"{model}/")[
+            "common_prefixes"
+        ]
+        # A local remote keeps the empty directories of deleted versions
+        if prefix.rstrip("/").endswith(".zarr")
+        and remote_object_exists(remote, f"{prefix.rstrip('/')}/zarr.json")
+    )
+    for old_version in versions[:-2]:
+        old_keys = [
+            meta["path"]
+            for batch in obstore.list(remote, prefix=f"{old_version}/")
+            for meta in batch
+        ]
+        obstore.delete(remote, old_keys)
+        logger.info("Deleted old published version %s", old_version)
+    return version_path
+
+
+def read_published_run_time(remote, time_pickle_name: str) -> Any | None:
+    """Return the run time recorded by the last published ingest, or None.
+
+    Every ingest publishes ``<MODEL>.time.pickle`` next to its store; comparing it
+    with the newest available run is how a scheduled ingest decides whether there
+    is anything new to process.
+    """
+    import obstore
 
     try:
-        s3.get_file(s3_tar_path, local_tar_path)
-        os.makedirs(extract_dir, exist_ok=True)
-        with tarfile.open(local_tar_path, "r:gz") as tar:
-            tar.extractall(path=extract_dir, filter="data")
+        return pickle.loads(obstore.get(remote, time_pickle_name).bytes())
+    except (FileNotFoundError, obstore.exceptions.NotFoundError):
+        return None
 
-        extracted_source = os.path.join(extract_dir, extracted_store_name)
-        if os.path.exists(extracted_source):
-            shutil.move(extracted_source, local_zarr_path)
 
-        if os.path.exists(local_zarr_path):
-            _validate_historic_zarr_variables(local_zarr_path, expected_vars)
-    except Exception:
-        shutil.rmtree(local_zarr_path, ignore_errors=True)
-        _delete_historic_archive_from_s3(s3, s3_tar_path)
-        raise
-    finally:
-        if os.path.exists(local_tar_path):
-            os.remove(local_tar_path)
-        shutil.rmtree(extract_dir, ignore_errors=True)
+def publish_ingest_run(
+    output_names: Iterable[str],
+    run_time: Any,
+    time_pickle_name: str,
+    *,
+    process_dir: str,
+    remote,
+) -> None:
+    """Publish a finished run: its outputs first, then ``<MODEL>.time.pickle``.
 
-    return local_zarr_path if os.path.exists(local_zarr_path) else None
+    ``output_names`` are entries in ``process_dir``: final zarr stores such as
+    ``GEFS.zarr`` (published as a new version, see ``publish_store``) or side
+    files the API reads. The run-time pickle is how the next scheduled ingest
+    sees that a new run exists, so it is only written once every output is in
+    place.
+    """
+    import obstore
+
+    for name in output_names:
+        source_path = os.path.join(process_dir, name)
+        if os.path.isdir(source_path):
+            publish_store(source_path, remote, name, run_time)
+        else:
+            _put_files(remote, [(source_path, name)])
+        logger.info("Published %s", name)
+
+    obstore.put(
+        remote,
+        time_pickle_name,
+        pickle.dumps(run_time),
+        attributes=_put_attributes(remote),
+    )
+
+
+def bitround_variables(stacked: da.Array, variables: Sequence[str]) -> da.Array:
+    """Bitround each variable of a ``(variable, ...)`` float32 array to its
+    ``KEEPBITS`` precision (round to nearest, ties to even, as numcodecs BitRound).
+
+    The dropped mantissa bits become zeros, which compress far better; NaN stays
+    NaN. A store chunk holds every variable, so this cannot be a zarr codec (one
+    setting per chunk) and is applied before writing. An unknown variable raises
+    rather than being stored at a guessed precision.
+    """
+    if len(variables) != stacked.shape[0]:
+        raise ValueError(
+            f"{len(variables)} variable names for {stacked.shape[0]} stacked variables"
+        )
+    keepbits = np.array([KEEPBITS[name] for name in variables])
+
+    def round_block(block, block_info=None):
+        start, stop = block_info[0]["array-location"][0]
+        bits = np.ascontiguousarray(block, dtype=np.float32).view(np.uint32).copy()
+        for offset, keep in enumerate(keepbits[start:stop]):
+            if keep >= EXACT_BITS:
+                continue
+            dropped = EXACT_BITS - int(keep)
+            half = np.uint32((1 << (dropped - 1)) - 1)
+            variable_bits = bits[offset]
+            variable_bits += (
+                (variable_bits >> np.uint32(dropped)) & np.uint32(1)
+            ) + half
+            variable_bits &= np.uint32((0xFFFFFFFF >> dropped) << dropped)
+        return bits.view(np.float32)
+
+    return stacked.astype("float32").map_blocks(round_block, dtype="float32")
+
+
+def write_final_zarr(
+    stacked: da.Array,
+    store_path: str,
+    final_chunk: int,
+    shard: int,
+    zarr_store_workers: int,
+    variables: Sequence[str],
+    times: Sequence[float],
+) -> None:
+    """Write the final ``(variable, time, y, x)`` array the API reads.
+
+    One chunk holds every variable and time step for a ``final_chunk`` square of
+    grid cells, so a point forecast is a single chunk read, and chunks are
+    grouped into ``shard`` square shard files (``FINAL_SHARD_SIZES``).
+    ``stacked`` must already be padded to a multiple of ``final_chunk``;
+    ``variables`` names its first axis and sets each variable's precision
+    (``bitround_variables``). ``store_path`` is a local directory store,
+    published with ``publish_ingest_run``.
+
+    The valid times are not stored in the array. ``times`` (Unix seconds, one per
+    time step) goes in the array's ``time`` attribute and the API reader puts it
+    back as column 0 of every point read, so a chunk holds only forecast values.
+
+    Sharded and read with tensorstore, a 16-model API request took ~1.3 ms
+    against ~10 ms for the unsharded store through zarr-python, and a store is a
+    few hundred files instead of 10^5 (Notes/STORAGE_AND_READ_BENCHMARKS.md).
+    Chunks that are entirely NaN are left out of their shard; readers return the
+    NaN fill value for them. Each run publishes to a new versioned path, so no
+    chunk of a previous run has to be overwritten.
+
+    Dask writes one shard per task (whatever ``stacked``'s chunks), which is why ``FINAL_SHARD_SIZES`` keeps a
+    shard under ~150 MB uncompressed. Blosc zstd with byte shuffle beat bit
+    shuffle, no shuffle, lz4, zstd 1 and 9 (9 was 7% smaller but wrote 9x
+    slower), a time-innermost chunk order and pcodec on size or read time.
+    """
+    import dask
+    import zarr
+
+    times = np.asarray(times, dtype=np.float64)
+    if times.ndim != 1 or len(times) != stacked.shape[1]:
+        raise ValueError(
+            f"{times.shape} times for an array with {stacked.shape[1]} time steps"
+        )
+    if not np.all(np.isfinite(times)) or np.any(np.diff(times) <= 0):
+        raise ValueError("times must be finite and strictly increasing")
+    if shard % final_chunk:
+        raise ValueError(f"shard {shard} is not a multiple of chunk {final_chunk}")
+
+    store = zarr.storage.LocalStore(store_path)
+    zarr_array = zarr.create_array(
+        store=store,
+        shape=stacked.shape,
+        shards=(stacked.shape[0], stacked.shape[1], shard, shard),
+        chunks=(stacked.shape[0], stacked.shape[1], final_chunk, final_chunk),
+        compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
+        dtype="float32",
+        attributes={
+            "time": [round(t) for t in times],
+            "variables": list(variables),
+        },
+    )
+
+    # dask rechunks to "auto" blocks made of whole shards before writing to a
+    # sharded array; capping a block at one shard's bytes makes it exactly one
+    # shard, so a task never holds more than one (see FINAL_SHARD_SIZES).
+    shard_bytes = stacked.shape[0] * stacked.shape[1] * shard * shard * 4
+    with dask.config.set(
+        {"array.chunk-size": shard_bytes},
+        scheduler="threads",
+        num_workers=zarr_store_workers,
+    ):
+        bitround_variables(stacked, variables).to_zarr(
+            zarr_array, overwrite=True, compute=True
+        )
+    close_store(store)
+
+
+def encode_era5_archive_field(name: str, values: np.ndarray) -> np.ndarray:
+    """Encode one week of an ERA5 archive variable, ``(time, y, x)`` in API units,
+    as int16 per ``ERA5_ARCHIVE_ENCODING``; ``ERA5_ARCHIVE_DELTA_VARS`` become
+    hour-to-hour differences along time (first hour absolute).
+
+    Quantized integers compress far better than bitrounded floats (1885 -> 953
+    MiB per week with bitshuffle, measured 2026-11-03), and a linear step keeps
+    an absolute precision where bitrounding kept a relative one (0.125 K at
+    300 K). NaN is allowed only in ``ERA5_ARCHIVE_NAN_VARS`` and is stored as
+    ``ERA5_ARCHIVE_FILL``. A value outside int16 raises rather than being
+    clipped into the store.
+    """
+    from API.constants.model_const import (
+        ERA5_ARCHIVE_DELTA_VARS,
+        ERA5_ARCHIVE_ENCODING,
+        ERA5_ARCHIVE_FILL,
+        ERA5_ARCHIVE_NAN_VARS,
+    )
+
+    kind, step_or_scale, offset = ERA5_ARCHIVE_ENCODING[name]
+    missing = np.isnan(values)
+    if missing.any() and name not in ERA5_ARCHIVE_NAN_VARS:
+        raise ValueError(f"ERA5 {name} has NaN values; not encoding the week")
+    if np.isinf(values).any():
+        raise ValueError(f"ERA5 {name} has infinite values; not encoding the week")
+    if kind == "lin":
+        scaled = (values - offset) / step_or_scale
+    else:
+        # ERA5 packing leaves accumulations of about -1e-9: zero precipitation.
+        scaled = np.sqrt(np.clip(values, 0, None)) * step_or_scale
+    scaled = np.rint(np.where(missing, 0, scaled))
+    is_delta = name in ERA5_ARCHIVE_DELTA_VARS
+    # Delta variables stay within half the range so every difference fits int16.
+    limit = 16383 if is_delta else 32767
+    if np.abs(scaled).max() > limit:
+        raise OverflowError(f"ERA5 {name} exceeds its int16 encoding range")
+    encoded = scaled.astype(np.int16)
+    del scaled
+    encoded[missing] = ERA5_ARCHIVE_FILL
+    if is_delta:
+        encoded[1:] = np.diff(encoded, axis=0)
+    return encoded
+
+
+def write_era5_archive_zarr(
+    stacked: np.ndarray,
+    store_path: str,
+    chunk: int,
+    shard: int,
+    zarr_store_workers: int,
+    attributes: dict,
+) -> None:
+    """Write one week of the ERA5 archive: an int16 ``(variable, time, y, x)``
+    array from ``encode_era5_archive_field``, inner chunks of every variable and
+    hour for a ``chunk`` square, in ``shard`` square shards, Blosc zstd 3 with
+    bitshuffle.
+
+    Bitshuffle beat byte shuffle by 15-20 % on these small integers (byte
+    shuffle won for bitrounded floats); zstd 9 was only 3.5 % smaller and ~30x
+    slower. One band of shards is written per call, which keeps zarr's encode
+    buffers to one band rather than the week.
+    """
+    import zarr
+
+    from API.constants.model_const import ERA5_ARCHIVE_FILL
+
+    if stacked.dtype != np.int16 or stacked.ndim != 4:
+        raise ValueError(
+            f"Expected int16 (variable, time, y, x), got {stacked.dtype} {stacked.shape}"
+        )
+    if shard % chunk or stacked.shape[2] % chunk or stacked.shape[3] % chunk:
+        raise ValueError(f"{stacked.shape} is not a whole number of {chunk} chunks")
+    times = np.asarray(attributes["time"], dtype=float)
+    if len(times) != stacked.shape[1] or np.any(np.diff(times) <= 0):
+        raise ValueError(
+            "time attribute must match the array's strictly increasing hours"
+        )
+
+    array = zarr.create_array(
+        store=zarr.storage.LocalStore(store_path),
+        shape=stacked.shape,
+        chunks=(stacked.shape[0], stacked.shape[1], chunk, chunk),
+        shards=(stacked.shape[0], stacked.shape[1], shard, shard),
+        dtype="int16",
+        fill_value=ERA5_ARCHIVE_FILL,
+        compressors=zarr.codecs.BloscCodec(
+            cname="zstd", clevel=3, shuffle="bitshuffle", typesize=2
+        ),
+        dimension_names=("variable", "time", "latitude", "longitude"),
+        attributes={**attributes, "fill_value": ERA5_ARCHIVE_FILL},
+        overwrite=True,
+    )
+    with zarr.config.set({"threading.max_workers": zarr_store_workers}):
+        for y0 in range(0, stacked.shape[2], shard):
+            array[:, :, y0 : y0 + shard, :] = stacked[:, :, y0 : y0 + shard, :]
+
+
+def remote_object_exists(remote, key: str) -> bool:
+    """True if ``key`` exists on the remote (a local remote raises a different error)."""
+    import obstore
+
+    try:
+        obstore.head(remote, key)
+    except (FileNotFoundError, obstore.exceptions.NotFoundError):
+        return False
+    return True
+
+
+def history_store_exists(remote, name: str) -> bool:
+    """True once history store ``name`` is fully published (root metadata last)."""
+    return remote_object_exists(remote, f"{name}/zarr.json")
+
+
+def publish_history_store(local_path: str, remote, name: str) -> None:
+    """Upload one finished history store to the history remote, then drop it."""
+    upload_store(local_path, remote, name)
+    shutil.rmtree(local_path, ignore_errors=True)
+    logger.info("Published history store %s", name)
+
+
+def shard_whole_variables(ds: "xr.Dataset", encoding: dict | None = None):
+    """Give every data variable of a history store a single shard, so a store is
+    one object per variable instead of one per chunk (GFS: 30 instead of 3,600).
+
+    Inner chunks stay as given (``encoding[var]["chunks"]``, else the dask
+    chunks). Returns the dataset rechunked to one dask chunk per variable, since
+    zarr cannot write parts of one shard from several tasks, and the encoding
+    to pass to ``to_zarr``.
+    """
+    encoding = {name: dict(value) for name, value in (encoding or {}).items()}
+    for name, variable in ds.data_vars.items():
+        inner = encoding.get(name, {}).get("chunks") or tuple(
+            sizes[0] for sizes in (variable.chunks or [(n,) for n in variable.shape])
+        )
+        shards = tuple(
+            -(-size // chunk) * chunk for size, chunk in zip(variable.shape, inner)
+        )
+        encoding.setdefault(name, {}).update(chunks=tuple(inner), shards=shards)
+    return ds.chunk(dict.fromkeys(ds.dims, -1)), encoding
+
+
+# History stores are downloaded with this many requests in flight. OVH answers a
+# GET in 100-400 ms, so the merge's dask threads reading one chunk each (~12 in
+# flight) got 3-4 MB/s: GFS spent ~45 min reading 8.8 GB of history.
+HISTORY_DOWNLOAD_CONCURRENCY = positive_int_env("history_download_concurrency", 64)
+# History stores are opened, and their times read, this many at a time.
+HISTORY_OPEN_CONCURRENCY = positive_int_env("history_open_concurrency", 32)
+
+
+def map_history_stores(func, items: Iterable) -> list:
+    """``[func(item) for item in items]``, ``HISTORY_OPEN_CONCURRENCY`` at a time;
+    for the round trips to many history stores. The first error is raised."""
+    with ThreadPoolExecutor(max_workers=HISTORY_OPEN_CONCURRENCY) as pool:
+        return list(pool.map(func, items))
+
+
+def download_history_stores(remote, names: Iterable[str], local_dir: str) -> list[str]:
+    """Copy published history stores to ``local_dir``; returns their local paths.
+
+    Every history run is published before the merge, so a missing store means it
+    was lost and the run fails rather than publishing a forecast with a gap.
+    Objects stream to disk ``HISTORY_DOWNLOAD_CONCURRENCY`` at a time; the merge
+    then reads local files instead of one S3 round trip per chunk.
+    """
+    import asyncio
+
+    import obstore
+
+    names = list(names)
+    missing = [
+        name
+        for name, exists in zip(
+            names,
+            map_history_stores(lambda name: history_store_exists(remote, name), names),
+            strict=True,
+        )
+        if not exists
+    ]
+    if missing:
+        raise RuntimeError(f"History stores {missing} are missing from {remote}")
+
+    keys = [
+        meta["path"]
+        for listing in map_history_stores(
+            lambda name: [
+                m for batch in obstore.list(remote, prefix=f"{name}/") for m in batch
+            ],
+            names,
+        )
+        for meta in listing
+    ]
+
+    async def get_all() -> None:
+        semaphore = asyncio.Semaphore(HISTORY_DOWNLOAD_CONCURRENCY)
+
+        async def get(key: str) -> None:
+            local_file = os.path.join(local_dir, key)
+            os.makedirs(os.path.dirname(local_file), exist_ok=True)
+            async with semaphore:
+                result = await obstore.get_async(remote, key)
+                # Streamed straight to local disk, which is fast next to S3, so
+                # memory stays bounded however large the shards are
+                with open(local_file, "wb") as fh:  # noqa: ASYNC230
+                    async for chunk in result.stream():
+                        fh.write(chunk)
+
+        await asyncio.gather(*(get(key) for key in keys))
+
+    started = time.time()
+    asyncio.run(get_all())
+    logger.info(
+        "Downloaded %d history stores (%d objects) in %.1f s",
+        len(names),
+        len(keys),
+        time.time() - started,
+    )
+    return [os.path.join(local_dir, name) for name in names]
+
+
+def open_history_store(
+    remote, name: str, expected_vars: Iterable[str], local_path: str | None = None
+):
+    """Open a published history store read-only: the copy at ``local_path``
+    (see ``download_history_stores``), else straight from the remote.
+
+    A store missing an expected variable (written by an older ingest) is deleted
+    from the remote so the next run rebuilds it, and the run fails.
+    """
+    import obstore
+    import zarr
+
+    if local_path is not None:
+        group = zarr.open_group(
+            zarr.storage.LocalStore(local_path, read_only=True), mode="r"
+        )
+    else:
+        if not history_store_exists(remote, name):
+            raise RuntimeError(f"History store {name} is missing from {remote}")
+        group = zarr.open_group(
+            zarr.storage.ObjectStore(remote, read_only=True), path=name, mode="r"
+        )
+    missing_vars = sorted(set(expected_vars) - set(group.keys()))
+    if missing_vars:
+        stale_keys = [
+            meta["path"]
+            for batch in obstore.list(remote, prefix=f"{name}/")
+            for meta in batch
+        ]
+        obstore.delete(remote, stale_keys)
+        raise ValueError(
+            f"History store {name} is missing variables {missing_vars}; "
+            "deleted it so the next run rebuilds it"
+        )
+    return group
+
+
+def open_history_arrays(
+    remote, names: Iterable[str], expected_vars: Iterable[str], local_dir: str
+):
+    """Download published history stores and open them, each as ``{name: array}``.
+
+    Same checks as ``download_history_stores`` and ``open_history_store``.
+    """
+    names = list(names)
+    expected_vars = tuple(expected_vars)
+    local_paths = download_history_stores(remote, names, local_dir)
+    return map_history_stores(
+        lambda pair: dict(
+            open_history_store(remote, pair[0], expected_vars, pair[1]).arrays()
+        ),
+        list(zip(names, local_paths, strict=True)),
+    )
 
 
 def mask_invalid_data(daskArray, ignoreAxis=None):
-    """Masks invalid data in a dask array, ignoring the time dimension."""
+    """Masks invalid data in a (variable, time, y, x) dask array."""
     # TODO: Update to mask for each variable according to reasonable values, as opposed to this global mask
     valid_mask = (daskArray >= VALID_DATA_MIN) & (daskArray <= VALID_DATA_MAX)
-    # Ignore times by setting first dimension to True
-    valid_mask[0, :, :, :] = True
 
-    # Also ignore the specified axis if provided
+    # Leave the variables in ignoreAxis unmasked
     if ignoreAxis is not None:
         for i in ignoreAxis:
             valid_mask[i, :, :, :] = True
@@ -811,69 +1618,6 @@ def mask_invalid_refc(xrArr: "xr.DataArray") -> "xr.DataArray":
 
 
 # Function to get the list of GRIB files from the forecast subscription, used by NBM
-def getGribList(FH_forecastsub, matchStrings):
-    try:
-        gribList = [
-            str(Path(x.get_localFilePath(matchStrings)).expand())
-            for x in FH_forecastsub.file_exists
-        ]
-    except (ValueError, OSError, KeyError, IndexError, RuntimeError):
-        print("Download Failure 1, wait 20 seconds and retry")
-        time.sleep(20)
-        FH_forecastsub.download(matchStrings, verbose=False)
-        try:
-            gribList = [
-                str(Path(x.get_localFilePath(matchStrings)).expand())
-                for x in FH_forecastsub.file_exists
-            ]
-        except (ValueError, OSError, KeyError, IndexError, RuntimeError):
-            print("Download Failure 2, wait 20 seconds and retry")
-            time.sleep(20)
-            FH_forecastsub.download(matchStrings, verbose=False)
-            try:
-                gribList = [
-                    str(Path(x.get_localFilePath(matchStrings)).expand())
-                    for x in FH_forecastsub.file_exists
-                ]
-            except (ValueError, OSError, KeyError, IndexError, RuntimeError):
-                print("Download Failure 3, wait 20 seconds and retry")
-                time.sleep(20)
-                FH_forecastsub.download(matchStrings, verbose=False)
-                try:
-                    gribList = [
-                        str(Path(x.get_localFilePath(matchStrings)).expand())
-                        for x in FH_forecastsub.file_exists
-                    ]
-                except (ValueError, OSError, KeyError, IndexError, RuntimeError):
-                    print("Download Failure 4, wait 20 seconds and retry")
-                    time.sleep(20)
-                    FH_forecastsub.download(matchStrings, verbose=False)
-                    try:
-                        gribList = [
-                            str(Path(x.get_localFilePath(matchStrings)).expand())
-                            for x in FH_forecastsub.file_exists
-                        ]
-                    except (ValueError, OSError, KeyError, IndexError, RuntimeError):
-                        print("Download Failure 5, wait 20 seconds and retry")
-                        time.sleep(20)
-                        FH_forecastsub.download(matchStrings, verbose=False)
-                        try:
-                            gribList = [
-                                str(Path(x.get_localFilePath(matchStrings)).expand())
-                                for x in FH_forecastsub.file_exists
-                            ]
-                        except (
-                            ValueError,
-                            OSError,
-                            KeyError,
-                            IndexError,
-                            RuntimeError,
-                        ):
-                            print("Download Failure 6, Fail")
-                            sys.exit(1)
-    return gribList
-
-
 def validate_grib_stats(gribCheck, excluded_variables: Iterable[str] | None = None):
     """
     Inspect gribCheck.stdout (from `wgrib2 … -stats`) for min/max values,
@@ -972,190 +1716,97 @@ def pad_to_chunk_size(dask_array: da.Array, final_chunk: int) -> da.Array:
     return dask_array
 
 
-def broadcast_times_to_grid(
-    times: np.ndarray, ny: int, nx: int, spatial_chunk: int
-) -> da.Array:
-    """Lazily broadcast one timestamp per timestep across a spatial grid.
-
-    Args:
-        times: One-dimensional array of timestamps.
-        ny: Number of grid rows.
-        nx: Number of grid columns.
-        spatial_chunk: Chunk size for both spatial dimensions.
-
-    Returns:
-        A lazily broadcast Dask array with shape ``(time, y, x)``.
-
-    Raises:
-        ValueError: If the timestamps are not one-dimensional or any output
-            dimension or chunk size is not positive.
-    """
-    times = np.asarray(times)
-    if times.ndim != 1:
-        raise ValueError("times must be one-dimensional")
-    if len(times) < 1 or ny < 1 or nx < 1 or spatial_chunk < 1:
-        raise ValueError("time and spatial dimensions and chunk size must be positive")
-
-    time_column = da.from_array(
-        times[:, np.newaxis, np.newaxis],
-        chunks=(len(times), 1, 1),
-    )
-    return da.broadcast_to(
-        time_column,
-        (len(times), ny, nx),
-        chunks=(len(times), spatial_chunk, spatial_chunk),
-    )
-
-
 def earth_relative_wind_components(
     ugrd: xr.DataArray, vgrd: xr.DataArray
-) -> tuple[
-    np.ndarray, np.ndarray
-]:  # Based off: https://unidata.github.io/python-gallery/examples/500hPa_Absolute_Vorticity_winds.html#function-to-compute-earth-relative-winds
-    """Calculate north-relative wind components from grid-relative components.
+) -> tuple[np.ndarray, np.ndarray]:
+    """Rotate grid-relative winds on a Lambert conformal grid to earth-relative.
 
-    Uses Cartopy to transform vectors from the model's grid-relative projection
-    to a standard Plate Carree projection (earth-relative).
+    Grid north leans away from true north by the meridian convergence, which on
+    a tangent Lambert cone is ``sin(latin) * (lon - LoV)``. Each point's rotation
+    comes from its own GRIB latitude/longitude because Herbie's cfgrib datasets
+    have index-only x/y dimensions (0, 1, 2...), not projection metres. A
+    projected vector transform is avoided as well: going through PlateCarree
+    measures angles in degree space, which skews diagonal winds with latitude.
 
     Args:
-        ugrd: Xarray DataArray of the grid-relative u-component of the wind.
-        vgrd: Xarray DataArray of the grid-relative v-component of the wind.
+        ugrd: Grid-relative u-component, with ``metpy_crs``, ``latitude`` and
+            ``longitude`` coordinates.
+        vgrd: Grid-relative v-component on the same grid.
 
     Returns:
-        A tuple containing two numpy arrays: the earth-relative u-component (ut)
-        and v-component (vt) of the wind.
+        The earth-relative u- and v-components.
+
+    Raises:
+        ValueError: If the projection is a secant cone (two different standard
+            parallels), which this formula does not cover.
     """
-    data_crs = ugrd.metpy_crs.metpy.cartopy_crs
-
-    x = ugrd.x.values
-    y = ugrd.y.values
-
-    xx, yy = np.meshgrid(x, y)
-
-    ut, vt = ccrs.PlateCarree().transform_vectors(
-        data_crs, xx, yy, ugrd.values, vgrd.values
-    )
-
-    return ut, vt
-
-
-def interp_time_map_blocks_nan(
-    arr: da.Array,
-    stacked_timesUnix: np.ndarray,
-    hourly_timesUnix: np.ndarray,
-    nearest_vars: int | Iterable[int] | None = None,
-    dtype: str = "float32",
-    fill_value: float = np.nan,
-    time_axis: int = 1,
-    max_columns_per_batch: int = 4096,
-) -> da.Array:
-    """Interpolate along time while ignoring NaNs with bounded block memory."""
-    if arr.ndim != 4:
-        raise ValueError("Expected arr with dims (V, T, Y, X).")
-    if time_axis != 1:
-        raise NotImplementedError("This helper assumes time_axis == 1 for (V,T,Y,X).")
-    if len(arr.chunks[time_axis]) != 1:
-        raise ValueError("time axis must be a single chunk before interpolating.")
-    if max_columns_per_batch < 1:
-        raise ValueError("max_columns_per_batch must be positive.")
-
-    x_source = np.asarray(stacked_timesUnix, dtype=np.float64).reshape(-1)
-    x_target = np.asarray(hourly_timesUnix, dtype=np.float64).reshape(-1)
-    target_count = len(x_target)
-    if arr.shape[time_axis] != len(x_source):
+    crs_params = ugrd.metpy_crs.metpy.cartopy_crs.proj4_params
+    if crs_params["lat_1"] != crs_params["lat_2"]:
         raise ValueError(
-            f"arr time length {arr.shape[time_axis]} does not match "
-            f"stacked_timesUnix length {len(x_source)}."
+            "Expected a tangent Lambert cone, got standard parallels "
+            f"{crs_params['lat_1']} and {crs_params['lat_2']}"
         )
 
-    if nearest_vars is None:
-        nearest_vars_set = set()
-    elif isinstance(nearest_vars, int):
-        nearest_vars_set = {nearest_vars}
-    else:
-        nearest_vars_set = {int(i) for i in nearest_vars}
+    cone_factor = np.sin(np.radians(crs_params["lat_1"]))
+    degrees_from_lov = (ugrd.longitude.values - crs_params["lon_0"] + 180.0) % 360.0
+    degrees_from_lov -= 180.0
+    convergence = cone_factor * np.radians(degrees_from_lov)
+    cos_convergence = np.cos(convergence)
+    sin_convergence = np.sin(convergence)
 
-    def interp_block(block, block_info=None):
-        var_start = 0
-        if block_info is not None:
-            var_start = block_info[0]["array-location"][0][0]
+    u_earth = ugrd.values * cos_convergence + vgrd.values * sin_convergence
+    v_earth = vgrd.values * cos_convergence - ugrd.values * sin_convergence
+    return u_earth, v_earth
 
-        out = np.full(
-            (block.shape[0], target_count, block.shape[2], block.shape[3]),
-            fill_value,
-            dtype=dtype,
-        )
-        n_points = block.shape[2] * block.shape[3]
 
-        for local_var_idx in range(block.shape[0]):
-            global_var_idx = var_start + local_var_idx
-            use_nearest = global_var_idx in nearest_vars_set
-            values = block[local_var_idx].reshape(block.shape[1], n_points)
-            var_out = out[local_var_idx].reshape(target_count, n_points)
+def rotated_latlon_grid_geometry(
+    north_pole_lat: float,
+    north_pole_lon: float,
+    rlat: np.ndarray,
+    rlon: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Geographic position and wind rotation angle of a rotated lat-lon grid.
 
-            for batch_start in range(0, n_points, max_columns_per_batch):
-                batch_stop = min(batch_start + max_columns_per_batch, n_points)
-                batch_values = values[:, batch_start:batch_stop]
-                valid = np.isfinite(batch_values)
-                valid_patterns, pattern_idx = np.unique(
-                    valid.T, axis=0, return_inverse=True
-                )
-                batch_out = var_out[:, batch_start:batch_stop]
+    wgrib2 cannot rotate winds on a rotated lat-lon grid in place: -new_grid has
+    no rotated lat-lon target, and its NetCDF output leaves U/V grid-relative.
+    The rotation is fixed by the grid geometry, so it is computed here once per
+    run. The angle is the bearing of the grid's +x (rotated east) axis measured
+    counterclockwise from true east, found by stepping a small distance along
+    the rotated longitude at every point; earth-relative winds are then
 
-                for valid_pattern_idx, valid_pattern in enumerate(valid_patterns):
-                    local_cols = np.flatnonzero(pattern_idx == valid_pattern_idx)
-                    if not valid_pattern.any():
-                        continue
+        u_earth = u * cos(angle) - v * sin(angle)
+        v_earth = u * sin(angle) + v * cos(angle)
 
-                    valid_times = x_source[valid_pattern]
-                    target_in_range = (x_target >= valid_times[0]) & (
-                        x_target <= valid_times[-1]
-                    )
-                    if not target_in_range.any():
-                        continue
+    Args:
+        north_pole_lat: Latitude of the rotated grid's north pole (degrees). GRIB
+            gives the south pole, whose negated latitude this is.
+        north_pole_lon: Longitude of the rotated north pole (degrees), the GRIB
+            south-pole longitude minus 180.
+        rlat: Rotated latitudes of the grid rows (degrees, south to north).
+        rlon: Rotated longitudes of the grid columns (degrees, -180 to 180).
 
-                    target_indices = np.flatnonzero(target_in_range)
-                    valid_values = batch_values[valid_pattern][:, local_cols]
+    Returns:
+        ``(lat, lon, angle)``: geographic latitude and longitude (degrees,
+        longitude in -180..180) and the rotation angle (radians), each (y, x).
+    """
+    rotated_crs = ccrs.RotatedPole(
+        pole_longitude=north_pole_lon, pole_latitude=north_pole_lat
+    )
+    geographic_crs = ccrs.PlateCarree()
+    rlon_grid, rlat_grid = np.meshgrid(rlon, rlat)
 
-                    if use_nearest or len(valid_times) == 1:
-                        insert_at = np.searchsorted(
-                            valid_times, x_target[target_indices]
-                        )
-                        left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 1)
-                        right_idx = np.clip(insert_at, 0, len(valid_times) - 1)
-                        left_dist = np.abs(
-                            x_target[target_indices] - valid_times[left_idx]
-                        )
-                        right_dist = np.abs(
-                            valid_times[right_idx] - x_target[target_indices]
-                        )
-                        nearest_idx = np.where(
-                            left_dist <= right_dist, left_idx, right_idx
-                        )
-                        batch_out[np.ix_(target_indices, local_cols)] = valid_values[
-                            nearest_idx
-                        ]
-                        continue
+    centre = geographic_crs.transform_points(rotated_crs, rlon_grid, rlat_grid)
+    # A central difference of 1e-3 rotated degrees (~100 m) along rotated east
+    step_deg = 1e-3
+    west = geographic_crs.transform_points(rotated_crs, rlon_grid - step_deg, rlat_grid)
+    east = geographic_crs.transform_points(rotated_crs, rlon_grid + step_deg, rlat_grid)
+    dlon_deg = ((east[..., 0] - west[..., 0] + 180.0) % 360.0) - 180.0
+    mid_lat_rad = np.radians((east[..., 1] + west[..., 1]) / 2.0)
+    d_east = np.radians(dlon_deg) * np.cos(mid_lat_rad)
+    d_north = np.radians(east[..., 1] - west[..., 1])
+    angle = np.arctan2(d_north, d_east)
 
-                    insert_at = np.searchsorted(
-                        valid_times, x_target[target_indices], side="right"
-                    )
-                    left_idx = np.clip(insert_at - 1, 0, len(valid_times) - 2)
-                    right_idx = left_idx + 1
-                    left_times = valid_times[left_idx]
-                    right_times = valid_times[right_idx]
-                    weights = (x_target[target_indices] - left_times) / (
-                        right_times - left_times
-                    )
-                    interp_values = (1 - weights[:, None]) * valid_values[
-                        left_idx
-                    ] + weights[:, None] * valid_values[right_idx]
-                    batch_out[np.ix_(target_indices, local_cols)] = interp_values
-
-        return out
-
-    chunks = (arr.chunks[0], (len(x_target),), arr.chunks[2], arr.chunks[3])
-    return arr.map_blocks(interp_block, dtype=dtype, chunks=chunks)
+    return centre[..., 1], centre[..., 0], angle
 
 
 def interp_time_take_blend(
@@ -1166,6 +1817,7 @@ def interp_time_take_blend(
     dtype: str = "float32",
     fill_value: float = np.nan,
     time_axis: int = 1,
+    direction_vars: int | Iterable[int] | None = None,  # var indices in degrees
 ) -> da.Array:
     r"""Interpolate model data along the time dimension via gather-and-blend.
 
@@ -1191,6 +1843,10 @@ def interp_time_take_blend(
         dtype: Output dtype for the interpolated array.
         fill_value: Value used for times outside the available range.
         time_axis: Axis index for time (must be 1 in this helper).
+        direction_vars: Optional variable indices holding directions in degrees,
+            blended along the shorter way round the circle: halfway between 350
+            and 10 is 0, where a linear blend gives 180. Directions that do not
+            cross north blend as before. Output is in 0 to 360.
 
     Returns:
         A dask array shaped \(V, T_new, Y, X\) with interpolated (or overridden)
@@ -1233,7 +1889,9 @@ def interp_time_take_blend(
     y1 = da.take(arr_t, idx1, axis=TAX)
 
     # Weighted blend
-    w_r = da.asarray(w, chunks=(T_new,))[None, :, None, None]
+    # In the data's dtype: float64 weights would promote every float32 value to
+    # float64, doubling the temporary memory, only to cast back afterwards.
+    w_r = da.asarray(w.astype(arr.dtype), chunks=(T_new,))[None, :, None, None]
     out = (1 - w_r) * y0 + w_r * y1
     out = out.astype(dtype, copy=False)
 
@@ -1242,32 +1900,46 @@ def interp_time_take_blend(
         valid_r = da.asarray(valid, chunks=(T_new,))[None, :, None, None]
         out = da.where(valid_r, out, fill_value)
 
+    # Variables replaced after the blend: {variable index: (1, T_new, Y, X) array}
+    overrides = {}
+
+    if direction_vars is not None:
+        if isinstance(direction_vars, int):
+            direction_vars = [direction_vars]
+        for i in {int(i) for i in direction_vars}:
+            start = y0[i : i + 1]
+            shortest_arc = ((y1[i : i + 1] - start + 180.0) % 360.0) - 180.0
+            direction = (start + w_r * shortest_arc) % 360.0
+            if (~valid).any():
+                direction = da.where(valid_r, direction, fill_value)
+            overrides[i] = direction.astype(dtype, copy=False)
+
     # Optional nearest-neighbor override for specified variable indices
     if nearest_vars is not None:
         # Precompute nearest indices once: closer of idx0 / idx1
         nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
 
-        # Normalize indices as a sorted, unique list
         if isinstance(nearest_vars, int):
             nearest_vars = [nearest_vars]
-        nv = sorted({int(i) for i in nearest_vars})
 
         # Compute nearest only for needed variables (cheap if few vars)
         # Shape of each nearest slice: (1, T_new, Y, X)
         take_nn = da.take(arr_t, nearest_idx, axis=TAX)
-        # Replace in 'out' per variable index
+        for i in {int(i) for i in nearest_vars}:
+            overrides[i] = take_nn[i : i + 1].astype(dtype, copy=False)
+
+    # Replace the overridden variables in 'out'
+    if overrides:
         pieces = []
         prev = 0
-        for i in nv:
+        for i in sorted(overrides):
             if i < 0 or i >= arr.shape[VAX]:
                 raise IndexError(
-                    f"nearest_vars index {i} out of range for V={arr.shape[VAX]}"
+                    f"Override variable index {i} out of range for V={arr.shape[VAX]}"
                 )
             if i > prev:
                 pieces.append(out[prev:i])  # unchanged segment
-            pieces.append(
-                take_nn[i : i + 1].astype(dtype, copy=False)
-            )  # nearest segment
+            pieces.append(overrides[i])
             prev = i + 1
         if prev < arr.shape[VAX]:
             pieces.append(out[prev:])
@@ -1389,14 +2061,17 @@ def interpolate_temporal_gaps_efficiently(
     1. Re-chunks data to be contiguous in time ('pencils').
     2. Short-circuits empty (all-NaN) spatial chunks.
     3. Interpolates internal gaps (Linear by default, Nearest for specific vars).
-    4. Extrapolates edges (Nearest neighbor / Forward & Back fill) for ALL vars.
+    4. Extends short edges (Nearest neighbor / Forward & Back fill) for ALL vars.
+
+    Gaps longer than max_gap_hours are genuinely missing and stay NaN, wherever they
+    are, so the API takes those hours from another model.
 
     Args:
         ds_chunked (xr.Dataset): Input dataset. Must be chunked with time as a single chunk.
         nearest_vars (list): List of variable names to use 'nearest' interpolation for
                              (e.g., flags, codes). Default is 'linear' for others.
-        max_gap_hours (int): Max gap size to interpolate internally.
-                             Extrapolation is applied to the ends regardless of gap size.
+        max_gap_hours (int): Longest run of missing hours to fill, inside the series
+                             or at either end; longer gaps stay missing.
         time_dim (str): Name of the time dimension.
 
     Returns:
@@ -1418,16 +2093,29 @@ def interpolate_temporal_gaps_efficiently(
             block, dims=(time_dim, "y", "x"), coords={time_dim: time_coords}
         )
 
-        # 1. Interpolate Internal Gaps
-        # use_coordinate=True ensures we respect actual time steps, not just index count
+        # 1. Interpolate Internal Gaps, leaving gaps longer than max_gap_hours alone.
+        # max_gap is the distance between the valid points either side of a gap, so
+        # N missing hourly steps span N + 1 hours. `limit` would be wrong here: it
+        # fills the first N steps of a gap of any length.
+        max_gap = max_gap_hours + 1
+        if np.issubdtype(time_coords.dtype, np.datetime64):
+            max_gap = np.timedelta64(max_gap, "h")
         filled = da_temp.interpolate_na(
-            dim=time_dim, method=method, limit=max_gap_hours, use_coordinate=True
+            dim=time_dim, method=method, max_gap=max_gap, use_coordinate=True
         )
 
-        # 2. Extrapolate Edges (Nearest Neighbour)
-        # We use ffill (forward) and bfill (backward) to extend the last known
-        # valid value to the start/end of the series.
-        filled = filled.ffill(time_dim).bfill(time_dim)
+        # 2. Extend Short Edges (Nearest Neighbour)
+        # The first and last known values reach the ends of the series if the gap
+        # there is short. Gaps between valid values were dealt with above.
+        valid = da_temp.notnull()
+        before_first = valid.cumsum(time_dim) == 0
+        after_last = (
+            valid.isel({time_dim: slice(None, None, -1)}).cumsum(time_dim) == 0
+        ).isel({time_dim: slice(None, None, -1)})
+        short_edge = (before_first & (before_first.sum(time_dim) <= max_gap_hours)) | (
+            after_last & (after_last.sum(time_dim) <= max_gap_hours)
+        )
+        filled = filled.where(~short_edge, filled.ffill(time_dim).bfill(time_dim))
 
         return filled.values
 
@@ -1456,105 +2144,3 @@ def interpolate_temporal_gaps_efficiently(
 
     # Execute
     return ds_chunked.map(_process_variable)
-
-
-def check_historic_zarr(
-    zarr_path: str,
-    save_type: str,
-    expected_vars: tuple,
-    aws_access_key_id: str = "",
-    aws_secret_access_key: str = "",
-) -> bool:
-    """
-    Validates a historic Zarr store.
-
-    Checks that the store exists, can be opened, contains all expected variables,
-    and that data can be read from the last variable.
-    If the store is invalid, it is deleted along with any corresponding .done file.
-
-    Parameters:
-    - zarr_path (str): Path to the Zarr store.
-    - save_type (str): "S3" or "local" / "Download"
-    - expected_vars (tuple): Tuple of expected variable names.
-    - aws_access_key_id (str): AWS access key for S3.
-    - aws_secret_access_key (str): AWS secret key for S3.
-
-    Returns:
-    - bool: True if the store is valid, False otherwise.
-    """
-    import os
-    import shutil
-    import traceback
-
-    import zarr
-
-    s3 = None
-    try:
-        if save_type == "S3":
-            import s3fs
-
-            s3 = s3fs.S3FileSystem(key=aws_access_key_id, secret=aws_secret_access_key)
-            if not s3.exists(zarr_path):
-                return False
-
-            store = zarr.storage.FsspecStore.from_url(
-                zarr_path,
-                storage_options={
-                    "key": aws_access_key_id,
-                    "secret": aws_secret_access_key,
-                },
-            )
-        else:
-            if not os.path.exists(zarr_path):
-                return False
-
-            store = zarr.storage.LocalStore(zarr_path)
-
-        # Open the zarr group.
-        z = zarr.open(store, mode="r")
-
-        # Check if all expected variables exist
-        store_vars = set(z.keys())
-        expected_set = set(expected_vars)
-        if not expected_set.issubset(store_vars):
-            print(
-                f"Missing variables in {zarr_path}. Expected subset {expected_set}, found {store_vars}"
-            )
-            raise ValueError("Missing variables in Zarr store")
-
-        # Check the last variable has data by reading its last value
-        last_var = expected_vars[-1]
-        _ = z[last_var][-1, -1, -1]
-
-        return True
-
-    except (
-        ValueError,
-        IndexError,
-        KeyError,
-        zarr.errors.GroupNotFoundError,
-        zarr.errors.NodeNotFoundError,
-        zarr.errors.ArrayNotFoundError,
-    ):
-        print(f"### Historic Data Failure for {zarr_path}!")
-        print(traceback.print_exc())
-
-        # Delete the invalid store
-        try:
-            if save_type == "S3":
-                if s3 is not None:
-                    if s3.exists(zarr_path):
-                        s3.rm(zarr_path, recursive=True)
-                    done_file = zarr_path.replace(".zarr", ".done")
-                    if s3.exists(done_file):
-                        s3.rm(done_file)
-            else:
-                if os.path.exists(zarr_path):
-                    shutil.rmtree(zarr_path, ignore_errors=True)
-                done_file = zarr_path.replace(".zarr", ".done")
-                if os.path.exists(done_file):
-                    os.remove(done_file)
-        except OSError as e:
-            print(f"Failed to delete corrupt store {zarr_path}: {e}")
-
-        return False

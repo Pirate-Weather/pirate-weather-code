@@ -8,6 +8,7 @@ dask==2026.8.0
 diskcache==5.6.3
 distributed==2026.8.0
 eccodes==2.47.0
+gcsfs==2026.10.1
 geopandas==1.2.0
 herbie-data==2026.10.0
 metpy==1.7.1
@@ -15,6 +16,7 @@ netCDF4==1.7.5.1.post1
 numba==0.68.1
 numpy==2.5.3
 nwswx==0.1.2
+obstore==0.12.0
 pandas==3.1.0
 pyarrow==26.0.0
 python-dotenv==1.2.4
