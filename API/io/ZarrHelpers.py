@@ -35,12 +35,18 @@ ERA5_CACHE_DIR_DEFAULT = "ERA5_cache"
 # Own ERA5 archive (scripts/build_era5_point_test_store.py). Opened weeks keep
 # their tensorstore handle; shard indexes are held in a shared cache pool, so a
 # repeat read of a week is one ranged GET of 110 KiB (measured 24-29 ms on OVH
-# High Performance storage against 0.6-8 s for Google). A week that is missing is
-# looked up again after ERA5_ARCHIVE_MISSING_RECHECK_S, so newly uploaded weeks
-# are picked up without a restart.
+# High Performance storage against 0.6-8 s for Google).
+# A week is either immutable (final ERA5, cached for good) or versioned behind a
+# pointer (ERA5T and the current, partial week; scripts/era5_archive_daily.py
+# republishes them daily). A versioned week's pointer is re-resolved after
+# ERA5_ARCHIVE_VERSIONED_RECHECK_S and a missing week is looked up again after
+# ERA5_ARCHIVE_MISSING_RECHECK_S, so new data and newly final weeks are picked up
+# without a restart. The daily job keeps the previous version for a day, far
+# longer than a reader can hold a stale pointer.
 ERA5_ARCHIVE_OPEN_WEEKS = 512
 ERA5_ARCHIVE_INDEX_CACHE_BYTES = 256 * 1024**2
-ERA5_ARCHIVE_MISSING_RECHECK_S = 600
+ERA5_ARCHIVE_VERSIONED_RECHECK_S = 300
+ERA5_ARCHIVE_MISSING_RECHECK_S = 300
 
 
 @dataclass
@@ -323,45 +329,97 @@ def init_ERA5_archive() -> dict | None:
     }
 
 
-def _open_era5_archive_week(archive: dict, week_start: str):
-    """``(tensorstore array, attributes)`` for one archive week, or None if the
-    week is not (fully) published or cannot be opened."""
-    import tensorstore as ts
+def _resolve_era5_archive_week(
+    archive: dict, week_start: str
+) -> tuple[str, dict] | None:
+    """``(store path, attributes)`` of the store to read for a week, or None.
 
-    with archive["lock"]:
-        cached = archive["weeks"].get(week_start)
-        if cached is not None:
-            opened, checked_at = cached
-            if (
-                opened is not None
-                or time.monotonic() - checked_at < ERA5_ARCHIVE_MISSING_RECHECK_S
-            ):
-                archive["weeks"].move_to_end(week_start)
-                return opened
+    The immutable ``<week>.zarr`` (final ERA5) wins over the pointer
+    ``<week>.current.json`` (ERA5T or the current partial week), because while a
+    week is being promoted to final both exist. A store counts only once its root
+    ``zarr.json`` exists, which is uploaded last.
+    """
+    import tensorstore as ts
 
     from API.constants.model_const import ERA5_ARCHIVE_STORE_DIR
 
-    week_kvstore = {
-        **archive["kvstore"],
-        "path": f"{archive['kvstore']['path']}{ERA5_ARCHIVE_STORE_DIR}/{week_start}.zarr/",
-    }
-    opened = None
+    root = archive.get("root_kvstore")
+    if root is None:
+        root = ts.KvStore.open(archive["kvstore"], context=archive["context"]).result()
+        archive["root_kvstore"] = root
+    immutable = f"{ERA5_ARCHIVE_STORE_DIR}/{week_start}.zarr"
+    metadata = root.read(f"{immutable}/zarr.json").result()
+    if metadata.state == "value":
+        return immutable, json.loads(bytes(metadata.value))["attributes"]
+    pointer = root.read(f"{ERA5_ARCHIVE_STORE_DIR}/{week_start}.current.json").result()
+    if pointer.state != "value":
+        return None
+    version = json.loads(bytes(pointer.value))["store"]
+    metadata = root.read(f"{version}/zarr.json").result()
+    if metadata.state != "value":
+        return None  # pointer written before its store: never, but read as missing
+    return version, json.loads(bytes(metadata.value))["attributes"]
+
+
+def _open_era5_archive_week(archive: dict, week_start: str):
+    """``(tensorstore array, attributes, store path)`` for one archive week, or
+    None if the week is not published or cannot be opened.
+
+    Immutable weeks are cached for good. A versioned week is re-resolved after
+    ``ERA5_ARCHIVE_VERSIONED_RECHECK_S``: the open handle is kept while its
+    pointer names the same version and replaced when the pointer moves, so a
+    store never changes under a reader. A failed lookup keeps a cached version
+    in use rather than dropping to Google.
+    """
+    import tensorstore as ts
+
+    from API.constants.model_const import ERA5_ARCHIVE_STORE_DIR
+
+    now = time.monotonic()
+    with archive["lock"]:
+        cached = archive["weeks"].get(week_start)
+    if cached is not None:
+        opened, checked_at = cached
+        if opened is None:
+            fresh = now - checked_at < ERA5_ARCHIVE_MISSING_RECHECK_S
+        elif opened[2] == f"{ERA5_ARCHIVE_STORE_DIR}/{week_start}.zarr":
+            fresh = True  # immutable
+        else:
+            fresh = now - checked_at < ERA5_ARCHIVE_VERSIONED_RECHECK_S
+        if fresh:
+            with archive["lock"]:
+                if week_start in archive["weeks"]:
+                    archive["weeks"].move_to_end(week_start)
+            return opened
+    previous = cached[0] if cached is not None else None
+
     try:
-        # The root zarr.json is uploaded last, so its presence means the week is complete.
-        kvstore = ts.KvStore.open(week_kvstore, context=archive["context"]).result()
-        metadata = kvstore.read("zarr.json").result()
-        if metadata.state == "value":
-            attributes = json.loads(bytes(metadata.value))["attributes"]
+        resolved = _resolve_era5_archive_week(archive, week_start)
+        if resolved is None:
+            opened = None
+        elif previous is not None and previous[2] == resolved[0]:
+            opened = previous  # pointer unchanged: keep the open handle
+        else:
+            store_path, attributes = resolved
+            store_kvstore = {
+                **archive["kvstore"],
+                "path": f"{archive['kvstore']['path']}{store_path}/",
+            }
             array = ts.open(
-                {"driver": "zarr3", "kvstore": week_kvstore},
+                {"driver": "zarr3", "kvstore": store_kvstore},
                 read=True,
                 context=archive["context"],
             ).result()
-            opened = (array, attributes)
+            opened = (array, attributes, store_path)
+            if previous is not None:
+                logger.info("ERA5 archive week %s now reads %s", week_start, store_path)
     except (
         ValueError
     ) as exc:  # tensorstore reports I/O and metadata errors as ValueError
-        logger.warning("ERA5 archive week %s could not be opened: %s", week_start, exc)
+        logger.warning(
+            "ERA5 archive week %s could not be resolved: %s", week_start, exc
+        )
+        opened = previous
 
     with archive["lock"]:
         archive["weeks"][week_start] = (opened, time.monotonic())
@@ -369,6 +427,13 @@ def _open_era5_archive_week(archive: dict, week_start: str):
         while len(archive["weeks"]) > ERA5_ARCHIVE_OPEN_WEEKS:
             archive["weeks"].popitem(last=False)
     return opened
+
+
+def _forget_era5_archive_week(archive: dict, week_start: str) -> None:
+    """Drop a week from the cache so the next request resolves it again (after a
+    read failed, e.g. because the version it pointed at was deleted)."""
+    with archive["lock"]:
+        archive["weeks"].pop(week_start, None)
 
 
 def _era5_archive_cell(attributes: dict, lat: float, lon: float) -> tuple[int, int]:
@@ -419,16 +484,22 @@ def read_era5_archive_point(
         opened = _open_era5_archive_week(archive, week_start)
         if opened is None:
             return None
-        array, attributes = opened
+        array, attributes, _ = opened
         in_week = (
             hours[hours // ERA5_ARCHIVE_WEEK_HOURS == week]
             - week * ERA5_ARCHIVE_WEEK_HOURS
         )
+        # The current week is published partial; hours past its last one are fill.
+        last_needed = int(np.asarray(attributes["time"], dtype=np.int64)[in_week[-1]])
+        if last_needed > attributes.get("complete_through", last_needed):
+            return None
         y, x = _era5_archive_cell(attributes, lat, lon)
         try:
             columns = array[:, : int(in_week[-1]) + 1, y, x].read().result()
         except ValueError as exc:
+            # Most likely a version deleted under a stale handle: resolve again next time.
             logger.warning("ERA5 archive week %s read failed: %s", week_start, exc)
+            _forget_era5_archive_week(archive, week_start)
             return None
         decoded = decode_era5_archive(columns, attributes)[:, in_week]
 
@@ -445,7 +516,13 @@ def read_era5_archive_point(
                 continue  # stored for later use (direct solar, cloud base)
             week_rows[:, ERA5[sources[0]]] = decoded[i] / factor
             filled.update(ERA5[source] for source in sources)
-        if filled != set(range(week_rows.shape[1])) or np.isnan(week_rows).any():
+        if filled != set(range(week_rows.shape[1])):
+            return None  # a store without a variable the API needs
+        if np.isnan(week_rows).any():
+            # Hours the store says it has came back as fill: its shards are gone
+            # (tensorstore reads a deleted shard as fill, not an error). Resolve
+            # the week again on the next request.
+            _forget_era5_archive_week(archive, week_start)
             return None
         rows.append(week_rows)
     return np.concatenate(rows)

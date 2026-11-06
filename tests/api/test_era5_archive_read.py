@@ -1,6 +1,8 @@
 """ERA5 read path: own archive first, Google ERA5 for anything it does not have."""
 
 import datetime
+import json
+import shutil
 
 import numpy as np
 import xarray as xr
@@ -82,24 +84,30 @@ def _encode(name, values):
     return encoded
 
 
-def _write_week(root, week_start, google, hour0):
+def _write_week(root, week_start, google, hour0, store=None, hours=WEEK_HOURS):
     """Write one archive week from the Google-unit fields in the builder's layout:
     int16 (variable, time, y, x), every variable and hour per chunk, sharded,
-    Blosc zstd bitshuffle, with the encoding in the attributes."""
+    Blosc zstd bitshuffle, with the encoding in the attributes. ``store`` is the
+    path under the archive root (default the immutable ``<week>.zarr``); a week
+    with fewer ``hours`` is partial, as the daily job publishes the current week.
+    """
     variables = sorted(ERA5_ARCHIVE, key=ERA5_ARCHIVE.get)
-    stacked = np.empty((len(variables), WEEK_HOURS, N_LAT, N_LON), np.int16)
-    week = slice(hour0, hour0 + WEEK_HOURS)
+    stacked = np.full(
+        (len(variables), WEEK_HOURS, N_LAT, N_LON), ERA5_ARCHIVE_FILL, np.int16
+    )
+    week = slice(hour0, hour0 + hours)
     for i, name in enumerate(variables):
         if name == "precipitation_probability":
             values = 100 * (google["total_precipitation"][week] > 1e-4).astype(float)
         else:
             sources, factor = ERA5_ARCHIVE_SOURCES[name]
             values = sum(google[source][week] for source in sources) * factor
-        stacked[i] = _encode(name, values.astype(np.float32))
+        stacked[i, :hours] = _encode(name, values.astype(np.float32))
     times = (week_start + np.arange(WEEK_HOURS).astype("timedelta64[h]")).astype(
         "datetime64[s]"
     )
-    path = root / ERA5_ARCHIVE_STORE_DIR / f"{week_start.astype('datetime64[D]')}.zarr"
+    week_name = str(week_start.astype("datetime64[D]"))
+    path = root / (store or f"{ERA5_ARCHIVE_STORE_DIR}/{week_name}.zarr")
     array = zarr.create_array(
         store=zarr.storage.LocalStore(str(path)),
         shape=stacked.shape,
@@ -117,6 +125,7 @@ def _write_week(root, week_start, google, hour0):
             "delta_variables": list(ERA5_ARCHIVE_DELTA_VARS),
             "nan_variables": list(ERA5_ARCHIVE_NAN_VARS),
             "fill_value": ERA5_ARCHIVE_FILL,
+            "complete_through": int(times[hours - 1].astype(np.int64)),
             "latitude_first": float(LATS[0]),
             "longitude_first": float(LONS[0]),
             "grid_step": STEP,
@@ -125,6 +134,17 @@ def _write_week(root, week_start, google, hour0):
         },
     )
     array[:] = stacked
+
+
+def _publish_version(root, week_start, google, hour0, stamp, hours):
+    """A new version of a changing week and the pointer to it, as publish_store
+    does: the store first, then the pointer."""
+    week_name = str(week_start.astype("datetime64[D]"))
+    store = f"{ERA5_ARCHIVE_STORE_DIR}/{week_name}/{stamp}.zarr"
+    _write_week(root, week_start, google, hour0, store=store, hours=hours)
+    pointer = root / ERA5_ARCHIVE_STORE_DIR / f"{week_name}.current.json"
+    pointer.write_text(json.dumps({"store": store, "run_time": None}))
+    return store
 
 
 def _era5_data(google, times, archive):
@@ -222,3 +242,67 @@ def test_era5_reads_archive_first_and_falls_back_to_google(tmp_path, monkeypatch
             np.argmin(np.abs(lats - p_lat)),
             np.argmin(np.abs(lons - p_lon)),
         ), (p_lat, p_lon)
+
+
+def test_era5_reader_follows_daily_updates_without_restart(tmp_path, monkeypatch):
+    """Protect the reader against the daily job's updates: a partial week serves
+    the hours it has and sends later hours to Google; a republished version is
+    picked up at the next re-check without a restart and without reading a store
+    that changes under it; a version deleted under an open handle costs one Google
+    fallback, not an error or bad data; and a week promoted to final ERA5 switches
+    to the immutable store even while its pointer still exists.
+    """
+    from API.io import ZarrHelpers
+
+    rng = np.random.default_rng(7)
+    times = WEEK_A + np.arange(2 * WEEK_HOURS).astype("timedelta64[h]")
+    google = _google_fields(rng, times)
+    monkeypatch.setenv("ERA5_ARCHIVE", str(tmp_path))
+    archive = init_ERA5_archive()
+    data = _era5_data(google, times, archive)
+    lat, lon, week = 89.0, 1.3, "2015-06-29"
+    y, x = np.argmin(np.abs(LATS - lat)), np.argmin(np.abs(LONS - lon))
+    monday = datetime.datetime(2015, 6, 29, 0, tzinfo=datetime.UTC)  # hours 0-24
+    tuesday = datetime.datetime(2015, 6, 30, 0, tzinfo=datetime.UTC)  # hours 24-48
+
+    def read(base):
+        rows = _load_era5_slice(data, lat, lon, base, 25)
+        from_archive = not np.any(rows[:, ERA5["2m_temperature"]] == GOOGLE_MARKER_K)
+        return rows, from_archive
+
+    def store_in_use():
+        return archive["weeks"][week][0][2]
+
+    # The first daily run published 30 hours of the week.
+    v1 = _publish_version(tmp_path, WEEK_A, google, 0, "20150701T000000Z", 30)
+    assert read(monday)[1]
+    # Hours past the partial week's last one come from Google, not from fill.
+    assert not read(tuesday)[1]
+
+    # The next run publishes the whole week. Readers keep the open version until
+    # their re-check, then move to the new one.
+    v2 = _publish_version(tmp_path, WEEK_A, google, 0, "20150708T000000Z", WEEK_HOURS)
+    assert not read(tuesday)[1] and store_in_use() == v1
+    monkeypatch.setattr(ZarrHelpers, "ERA5_ARCHIVE_VERSIONED_RECHECK_S", 0)
+    rows, from_archive = read(tuesday)
+    assert from_archive and store_in_use() == v2
+    np.testing.assert_allclose(
+        rows[:, ERA5["2m_temperature"]],
+        google["2m_temperature"][24:49, y, x],
+        atol=0.051,
+    )
+
+    # A version deleted under an open handle: one Google fallback, then forgotten.
+    monkeypatch.setattr(ZarrHelpers, "ERA5_ARCHIVE_VERSIONED_RECHECK_S", 3600)
+    shutil.rmtree(tmp_path / v2)
+    assert not read(tuesday)[1]
+    assert week not in archive["weeks"]
+
+    # Final ERA5 arrives: the immutable store wins while the pointer still exists,
+    # and stays in use after the pointer and the old versions are deleted.
+    _write_week(tmp_path, WEEK_A, google, 0)
+    assert read(tuesday)[1]
+    assert store_in_use() == f"{ERA5_ARCHIVE_STORE_DIR}/{week}.zarr"
+    (tmp_path / ERA5_ARCHIVE_STORE_DIR / f"{week}.current.json").unlink()
+    shutil.rmtree(tmp_path / v1)
+    assert read(monday)[1] and read(tuesday)[1]

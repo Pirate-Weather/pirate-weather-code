@@ -7,8 +7,10 @@ rerun resumes where a stopped one left off. A failed week is retried
 ``ATTEMPTS`` times; the others carry on, and the exit status is 1 if any week
 still failed. Each week's local store is deleted once it is published.
 
-Only complete weeks are built: the last one ends on or before ``--end`` (Google
-ERA5 ends at ``valid_time_stop_era5t``, about 5 days behind real time).
+Only complete weeks of final ERA5 are built here, as immutable stores: keep
+``--end`` at or before Google's ``valid_time_stop`` (about 3 months behind). Newer
+weeks (ERA5T, and the current partial week) change, so
+``scripts/era5_archive_daily.py`` publishes them as versioned stores.
 
 Usage:
     python scripts/backfill_era5_archive.py --start 2020-01-01 --end 2026-10-29 \\
@@ -66,9 +68,10 @@ def week_starts(start: dt.date, end: dt.date) -> list[dt.date]:
 
 
 def build_week(
-    week: dt.date, work: Path, upload: str, log_dir: Path
+    week: dt.date, work: Path, upload: str, log_dir: Path, publish: str = "immutable"
 ) -> tuple[dt.date, bool, float]:
-    """Build and publish one week; returns (week, succeeded, seconds)."""
+    """Build and publish one week (``publish``: immutable or versioned, see the
+    builder); returns (week, succeeded, seconds)."""
     out = work / week.isoformat()
     log_path = log_dir / f"{week.isoformat()}.log"
     t0 = time.perf_counter()
@@ -89,6 +92,8 @@ def build_week(
                         week.isoformat(),
                         "--upload",
                         upload,
+                        "--publish",
+                        publish,
                     ],
                     stdout=log,
                     stderr=subprocess.STDOUT,

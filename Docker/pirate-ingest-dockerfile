@@ -163,5 +163,9 @@ RUN python3 -m pip install --upgrade pip && \
 # ----------------------------------------------------------------------
 COPY API /app/API
 COPY ingest /app/ingest
+# ERA5 archive jobs (ingest-era5-daily runs era5_archive_daily.py, which runs the
+# builder per week); the rest of scripts/ is development tooling.
+COPY scripts/era5_archive_daily.py scripts/backfill_era5_archive.py \
+     scripts/build_era5_point_test_store.py /app/scripts/
 
 ENTRYPOINT ["python3"]

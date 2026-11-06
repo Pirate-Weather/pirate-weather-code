@@ -77,8 +77,18 @@ precipitation, radiation, cloud base) are missing for 1940-01-01 00-06 UTC.
 Source quirks met: Google stalled for minutes once (one week hung; hence the per-week
 timeout), and ERA5 has spurious CAPE spikes over steep terrain (up to ~2e6 J/kg in the
 Andes), now capped at 20,000 J/kg (101 weeks before 2000 and a few after).
-Still to do: rebuild the 17 ERA5T weeks (2026-06-29 onward, attribute `era5t`) once
-Google's final ERA5 covers them, and add weekly appends for new ERA5T weeks.
+Daily updates: `scripts/era5_archive_daily.py` (CronJob `ingest-era5-daily`, in the
+RBX workloads values, suspended until deployed). Final weeks are immutable
+`<week>.zarr`; ERA5T weeks and the current partial week are versioned behind
+`<week>.current.json` and republished when Google has more; weeks move to final ERA5
+when Google's does. Readers re-resolve changing weeks every 5 minutes and never read a
+store that changes under them. Its first run converts the 17 ERA5T weeks the backfill
+wrote as immutable stores (2026-06-29 onward) to versions (dry run, 2026-11-06: 18
+versioned builds, ~45 min). Tested live on a test prefix (2026-11-06): 3 weeks in 169
+s, a second run did nothing, and a reader kept serving through a republish and moved
+to the new version at its re-check.
+To do: deploy it (image with `scripts/`, unsuspend the CronJob); alert if Google's
+ERA5T end stops moving (the job exits 1 after 10 days).
 
 ### ERA5: tune rounding and compression for storage cost
 The one-week test store (`scripts/build_era5_point_test_store.py`, 2015-06-29, 18
