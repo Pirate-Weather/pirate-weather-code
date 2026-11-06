@@ -240,9 +240,6 @@ file. Measure on a mounted share: publishing the real HRRR store and copying it
 down to local disk (files/s, IOPS used, wall time), then size IOPS from those.
 
 ### Remaining storage clean-up
-- Re-publish the static `ETOPO_DA_C` store as a zarr v3 directory on the remote
-  (`API/store_sync.py` copies `ETOPO_DA_C.zarr/` once; the API opens it with
-  tensorstore, zarr v3 or v2).
 - Re-publish the static developer snapshot linked from `README.md` in the
   sharded, versioned layout.
 - Expire old history stores on the remote (nothing deletes them).

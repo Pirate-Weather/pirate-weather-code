@@ -146,3 +146,36 @@ def test_old_version_is_kept_until_readers_move_on(tmp_path, monkeypatch):
         if remote_object_exists(remote, prefix.rstrip("/") + "/zarr.json")
     )
     assert published == [second, third]
+
+
+def test_etopo_is_on_disk_before_the_last_store_pointer(tmp_path, monkeypatch):
+    """Workers open ETOPO only at startup, and the OVH chart starts them once the
+    WMO_Alerts pointer exists. If the sync copied ETOPO after that pointer, a new
+    node would report elevation 0 until its workers next restarted.
+    """
+    remote_dir = tmp_path / "remote"
+    etopo_dir = remote_dir / f"{store_reader.ETOPO_STORE_NAME}.zarr"
+    etopo_dir.mkdir(parents=True)
+    (etopo_dir / "zarr.json").write_text("{}")
+    api_dir = tmp_path / "api"
+    api_dir.mkdir()
+
+    etopo_present_at_last_pointer = []
+
+    def record_store(remote, name, base_dir):
+        if name == store_sync.STORE_NAMES[-1]:
+            etopo_present_at_last_pointer.append(
+                os.path.exists(
+                    os.path.join(
+                        base_dir, f"{store_reader.ETOPO_STORE_NAME}.zarr", "zarr.json"
+                    )
+                )
+            )
+        return True
+
+    monkeypatch.setattr(store_sync, "sync_store", record_store)
+    remote = obstore.store.LocalStore(str(remote_dir))
+    store_sync.sync_once(remote, str(api_dir))
+
+    assert store_sync.STORE_NAMES[-1] == "WMO_Alerts"
+    assert etopo_present_at_last_pointer == [True]

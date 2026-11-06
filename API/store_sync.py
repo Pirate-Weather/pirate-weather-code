@@ -167,7 +167,9 @@ def sync_static_store(remote, name: str, base_dir: str) -> bool:
     keys = [
         meta["path"] for batch in obstore.list(remote, prefix=prefix) for meta in batch
     ]
-    if not keys:
+    # The metadata is uploaded last. This store is copied only once, so a copy of
+    # a half-finished upload would stay on this node for good.
+    if f"{prefix}zarr.json" not in keys:
         logger.warning("Static store %s is not published", name)
         return False
     partial = local_store + ".partial"
@@ -226,11 +228,14 @@ def remove_old_versions(base_dir: str, now: float | None = None) -> None:
 def sync_once(remote, base_dir: str) -> bool:
     """One pass over every store and side file; True if all are current."""
     all_ok = True
+    # Before the model stores: workers open ETOPO once, at startup, and the OVH
+    # chart starts them as soon as the last store's pointer (WMO_Alerts) exists.
+    # Copied after it, a new node would serve elevation 0 until its next restart.
+    all_ok &= sync_static_store(remote, ETOPO_STORE_NAME, base_dir)
     for name in STORE_NAMES:
         all_ok &= sync_store(remote, name, base_dir)
     for name in SUPPORT_FILES:
         all_ok &= sync_file(remote, name, base_dir)
-    all_ok &= sync_static_store(remote, ETOPO_STORE_NAME, base_dir)
     remove_old_versions(base_dir)
     return all_ok
 
