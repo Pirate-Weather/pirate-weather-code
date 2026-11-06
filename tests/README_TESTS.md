@@ -45,12 +45,13 @@ PW_RUN_LIVE_TESTS=1 python -m pytest tests/live
     quota exceeded".
 - **Credentials:** taken from the environment, falling back to a repository-root
   `.env`, which is only read for live runs. Supported keys: `PW_API`, `AWS_KEY`,
-  `AWS_SECRET`, `GRIBSTREAM_API_KEY` and `s3_bucket`. A test whose data or
+  `AWS_SECRET`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `GRIBSTREAM_API_KEY`,
+  `REMOTE_PATH`, `s3_bucket`, `s3_endpoint` and `s3_region`. A test whose data or
   credentials are missing skips with a reason; run with `-rs` to see them.
 
 | Variable | Needed by |
 |---|---|
-| `PW_API` | everything that uses `live_client` (S3 proxy and production API) |
+| `PW_API` | everything that uses `live_client` (the key in request paths, and the production API) |
 | `GRIBSTREAM_API_KEY` | the four GribStream comparisons |
 | `PW_URMA_DATA_DIR` (default `/mnt/nvme/data/ProdSync`) | `test_compare_urma_gribstream.py`: local `URMA_Hist.zarr` + `GFS.zarr` |
 | `PW_URMA_OUTPUT_ROOT` (default `/mnt/nvme/data/Prod/URMA`) | `test_urma_output_live.py`: output of a local URMA ingest |
