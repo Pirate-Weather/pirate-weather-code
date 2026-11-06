@@ -17,9 +17,9 @@ import sys
 import threading
 from contextlib import asynccontextmanager
 
-import aiobotocore.session as _aio_session
 import numpy as np
 import orjson
+import tensorstore as ts
 from astral import LocationInfo, moon
 from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
@@ -78,8 +78,7 @@ from API.forecast_sources import (
     merge_hourly_models,
 )
 from API.hourly.block import build_hourly_block
-from API.io.store_reader import load_stores, watch_stores
-from API.io.ZarrHelpers import _add_custom_header
+from API.io.store_reader import load_stores, remote_store_root, watch_stores
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -108,7 +107,6 @@ s3_bucket = os.getenv("s3_bucket", default="piratezarr2")
 ingest_version = INGEST_VERSION_STR
 save_type = os.getenv("save_type", default="S3")
 
-pw_api_key = os.environ.get("PW_API", "")
 save_dir = os.getenv("save_dir", default="/tmp")
 use_etopo = str(os.getenv("use_etopo", "True")).lower() not in {"0", "false", "no"}
 TIMING = str(os.environ.get("TIMING", "0")).lower() not in {"0", "false", "no"}
@@ -170,43 +168,22 @@ app.add_middleware(TimingMiddleware)
 
 # Load DWD MOSMIX station mapping
 try:
-    from API.constants.shared_const import INGEST_VERSION_STR
-
     station_map_file = None
-    ingest_version = INGEST_VERSION_STR
 
     if STAGE in ("DEV", "PROD"):
         station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
-    elif STAGE in ("TESTING", "TM_TESTING"):
-        # For testing stages, try to load from S3 first
+    elif STAGE in ("TESTING", "TM_TESTING") and save_type in ("S3", "S3Zarr"):
+        # The map is optional: without it the DWD MOSMIX source is left out.
         try:
-            import s3fs
-            from botocore.exceptions import BotoCoreError, ClientError
-
-            aio_sess = _aio_session.AioSession()
-            aio_sess.register("before-send.s3", _add_custom_header)
-            s3 = s3fs.S3FileSystem(
-                anon=True,
-                asynchronous=False,
-                endpoint_url="https://api.pirateweather.net/files/",
-                skip_instance_cache=True,
-                session=aio_sess,
-            )
-
-            s3_path = f"s3://ForecastTar_v2/{ingest_version}/DWD_MOSMIX_stations.pickle"
-            if s3.exists(s3_path):
-                with s3.open(s3_path, "rb") as f:
-                    DWD_MOSMIX_Stations = pickle.load(f)
-                    logger.info("Loaded DWD MOSMIX station map from S3")
-        except (
-            ImportError,
-            OSError,
-            pickle.UnpicklingError,
-            EOFError,
-            BotoCoreError,
-            ClientError,
-        ) as e:
-            logger.debug(f"Could not load DWD MOSMIX station map from S3: {e}")
+            kvstore = ts.KvStore.open(remote_store_root().kvstore).result()
+            station_map = kvstore.read("DWD_MOSMIX_stations.pickle").result()
+            if station_map.state == "value":
+                DWD_MOSMIX_Stations = pickle.loads(bytes(station_map.value))
+                logger.info("Loaded DWD MOSMIX station map from S3")
+        except (ValueError, OSError, pickle.UnpicklingError, EOFError) as e:
+            logger.warning("Could not load DWD MOSMIX station map from S3: %s", e)
+    elif STAGE in ("TESTING", "TM_TESTING"):
+        station_map_file = os.path.join(s3_bucket, "DWD_MOSMIX_stations.pickle")
 
     if station_map_file and os.path.exists(station_map_file):
         with open(station_map_file, "rb") as f:

@@ -47,10 +47,6 @@ STORE_POLL_SECONDS = float(os.getenv("STORE_POLL_SECONDS", "10"))
 # container on the same volume) can see which versions are still open.
 READERS_DIR_NAME = ".readers"
 
-# The public, S3-compatible files endpoint the TESTING stages read through.
-REMOTE_FILES_URL = "https://api.pirateweather.net/files/"
-pw_api_key = os.environ.get("PW_API", "")
-
 # One tensorstore context per worker, shared by every store. The cache pool
 # keeps the shard indexes (~35 MB for all stores) and hot chunks decoded;
 # recheck_cached_data="open" (set at open) trusts that cache because a version
@@ -308,29 +304,33 @@ def local_store_root(save_dir: str) -> StoreRoot:
     return StoreRoot(kvstore={"driver": "file", "path": path + "/"}, local_dir=path)
 
 
-def remote_store_root(save_type: str, s3_bucket: str) -> StoreRoot:
-    """The published stores on S3: through the public files endpoint with the
-    API key ("S3"), or straight from the bucket with AWS credentials from the
-    environment ("S3Zarr")."""
-    prefix = f"ForecastTar_v2/{INGEST_VERSION_STR}/"
-    if save_type == "S3":
-        headers = {"apikey": pw_api_key}
-        return StoreRoot(
-            kvstore={
-                "driver": "http",
-                "base_url": REMOTE_FILES_URL + prefix,
-                "headers": [f"{name}: {value}" for name, value in headers.items()],
-            },
-            alert_url=REMOTE_FILES_URL + prefix,
-            alert_storage_options={"client_kwargs": {"headers": headers}},
-        )
-    kvstore = {"driver": "s3", "bucket": s3_bucket, "path": prefix}
-    if os.getenv("s3_endpoint"):
-        kvstore["endpoint"] = os.environ["s3_endpoint"]
+def remote_store_root() -> StoreRoot:
+    """The published stores, read straight from the bucket.
+
+    ``REMOTE_PATH`` is the ``bucket/prefix`` the ingests publish to, as for
+    ``store_sync``. ``s3_endpoint`` and ``s3_region`` select a non-AWS store such
+    as OVH; credentials come from the usual AWS environment variables.
+    """
+    remote_path = os.getenv(
+        "REMOTE_PATH", f"piratezarr2/ForecastTar_v2/{INGEST_VERSION_STR}"
+    )
+    bucket, _, prefix = remote_path.strip("/").partition("/")
+    prefix = f"{prefix}/" if prefix else ""
+
+    kvstore = {"driver": "s3", "bucket": bucket, "path": prefix}
+    client_kwargs = {}
+    endpoint = os.getenv("s3_endpoint")
+    region = os.getenv("s3_region")
+    if endpoint:
+        kvstore["endpoint"] = endpoint
+        client_kwargs["endpoint_url"] = endpoint
+    if region:
+        kvstore["aws_region"] = region
+        client_kwargs["region_name"] = region
     return StoreRoot(
         kvstore=kvstore,
-        alert_url=f"s3://{s3_bucket}/{prefix}",
-        alert_storage_options={"anon": False},
+        alert_url=f"s3://{bucket}/{prefix}",
+        alert_storage_options={"anon": False, "client_kwargs": client_kwargs},
     )
 
 
@@ -520,7 +520,7 @@ async def load_stores(
     logger = logger or _default_logger()
     stores = ZarrStores()
     if stage in ("TESTING", "TM_TESTING") and save_type in ("S3", "S3Zarr"):
-        root = remote_store_root(save_type, s3_bucket)
+        root = remote_store_root()
     elif stage in ("TESTING", "TM_TESTING"):
         root = local_store_root(s3_bucket)
     else:

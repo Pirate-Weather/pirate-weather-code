@@ -25,7 +25,6 @@ from zarr.storage import FsspecStore
 
 logger = logging.getLogger(__name__)
 
-pw_api_key = os.environ.get("PW_API", "")
 
 ERA5_ZARR_URL = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
 ERA5_DASK_CHUNKS = {"time": 24}
@@ -211,10 +210,6 @@ def _get_era5_cache_max_size() -> int:
     except ValueError:
         return ERA5_CACHE_MAX_SIZE
     return max_size if max_size > 0 else ERA5_CACHE_MAX_SIZE
-
-
-def _add_custom_header(request, **kwargs):
-    request.headers["apikey"] = pw_api_key
 
 
 # Function to initialize in ERA5 xarray dataset

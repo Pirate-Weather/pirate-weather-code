@@ -23,7 +23,18 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUN_LIVE_ENV_VAR = "PW_RUN_LIVE_TESTS"
 _ENV_FILE_KEYS = frozenset(
-    {"PW_API", "AWS_KEY", "AWS_SECRET", "GRIBSTREAM_API_KEY", "s3_bucket"}
+    {
+        "PW_API",
+        "AWS_KEY",
+        "AWS_SECRET",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "GRIBSTREAM_API_KEY",
+        "REMOTE_PATH",
+        "s3_bucket",
+        "s3_endpoint",
+        "s3_region",
+    }
 )
 
 
@@ -64,7 +75,7 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture(scope="session")
 def pw_api_key() -> str:
-    """Return the Pirate Weather API key used for the S3 proxy and production API."""
+    """Return the Pirate Weather API key used in request paths and for the production API."""
     key = os.environ.get("PW_API")
     if not key:
         pytest.skip("PW_API is not set")
