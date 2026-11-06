@@ -151,10 +151,10 @@ _CURRENTLY_ORDER_CANADA = [
     "nbm",
     "hrrr",
     "ecmwf_ifs",
+    "era5",
     "gfs",
     "gefs",
     "dwd_mosmix",
-    "era5",
 ]
 _CURRENTLY_ORDER_NA = [
     "rtma_ru",
@@ -162,12 +162,12 @@ _CURRENTLY_ORDER_NA = [
     "nbm",
     "hrrr",
     "ecmwf_ifs",
+    "era5",
     "gfs",
     "gefs",
     "gdps",
     "geps",
     "dwd_mosmix",
-    "era5",
     "hrdps",
     "reps",
 ]
@@ -178,11 +178,11 @@ _CURRENTLY_ORDER_ROW = [
     "hrrr",
     "dwd_mosmix",
     "ecmwf_ifs",
+    "era5",
     "gfs",
     "gefs",
     "gdps",
     "geps",
-    "era5",
     "hrdps",
     "reps",
 ]
@@ -969,22 +969,30 @@ def _get_intensity(
             * state.fac2
         ) * 3600
 
-        snow_intensity = estimate_snow_height(
-            np.array([era5_current_snow_we]),
-            np.array([InterPcurrent[DATA_CURRENT["temp"]]]),
-            np.array([InterPcurrent[DATA_CURRENT["wind"]]]),
-        )[0]
-
-        return intensity, rain_intensity, snow_intensity, 0, MISSING_DATA, MISSING_DATA
-    else:
-        return (
-            InterPminute[0, DATA_MINUTELY["intensity"]],
-            InterPminute[0, DATA_MINUTELY["rain_intensity"]],
-            InterPminute[0, DATA_MINUTELY["snow_intensity"]],
-            InterPminute[0, DATA_MINUTELY["ice_intensity"]],
-            InterPminute[0, DATA_MINUTELY["prob"]],
-            InterPminute[0, DATA_MINUTELY["error"]],
-        )
+        # A time-machine hour ERA5 doesn't have yet (NaN) falls through to the
+        # other sources (GFS history) below.
+        if np.isfinite(intensity):
+            snow_intensity = estimate_snow_height(
+                np.array([era5_current_snow_we]),
+                np.array([InterPcurrent[DATA_CURRENT["temp"]]]),
+                np.array([InterPcurrent[DATA_CURRENT["wind"]]]),
+            )[0]
+            return (
+                intensity,
+                rain_intensity,
+                snow_intensity,
+                0,
+                MISSING_DATA,
+                MISSING_DATA,
+            )
+    return (
+        InterPminute[0, DATA_MINUTELY["intensity"]],
+        InterPminute[0, DATA_MINUTELY["rain_intensity"]],
+        InterPminute[0, DATA_MINUTELY["snow_intensity"]],
+        InterPminute[0, DATA_MINUTELY["ice_intensity"]],
+        InterPminute[0, DATA_MINUTELY["prob"]],
+        InterPminute[0, DATA_MINUTELY["error"]],
+    )
 
 
 def _get_bearing(
@@ -1271,25 +1279,21 @@ def _get_station_pressure(sourceList, model_data, state: InterpolationState):
         Current station pressure.
     """
     val = MISSING_DATA
-    if "urma" in sourceList:
-        val = _interp_scalar(model_data["URMA_Merged"], URMA["pressure"], state)
+    if "rtma_ru" in sourceList and "urma" not in sourceList:
+        val = model_data["dataOut_rtma_ru"][0, RTMA_RU["pressure"]]
+    else:
+        # URMA, then ERA5 ahead of GFS, each filling what the one before lacks
+        # (in time machine, an hour ERA5 doesn't have yet falls to GFS history).
+        if "urma" in sourceList:
+            val = _interp_scalar(model_data["URMA_Merged"], URMA["pressure"], state)
+        if not np.isfinite(val) and "era5" in sourceList:
+            val = _interp_scalar(
+                model_data["ERA5_MERGED"], ERA5["surface_pressure"], state
+            )
         if not np.isfinite(val) and "gfs" in sourceList:
             val = _interp_scalar(
                 model_data["GFS_Merged"], GFS["station_pressure"], state
             )
-    elif "rtma_ru" in sourceList:
-        val = model_data["dataOut_rtma_ru"][0, RTMA_RU["pressure"]]
-    elif "gfs" in sourceList:
-        val = (
-            model_data["GFS_Merged"][state.idx1, GFS["station_pressure"]] * state.fac1
-            + model_data["GFS_Merged"][state.idx2, GFS["station_pressure"]] * state.fac2
-        )
-    elif "era5" in sourceList:
-        val = (
-            model_data["ERA5_MERGED"][state.idx1, ERA5["surface_pressure"]] * state.fac1
-            + model_data["ERA5_MERGED"][state.idx2, ERA5["surface_pressure"]]
-            * state.fac2
-        )
 
     return clipLog(
         val,
@@ -1667,6 +1671,20 @@ def _get_feels_like(
                 lambda: _interp_scalar(
                     model_data["NBM_Merged"], NBM["apparent"], state
                 ),
+            ),
+            # Time machine with ERA5 for this hour: computed from ERA5's
+            # temperature, wind and humidity, ahead of GFS's apparent temperature.
+            (
+                lambda: (
+                    timeMachine
+                    and "era5" in sourceList
+                    and np.isfinite(
+                        _interp_scalar(
+                            model_data["ERA5_MERGED"], ERA5["2m_temperature"], state
+                        )
+                    )
+                ),
+                lambda: apparent,
             ),
             (
                 lambda: "gfs" in sourceList,

@@ -63,9 +63,9 @@ AI_CURRENT_SOURCES = tuple(
                 "nbm",
                 "hrrr",
                 "ecmwf_ifs",
+                "era5",
                 "gfs",
                 "dwd_mosmix",
-                "era5",
             ],
             id="canada",
         ),
@@ -78,10 +78,10 @@ AI_CURRENT_SOURCES = tuple(
                 "nbm",
                 "hrrr",
                 "ecmwf_ifs",
+                "era5",
                 "gfs",
                 "gdps",
                 "dwd_mosmix",
-                "era5",
                 "hrdps",
             ],
             id="north-america",
@@ -96,9 +96,9 @@ AI_CURRENT_SOURCES = tuple(
                 "hrrr",
                 "dwd_mosmix",
                 "ecmwf_ifs",
+                "era5",
                 "gfs",
                 "gdps",
-                "era5",
                 "hrdps",
             ],
             id="rest-of-world",
@@ -142,6 +142,8 @@ AI_CURRENT_SOURCES = tuple(
 def test_currently_source_order_by_region(location, ai, expected):
     """A wrong regional order silently swaps which model supplies current
     conditions (e.g. GFS ahead of HRDPS in Canada, or DWD ahead of ECMWF in the US).
+    ERA5 comes just ahead of GFS: in time machine, the only place both appear,
+    the reanalysis wins and GFS history fills the hours ERA5 hasn't reached.
     """
     sources = AI_CURRENT_SOURCES if ai else CONVENTIONAL_CURRENT_SOURCES
     source_map = {name: name for name in sources}

@@ -107,21 +107,21 @@ _CANADA_PRIORITY_ORDER = [
     "nbm",
     "hrrr",
     "ecmwf",
+    "era5",
     "gfs",
     "gefs",
     "dwd_mosmix",
-    "era5",
 ]
 _PRIORITY_ORDER_NA = [
     "nbm",
     "hrrr",
     "ecmwf",
+    "era5",
     "gfs",
     "gefs",
     "gdps",
     "geps",
     "dwd_mosmix",
-    "era5",
     "hrdps",
     "reps",
 ]
@@ -130,11 +130,11 @@ _PRIORITY_ORDER_ROW = [
     "hrrr",
     "dwd_mosmix",
     "ecmwf",
+    "era5",
     "gfs",
     "gefs",
     "gdps",
     "geps",
-    "era5",
     "hrdps",
     "reps",
 ]
@@ -172,21 +172,21 @@ _CANADA_PRECIP_PRIORITY_ORDER = [
     "nbm",
     "hrrr",
     "ecmwf",
+    "era5",
     "gefs",
     "gfs",
     "dwd_mosmix",
-    "era5",
 ]
 _PRECIP_PRIORITY_ORDER_NA = [
     "nbm",
     "hrrr",
     "ecmwf",
+    "era5",
     "gefs",
     "gfs",
     "geps",
     "gdps",
     "dwd_mosmix",
-    "era5",
     "reps",
     "hrdps",
 ]
@@ -195,11 +195,11 @@ _PRECIP_PRIORITY_ORDER_ROW = [
     "hrrr",
     "dwd_mosmix",
     "ecmwf",
+    "era5",
     "gefs",
     "gfs",
     "geps",
     "gdps",
-    "era5",
     "reps",
     "hrdps",
 ]
@@ -1069,8 +1069,8 @@ def prepare_data_inputs(
         station_pressure_inputs = _stack_fields(
             num_hours,
             urma_merged[:, URMA["pressure"]] if urma_valid else None,
-            gfs_merged[:, GFS["station_pressure"]] if gfs_merged is not None else None,
             era5_merged[:, ERA5["surface_pressure"]] if era5_valid else None,
+            gfs_merged[:, GFS["station_pressure"]] if gfs_merged is not None else None,
             hrdps_merged[:, HRDPS["station_pressure"]]
             if hrdps_merged is not None
             else None,
@@ -1083,10 +1083,23 @@ def prepare_data_inputs(
     fire_inputs = np.full((num_hours, 1), np.nan)
 
     # --- feels_like_inputs ---
+    gfs_apparent = gfs_merged[:, GFS["apparent"]] if gfs_merged is not None else None
+    if gfs_apparent is not None and era5_valid:
+        # Time machine with ERA5 and GFS: where ERA5 has the hour, feels-like is
+        # computed from ERA5's temperature, wind and humidity (as for an ERA5-only
+        # request) rather than taken from GFS's apparent temperature.
+        era5_temp = _normalize_length(
+            num_hours, era5_merged[:, ERA5["2m_temperature"]], label="era5"
+        )
+        gfs_apparent = np.where(
+            np.isfinite(era5_temp),
+            np.nan,
+            _normalize_length(num_hours, gfs_apparent, label="gfs"),
+        )
     feels_like_inputs = _stack_fields(
         num_hours,
         nbm_merged[:, NBM["apparent"]] if nbm_merged is not None else None,
-        gfs_merged[:, GFS["apparent"]] if gfs_merged is not None else None,
+        gfs_apparent,
     )
 
     # --- solar_inputs ---
@@ -1121,10 +1134,10 @@ def prepare_data_inputs(
         hrrr_merged[:, HRRR["cape"]] if hrrr_merged is not None else None,
         hrdps_merged[:, HRDPS["cape"]] if hrdps_merged is not None else None,
         gdps_merged[:, GDPS["cape"]] if gdps_merged is not None else None,
-        gfs_merged[:, GFS["cape"]] if gfs_merged is not None else None,
         era5_merged[:, ERA5["convective_available_potential_energy"]]
         if era5_valid
         else None,
+        gfs_merged[:, GFS["cape"]] if gfs_merged is not None else None,
     )
 
     # --- lifted_index_inputs ---

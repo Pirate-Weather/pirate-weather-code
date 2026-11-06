@@ -951,9 +951,30 @@ async def calculate_grid_indexing(
     reps_lat = None
     reps_lon = None
 
-    if (now_time - utc_time) > datetime.timedelta(hours=10 * 24):
-        dataOut_gfs = False
+    # Time machine reads ERA5 and GFS together where both can contribute: ERA5
+    # (reanalysis) wins wherever it has data and GFS's history fills the hours
+    # it lacks, hour by hour (the source stacks take the first non-NaN value).
+    # ERA5T, the newest ERA5, ends ~5-7 days ago; GFS keeps HISTORY_PERIODS["GFS"]
+    # hours (~12 days) of history. With the own ERA5 archive configured ERA5 is
+    # read for any time-machine request (hours it doesn't have yet come back
+    # NaN, in milliseconds); without it ERA5 would come from Google at seconds
+    # per read, so only requests older than ten days use it, as before.
+    era5_data = zarr_sources.era5_data
+    era5_archive = bool(era5_data) and era5_data.get("ERA5_archive") is not None
+    if era5_data is not None and (
+        (time_machine and era5_archive)
+        or (now_time - utc_time) > datetime.timedelta(hours=10 * 24)
+    ):
         readERA5 = True
+    request_end = (base_day_utc or utc_time).replace(tzinfo=None) + datetime.timedelta(
+        hours=num_hours
+    )
+    gfs_history_start = now_time.replace(tzinfo=None) - datetime.timedelta(
+        hours=HISTORY_PERIODS["GFS"]
+    )
+    if time_machine and request_end <= gfs_history_start:
+        # The whole request is older than GFS's history: nothing to read.
+        dataOut_gfs = False
         readGFS = False
         ex_gfs = 1
     elif ex_gfs or zarr_sources.gfs is None:

@@ -47,6 +47,9 @@ ERA5_ARCHIVE_OPEN_WEEKS = 512
 ERA5_ARCHIVE_INDEX_CACHE_BYTES = 256 * 1024**2
 ERA5_ARCHIVE_VERSIONED_RECHECK_S = 300
 ERA5_ARCHIVE_MISSING_RECHECK_S = 300
+# A missing week starting less than this long ago is one the data has not reached
+# yet (NaN rows, filled by GFS); an older missing week is a gap (read Google).
+ERA5_ARCHIVE_UNPUBLISHED_DAYS = 14
 
 
 @dataclass
@@ -452,9 +455,13 @@ def read_era5_archive_point(
     archive: dict, lat: float, lon: float, base_time: np.datetime64, num_hours: int
 ) -> np.ndarray | None:
     """ERA5 point rows from the archive, in the layout and units ``_load_era5_slice``
-    returns from Google (time column 0, ``ERA5`` columns, ``prob`` last), or None
-    if any needed week is missing or any value the API uses is missing, so the
-    caller reads the request from Google instead.
+    returns from Google (time column 0, ``ERA5`` columns, ``prob`` last).
+
+    Hours the archive does not have yet (past a partial week's last hour, or in a
+    recent week that is not published) are NaN rows, as Google returns past its
+    own end; the API fills them from the next source (GFS) hour by hour. Returns
+    None, so the caller reads Google, only when an older week is missing (a gap
+    that should not exist), a store lacks a variable, or a read fails.
 
     A delta-coded week has to be read from its first hour, so a read takes the
     week's hours up to the last one needed; that is the same chunk either way.
@@ -474,55 +481,68 @@ def read_era5_archive_point(
     hours = first_hour + np.arange(num_hours)
     if first_hour < 0:
         return None
+    hour_times = (
+        (epoch + hours.astype("timedelta64[h]"))
+        .astype("datetime64[s]")
+        .astype(np.int64)
+    )
+    n_columns = max(ERA5.values()) + 1
+    # Unpublished weeks: Google's ERA5T runs ~5-7 days behind and the daily job
+    # publishes the current week partial, so a missing week this recent is one
+    # the data has not reached yet, not a gap.
+    unpublished_after = (
+        np.datetime64("now", "s") - np.timedelta64(ERA5_ARCHIVE_UNPUBLISHED_DAYS, "D")
+    ).astype(np.int64)
     rows = []
     for week in np.unique(hours // ERA5_ARCHIVE_WEEK_HOURS):
-        week_start = str(
-            (epoch + np.timedelta64(int(week) * ERA5_ARCHIVE_WEEK_HOURS, "h")).astype(
-                "datetime64[D]"
-            )
-        )
+        in_request = hours // ERA5_ARCHIVE_WEEK_HOURS == week
+        in_week = hours[in_request] - week * ERA5_ARCHIVE_WEEK_HOURS
+        week_rows = np.full((len(in_week), n_columns), np.nan)
+        week_rows[:, 0] = hour_times[in_request]
+        week_start_time = int(hour_times[in_request][0] - in_week[0] * 3600)
+        week_start = str(np.datetime64(week_start_time, "s").astype("datetime64[D]"))
+
         opened = _open_era5_archive_week(archive, week_start)
         if opened is None:
-            return None
-        array, attributes, _ = opened
-        in_week = (
-            hours[hours // ERA5_ARCHIVE_WEEK_HOURS == week]
-            - week * ERA5_ARCHIVE_WEEK_HOURS
-        )
-        # The current week is published partial; hours past its last one are fill.
-        last_needed = int(np.asarray(attributes["time"], dtype=np.int64)[in_week[-1]])
-        if last_needed > attributes.get("complete_through", last_needed):
-            return None
-        y, x = _era5_archive_cell(attributes, lat, lon)
-        try:
-            columns = array[:, : int(in_week[-1]) + 1, y, x].read().result()
-        except ValueError as exc:
-            # Most likely a version deleted under a stale handle: resolve again next time.
-            logger.warning("ERA5 archive week %s read failed: %s", week_start, exc)
-            _forget_era5_archive_week(archive, week_start)
-            return None
-        decoded = decode_era5_archive(columns, attributes)[:, in_week]
-
-        week_rows = np.zeros((len(in_week), max(ERA5.values()) + 1))
-        week_rows[:, 0] = np.asarray(attributes["time"], dtype=np.int64)[in_week]
-        filled = {0}
-        for i, name in enumerate(attributes["variables"]):
-            if name == "precipitation_probability":
-                week_rows[:, ERA5["prob"]] = decoded[i]
-                filled.add(ERA5["prob"])
+            if week_start_time >= unpublished_after:
+                rows.append(week_rows)  # not published yet: NaN, filled by GFS
                 continue
-            sources, factor = ERA5_ARCHIVE_SOURCES.get(name, ((), 1.0))
-            if not sources or sources[0] not in ERA5:
-                continue  # stored for later use (direct solar, cloud base)
-            week_rows[:, ERA5[sources[0]]] = decoded[i] / factor
-            filled.update(ERA5[source] for source in sources)
-        if filled != set(range(week_rows.shape[1])):
-            return None  # a store without a variable the API needs
-        if np.isnan(week_rows).any():
-            # Hours the store says it has came back as fill: its shards are gone
-            # (tensorstore reads a deleted shard as fill, not an error). Resolve
-            # the week again on the next request.
-            _forget_era5_archive_week(archive, week_start)
-            return None
+            return None  # an older week is missing: read Google
+        array, attributes, _ = opened
+        # A partial week (the current one) has data through complete_through.
+        complete_through = attributes.get("complete_through", int(week_rows[-1, 0]))
+        have = week_rows[:, 0] <= complete_through
+        if have.any():
+            y, x = _era5_archive_cell(attributes, lat, lon)
+            last = int(in_week[have][-1])
+            try:
+                columns = array[:, : last + 1, y, x].read().result()
+            except ValueError as exc:
+                # Most likely a version deleted under a stale handle.
+                logger.warning("ERA5 archive week %s read failed: %s", week_start, exc)
+                _forget_era5_archive_week(archive, week_start)
+                return None
+            decoded = decode_era5_archive(columns, attributes)[:, in_week[have]]
+            filled = {0}
+            for i, name in enumerate(attributes["variables"]):
+                if name == "precipitation_probability":
+                    week_rows[have, ERA5["prob"]] = decoded[i]
+                    filled.add(ERA5["prob"])
+                    continue
+                sources, factor = ERA5_ARCHIVE_SOURCES.get(name, ((), 1.0))
+                if not sources or sources[0] not in ERA5:
+                    continue  # stored for later use (direct solar, cloud base)
+                week_rows[have, ERA5[sources[0]]] = decoded[i] / factor
+                # The API only uses large-scale + convective sums: 0 in the second.
+                for source in sources[1:]:
+                    week_rows[have, ERA5[source]] = 0.0
+                filled.update(ERA5[source] for source in sources)
+            if filled != set(range(n_columns)):
+                return None  # a store without a variable the API needs
+            if np.isnan(week_rows[have]).any():
+                # Hours the store says it has came back as fill: its shards are
+                # gone (tensorstore reads a deleted shard as fill, not an error).
+                _forget_era5_archive_week(archive, week_start)
+                return None
         rows.append(week_rows)
     return np.concatenate(rows)

@@ -298,3 +298,80 @@ def test_ecmwf_and_aifs_grids_are_looked_up_separately(ecmwf_y_size, expected_re
     )
 
     assert reads == expected_read
+
+
+@pytest.mark.parametrize(
+    ("age_days", "archive", "expected"),
+    [
+        pytest.param(3, True, {"ERA5", "GFS"}, id="recent-with-archive"),
+        pytest.param(3, False, {"GFS"}, id="recent-google-only"),
+        pytest.param(11, True, {"ERA5", "GFS"}, id="inside-gfs-history"),
+        pytest.param(20, True, {"ERA5"}, id="older-than-gfs-history"),
+        pytest.param(20, False, {"ERA5"}, id="older-google-only"),
+    ],
+)
+def test_time_machine_reads_era5_and_gfs_where_each_can_contribute(
+    monkeypatch, age_days, archive, expected
+):
+    """Protect time-machine source selection: with the own ERA5 archive, ERA5 is
+    read for every time-machine request (it wins where it has data) together with
+    GFS while the request overlaps GFS's ~12-day history, which fills the hours
+    ERA5 hasn't reached. Without the archive, ERA5 would come from Google at
+    seconds per read, so recent requests keep using GFS only. Reading neither, or
+    only the source that lacks the hours, leaves recent days empty.
+    """
+    from API.request import grid_indexing
+
+    reads = set()
+
+    async def zarr_read(model, _store, x, y):
+        reads.add(model)
+        return False
+
+    def load_era5_slice(*_args, **_kwargs):
+        reads.add("ERA5")
+        return np.full((24, max(ERA5.values()) + 1), np.nan)
+
+    monkeypatch.setattr(grid_indexing, "_load_era5_slice", load_era5_slice)
+    now = datetime.datetime(2026, 11, 6, 12)
+    requested = now - datetime.timedelta(days=age_days)
+    era5_data = {"ERA5_archive": {} if archive else None}
+    sources = ZarrSources(
+        subh=None,
+        hrrr_6h=None,
+        hrrr=None,
+        nbm=None,
+        gfs=SimpleNamespace(shape=(20, 500, 721, 1440)),
+        ecmwf=None,
+        gefs=None,
+        era5_data=era5_data,
+    )
+    asyncio.run(
+        calculate_grid_indexing(
+            lat=52.5,
+            lon=13.4,
+            az_lon=13.4,
+            utc_time=requested,
+            now_time=now,
+            time_machine=True,
+            ex_hrrr=1,
+            ex_nbm=1,
+            ex_gfs=0,
+            ex_urma=1,
+            ex_ecmwf=1,
+            ex_gefs=1,
+            ex_rtma_ru=1,
+            ex_dwd_mosmix=1,
+            ex_aigfs=1,
+            ex_aigefs=1,
+            ex_aifs=1,
+            read_wmo_alerts=False,
+            base_day_utc=requested,
+            num_hours=24,
+            zarr_sources=sources,
+            weather=SimpleNamespace(zarr_read=zarr_read),
+            logger=logging.getLogger(__name__),
+        )
+    )
+
+    assert reads == expected

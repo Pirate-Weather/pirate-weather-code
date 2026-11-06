@@ -246,7 +246,8 @@ def test_era5_reads_archive_first_and_falls_back_to_google(tmp_path, monkeypatch
 
 def test_era5_reader_follows_daily_updates_without_restart(tmp_path, monkeypatch):
     """Protect the reader against the daily job's updates: a partial week serves
-    the hours it has and sends later hours to Google; a republished version is
+    the hours it has and leaves later hours NaN for the next source (GFS) rather
+    than sending the request to Google; a republished version is
     picked up at the next re-check without a restart and without reading a store
     that changes under it; a version deleted under an open handle costs one Google
     fallback, not an error or bad data; and a week promoted to final ERA5 switches
@@ -270,22 +271,32 @@ def test_era5_reader_follows_daily_updates_without_restart(tmp_path, monkeypatch
         from_archive = not np.any(rows[:, ERA5["2m_temperature"]] == GOOGLE_MARKER_K)
         return rows, from_archive
 
+    def missing_hours(rows):
+        return int(np.isnan(rows[:, ERA5["2m_temperature"]]).sum())
+
     def store_in_use():
         return archive["weeks"][week][0][2]
 
     # The first daily run published 30 hours of the week.
     v1 = _publish_version(tmp_path, WEEK_A, google, 0, "20150701T000000Z", 30)
     assert read(monday)[1]
-    # Hours past the partial week's last one come from Google, not from fill.
-    assert not read(tuesday)[1]
+    # Tuesday 00-05 UTC are in the archive; the 19 hours after its last one are
+    # NaN (not fill decoded as data), and the request does not go to Google.
+    rows, from_archive = read(tuesday)
+    assert from_archive and missing_hours(rows) == 19
+    np.testing.assert_allclose(
+        rows[:6, ERA5["2m_temperature"]],
+        google["2m_temperature"][24:30, y, x],
+        atol=0.051,
+    )
 
     # The next run publishes the whole week. Readers keep the open version until
     # their re-check, then move to the new one.
     v2 = _publish_version(tmp_path, WEEK_A, google, 0, "20150708T000000Z", WEEK_HOURS)
-    assert not read(tuesday)[1] and store_in_use() == v1
+    assert missing_hours(read(tuesday)[0]) == 19 and store_in_use() == v1
     monkeypatch.setattr(ZarrHelpers, "ERA5_ARCHIVE_VERSIONED_RECHECK_S", 0)
     rows, from_archive = read(tuesday)
-    assert from_archive and store_in_use() == v2
+    assert from_archive and missing_hours(rows) == 0 and store_in_use() == v2
     np.testing.assert_allclose(
         rows[:, ERA5["2m_temperature"]],
         google["2m_temperature"][24:49, y, x],
