@@ -73,6 +73,95 @@ def test_prepare_data_inputs_normalizes_short_era5_series_to_num_hours():
     assert np.isnan(inputs["era5_rain_intensity"][source_hours:]).all()
 
 
+def test_time_machine_prefers_era5_and_fills_its_gaps_from_gfs():
+    """Protect the time-machine source merge: where ERA5 has an hour it must win
+    over GFS (reanalysis over model history), and the hours ERA5 hasn't reached
+    yet (NaN rows from the archive) must come from GFS rather than staying empty
+    or sending the request to Google. Precipitation intensity and type must stay
+    on the same source each hour, and feels-like must not take GFS's apparent
+    temperature for an ERA5 hour.
+    """
+    num_hours, era5_hours = 48, 30
+    era5_merged = np.full((num_hours, max(ERA5.values()) + 1), np.nan)
+    era5_merged[:, 0] = np.arange(num_hours) * 3600
+    covered = slice(0, era5_hours)
+    era5_merged[covered, ERA5["2m_temperature"]] = 290.0
+    era5_merged[covered, ERA5["2m_dewpoint_temperature"]] = 280.0
+    era5_merged[covered, ERA5["mean_sea_level_pressure"]] = 101000.0
+    era5_merged[covered, ERA5["surface_pressure"]] = 95000.0
+    era5_merged[covered, ERA5["10m_u_component_of_wind"]] = 1.0
+    era5_merged[covered, ERA5["10m_v_component_of_wind"]] = 1.0
+    era5_merged[covered, ERA5["instantaneous_10m_wind_gust"]] = 3.0
+    era5_merged[covered, ERA5["total_cloud_cover"]] = 0.25
+    era5_merged[covered, ERA5["convective_available_potential_energy"]] = 111.0
+    era5_merged[covered, ERA5["large_scale_rain_rate"]] = 0.0005
+    era5_merged[covered, ERA5["convective_rain_rate"]] = 0.0
+    era5_merged[covered, ERA5["large_scale_snowfall_rate_water_equivalent"]] = 0.0
+    era5_merged[covered, ERA5["convective_snowfall_rate_water_equivalent"]] = 0.0
+    era5_merged[covered, ERA5["total_precipitation"]] = 0.0018
+    era5_merged[covered, ERA5["precipitation_type"]] = 1.0
+    era5_merged[covered, ERA5["prob"]] = 100.0
+
+    gfs_merged = np.full((num_hours, max(GFS.values()) + 1), np.nan)
+    gfs_merged[:, 0] = np.arange(num_hours) * 3600
+    gfs_merged[:, GFS["temp"]] = 300.0
+    gfs_merged[:, GFS["dew"]] = 285.0
+    gfs_merged[:, GFS["pressure"]] = 102000.0
+    gfs_merged[:, GFS["station_pressure"]] = 96000.0
+    gfs_merged[:, GFS["cape"]] = 999.0
+    gfs_merged[:, GFS["apparent"]] = 305.0
+    gfs_merged[:, GFS["intensity"]] = 2.0 / 3600
+    gfs_merged[:, GFS["rain"]] = 0.0
+    gfs_merged[:, GFS["snow"]] = 1.0
+    gfs_merged[:, GFS["ice"]] = 0.0
+    gfs_merged[:, GFS["freezing_rain"]] = 0.0
+
+    inputs = prepare_data_inputs(
+        source_list=["era5", "gfs"],
+        nbm_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=None,
+        ecmwf_merged=None,
+        gefs_merged=None,
+        gfs_merged=gfs_merged,
+        era5_merged=era5_merged,
+        extra_vars=["stationPressure"],
+        num_hours=num_hours,
+        lat=40.0,
+        lon=-75.0,
+    )
+
+    def chosen(name):
+        # The hourly block takes the first non-NaN source each hour.
+        stack = inputs[name]
+        return np.choose(np.argmin(np.isnan(stack), axis=1), stack.T)
+
+    def source_column(name):
+        return np.argmin(np.isnan(inputs[name]), axis=1)
+
+    era5_part, gfs_part = slice(0, era5_hours), slice(era5_hours, num_hours)
+    for name, era5_value, gfs_value in [
+        ("temperature_inputs", 290.0, 300.0),
+        ("pressure_inputs", 101000.0, 102000.0),
+        ("station_pressure_inputs", 95000.0, 96000.0),
+        ("cape_inputs", 111.0, 999.0),
+    ]:
+        np.testing.assert_array_equal(chosen(name)[era5_part], era5_value, err_msg=name)
+        np.testing.assert_array_equal(chosen(name)[gfs_part], gfs_value, err_msg=name)
+    # Intensity and type come from the same source every hour (ERA5, then GFS).
+    np.testing.assert_array_equal(
+        source_column("prcipIntensity_inputs"), source_column("prcipType_inputs")
+    )
+    assert len(set(source_column("prcipIntensity_inputs")[era5_part])) == 1
+    assert (
+        source_column("prcipIntensity_inputs")[0]
+        != source_column("prcipIntensity_inputs")[-1]
+    )
+    # Feels-like: GFS's apparent temperature only where ERA5 has no hour.
+    assert np.isnan(chosen("feels_like_inputs")[era5_part]).all()
+    np.testing.assert_array_equal(chosen("feels_like_inputs")[gfs_part], 305.0)
+
+
 def test_prepare_data_inputs_includes_canadian_model_fields():
     """Canadian models must feed the hourly inputs with HRDPS ahead of GDPS and
     REPS ahead of GEPS, with their native units handled: cloud % -> fraction and

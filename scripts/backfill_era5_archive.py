@@ -7,8 +7,10 @@ rerun resumes where a stopped one left off. A failed week is retried
 ``ATTEMPTS`` times; the others carry on, and the exit status is 1 if any week
 still failed. Each week's local store is deleted once it is published.
 
-Only complete weeks are built: the last one ends on or before ``--end`` (Google
-ERA5 ends at ``valid_time_stop_era5t``, about 5 days behind real time).
+Only complete weeks of final ERA5 are built here, as immutable stores: keep
+``--end`` at or before Google's ``valid_time_stop`` (about 3 months behind). Newer
+weeks (ERA5T, and the current partial week) change, so
+``scripts/era5_archive_daily.py`` publishes them as versioned stores.
 
 Usage:
     python scripts/backfill_era5_archive.py --start 2020-01-01 --end 2026-10-29 \\
@@ -46,6 +48,10 @@ BUILDER = REPO_ROOT / "scripts" / "build_era5_point_test_store.py"
 # times is reported rather than retried forever.
 ATTEMPTS = 3
 RETRY_DELAY_S = 60
+# A week takes ~2 min. In the 2026-11-04 backfill a Google read stalled for
+# minutes and one week hung on a single request with no end, so an attempt that
+# runs past this is killed and counts as a failed attempt.
+WEEK_TIMEOUT_S = 30 * 60
 
 
 def week_starts(start: dt.date, end: dt.date) -> list[dt.date]:
@@ -62,9 +68,10 @@ def week_starts(start: dt.date, end: dt.date) -> list[dt.date]:
 
 
 def build_week(
-    week: dt.date, work: Path, upload: str, log_dir: Path
+    week: dt.date, work: Path, upload: str, log_dir: Path, publish: str = "immutable"
 ) -> tuple[dt.date, bool, float]:
-    """Build and publish one week; returns (week, succeeded, seconds)."""
+    """Build and publish one week (``publish``: immutable or versioned, see the
+    builder); returns (week, succeeded, seconds)."""
     out = work / week.isoformat()
     log_path = log_dir / f"{week.isoformat()}.log"
     t0 = time.perf_counter()
@@ -74,29 +81,39 @@ def build_week(
         with open(log_path, "a") as log:
             log.write(f"=== attempt {attempt} {dt.datetime.now(dt.UTC).isoformat()}\n")
             log.flush()
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(BUILDER),
-                    "--out",
-                    str(out),
-                    "--week-start",
-                    week.isoformat(),
-                    "--upload",
-                    upload,
-                ],
-                stdout=log,
-                stderr=subprocess.STDOUT,
-                check=False,
-            )
+            try:
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(BUILDER),
+                        "--out",
+                        str(out),
+                        "--week-start",
+                        week.isoformat(),
+                        "--upload",
+                        upload,
+                        "--publish",
+                        publish,
+                    ],
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                    timeout=WEEK_TIMEOUT_S,
+                )
+                outcome = f"exit {result.returncode}"
+                succeeded = result.returncode == 0
+            except subprocess.TimeoutExpired:
+                # subprocess.run has already killed the builder.
+                outcome = f"timed out after {WEEK_TIMEOUT_S} s"
+                succeeded = False
         shutil.rmtree(out, ignore_errors=True)
-        if result.returncode == 0:
+        if succeeded:
             return week, True, time.perf_counter() - t0
         logger.warning(
-            "Week %s attempt %d failed (exit %d); see %s",
+            "Week %s attempt %d failed (%s); see %s",
             week,
             attempt,
-            result.returncode,
+            outcome,
             log_path,
         )
         if attempt < ATTEMPTS:

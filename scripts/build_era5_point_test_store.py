@@ -34,10 +34,21 @@ The API reads these weeks first when ``ERA5_ARCHIVE`` points at the published
 location (``API.io.ZarrHelpers.read_era5_archive_point``) and falls back to Google
 for any week that is missing.
 
+Two ways to publish a week (``--publish``):
+
+* ``immutable``: ``ERA5_archive/<week>.zarr``, written once. Only a complete week
+  of final ERA5 may be published this way; readers cache it for good.
+* ``versioned``: ``ERA5_archive/<week>/<stamp>.zarr`` plus the pointer
+  ``ERA5_archive/<week>.current.json`` (``publish_store``), for weeks that still
+  change: preliminary ERA5T weeks, and the current week, which is published with
+  the hours Google has so far (the rest are fill, and ``complete_through`` gives
+  the last real hour). Readers re-resolve the pointer every few minutes and never
+  see a store change under them. ``scripts/era5_archive_daily.py`` decides which.
+
 Usage:
     python scripts/build_era5_point_test_store.py --out <dir> [--week-start 2015-06-29]
-        [--upload bucket/prefix]   # publishes <prefix>/ERA5_archive/<week start>.zarr;
-                                   # S3 settings from s3_endpoint/s3_region, AWS_KEY/AWS_SECRET
+        [--upload bucket/prefix | /local/dir] [--publish immutable|versioned]
+        # S3 settings from s3_endpoint/s3_region/s3_storage_class, AWS_KEY/AWS_SECRET
 """
 
 from __future__ import annotations
@@ -73,6 +84,7 @@ from API.constants.model_const import (  # noqa: E402
 from API.ingest_utils import (  # noqa: E402
     encode_era5_archive_field,
     open_remote,
+    publish_store,
     upload_store,
     write_era5_archive_zarr,
 )
@@ -93,6 +105,13 @@ SOURCE_READ_THREADS = 64
 # Matches ERA5_PRECIP_PROB_THRESHOLD_M in API/request/grid_indexing.py, which the
 # API used to apply to Google's total_precipitation (m) at read time.
 PRECIP_PROB_THRESHOLD_M = 0.0001
+# ERA5 has isolated spurious CAPE spikes over steep terrain: 2011-04-30 09 UTC
+# has 24 cells over the Peruvian Andes at up to 466,656 J/kg, where observed CAPE
+# tops out near 8,000 J/kg and ERA5's ordinary maximum in the tested weeks was
+# ~9,700. Such values are capped (and counted in the log) rather than stored; a
+# cap well above any real value leaves genuine extremes untouched. Other fields
+# keep encode_era5_archive_field's strict range check, so new oddities still fail.
+CAPE_MAX_J_PER_KG = 20000.0
 
 DERIVED_VARS = ("precipitation_probability",)
 ARCHIVE_UNITS = {
@@ -143,11 +162,23 @@ def precipitation_probability(total_precipitation_m: np.ndarray) -> np.ndarray:
     return np.float32(100.0) * count / cells[None, :, None]
 
 
+def open_archive_remote(upload: str):
+    """The archive's bucket/prefix on S3, or a local directory (an absolute path)."""
+    if os.path.isabs(upload):
+        return open_remote(upload, "Download")
+    return open_remote(
+        upload, "S3", os.getenv("AWS_KEY", ""), os.getenv("AWS_SECRET", "")
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--out", required=True, help="parent directory for the store")
     parser.add_argument("--week-start", default="2015-06-29")
-    parser.add_argument("--upload", help="bucket/prefix to publish to (S3)")
+    parser.add_argument("--upload", help="bucket/prefix (S3) or local directory")
+    parser.add_argument(
+        "--publish", choices=("immutable", "versioned"), default="immutable"
+    )
     parser.add_argument("--write-workers", type=int, default=8)
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -175,25 +206,41 @@ def main() -> None:
     missing = [var for var in source_vars if var not in ds]
     if missing:
         raise KeyError(f"Google ERA5 is missing {missing}")
-    week = ds[source_vars].sel(time=slice(start, stop)).chunk({"time": 1})
+    # Google extends final ERA5 (valid_time_stop, ~3 months behind) with the
+    # preliminary ERA5T (valid_time_stop_era5t, ~5 days behind), which ECMWF later
+    # replaces. Its time axis runs to 2050 with NaN past the data, so the week is
+    # cut at the last ERA5T day; a week past the final date is tagged ERA5T so it
+    # can be rebuilt once final ERA5 covers it.
+    final_stop = np.datetime64(ds.attrs["valid_time_stop"]) + np.timedelta64(23, "h")
+    era5t_stop = np.datetime64(ds.attrs["valid_time_stop_era5t"]) + np.timedelta64(
+        23, "h"
+    )
+    available_stop = min(stop, era5t_stop)
+    if available_stop < start:
+        raise ValueError(f"Google has no ERA5 for the week of {week_start} yet")
+    week = ds[source_vars].sel(time=slice(start, available_stop)).chunk({"time": 1})
     times = week["time"].values
-    if len(times) != WEEK_HOURS or np.any(np.diff(times) != np.timedelta64(1, "h")):
-        raise ValueError(f"Expected {WEEK_HOURS} hourly steps, got {len(times)}")
+    n_hours = int((available_stop - start) / np.timedelta64(1, "h")) + 1
+    if len(times) != n_hours or np.any(np.diff(times) != np.timedelta64(1, "h")):
+        raise ValueError(f"Expected {n_hours} hourly steps, got {len(times)}")
     if week.sizes["latitude"] != ERA5_N_LAT or week.sizes["longitude"] != ERA5_N_LON:
         raise ValueError(f"Unexpected ERA5 grid {dict(week.sizes)}")
     lats = week["latitude"].values
     lons = week["longitude"].values
-    # Google extends final ERA5 (valid_time_stop, ~3 months behind) with the
-    # preliminary ERA5T (valid_time_stop_era5t, ~5 days behind), which ECMWF later
-    # replaces. A week that ends past the final date is ERA5T and is tagged so it
-    # can be rebuilt once final ERA5 covers it.
-    final_stop = np.datetime64(ds.attrs["valid_time_stop"]) + np.timedelta64(23, "h")
+    partial = n_hours < WEEK_HOURS
     era5t = bool(times[-1] > final_stop)
+    if args.publish == "immutable" and (partial or era5t):
+        # Readers cache an immutable week for good, so it must never change.
+        raise ValueError(
+            f"Week {week_start} is {'partial' if partial else 'ERA5T'}; "
+            "only complete final-ERA5 weeks are published immutable (use --publish versioned)"
+        )
     logger.info(
-        "Opened %s week %s .. %s (%s)",
+        "Opened %s week %s .. %s (%d h, %s)",
         GOOGLE_ERA5_URL,
         times[0],
         times[-1],
+        n_hours,
         "ERA5T" if era5t else "final ERA5",
     )
 
@@ -213,18 +260,23 @@ def main() -> None:
     spot_x = np.array([x for _, x in spot_cells])
     spot_source = {}
 
-    # Download, convert and encode each variable into one padded int16 array.
+    # Download, convert and encode each variable into one padded int16 array. A
+    # partial week keeps the whole week's shape (so its chunks line up with the
+    # complete week that replaces it) with fill after the last hour.
     padded_lat = -(-ERA5_N_LAT // FINAL_CHUNK) * FINAL_CHUNK
-    stacked = np.empty((len(variables), WEEK_HOURS, padded_lat, ERA5_N_LON), np.int16)
-    stacked[:, :, ERA5_N_LAT:, :] = ERA5_ARCHIVE_FILL
+    stacked = np.full(
+        (len(variables), WEEK_HOURS, padded_lat, ERA5_N_LON),
+        ERA5_ARCHIVE_FILL,
+        np.int16,
+    )
     buffers = [
-        np.empty((WEEK_HOURS, ERA5_N_LAT, ERA5_N_LON), np.float32) for _ in range(2)
+        np.empty((n_hours, ERA5_N_LAT, ERA5_N_LON), np.float32) for _ in range(2)
     ]
 
     def store_encoded(name: str, values: np.ndarray) -> None:
         spot_source[name] = values[:, spot_y, spot_x].astype(np.float64)
-        stacked[variables.index(name), :, :ERA5_N_LAT, :] = encode_era5_archive_field(
-            name, values
+        stacked[variables.index(name), :n_hours, :ERA5_N_LAT, :] = (
+            encode_era5_archive_field(name, values)
         )
 
     # da.store writes each hourly source chunk straight into its slice: loading
@@ -250,7 +302,18 @@ def main() -> None:
                 store_encoded(
                     "precipitation_probability", precipitation_probability(values)
                 )
-            store_encoded(name, values * np.float32(factor))
+            values = values * np.float32(factor)
+            if name == "convective_available_potential_energy":
+                spurious = int((values > CAPE_MAX_J_PER_KG).sum())
+                if spurious:
+                    logger.warning(
+                        "Capping %d spurious ERA5 CAPE values (max %.0f J/kg) at %.0f",
+                        spurious,
+                        float(np.nanmax(values)),
+                        CAPE_MAX_J_PER_KG,
+                    )
+                    np.minimum(values, CAPE_MAX_J_PER_KG, out=values)
+            store_encoded(name, values)
             del values
             logger.info(
                 "Read and encoded %s in %.1f s", name, time.perf_counter() - t_var
@@ -260,7 +323,10 @@ def main() -> None:
 
     # Write the store.
     store_path = os.path.join(args.out, f"{week_start.isoformat()}.zarr")
-    unix_times = (times - np.datetime64("1970-01-01T00:00:00")) / np.timedelta64(1, "s")
+    week_times = start + np.arange(WEEK_HOURS).astype("timedelta64[h]")
+    unix_times = (week_times - np.datetime64("1970-01-01T00:00:00")) / np.timedelta64(
+        1, "s"
+    )
     t_write = time.perf_counter()
     write_era5_archive_zarr(
         stacked,
@@ -278,6 +344,10 @@ def main() -> None:
             "source": GOOGLE_ERA5_URL,
             "era5t": era5t,
             "google_valid_time_stop": ds.attrs["valid_time_stop"],
+            "google_valid_time_stop_era5t": ds.attrs["valid_time_stop_era5t"],
+            # The last hour with data (the week's last hour unless it is partial).
+            "complete_through": round(unix_times[n_hours - 1]),
+            "hours_available": n_hours,
             "week_start": week_start.isoformat(),
             "precipitation_probability_threshold_m": PRECIP_PROB_THRESHOLD_M,
             # The API locates ERA5 cells from the grid.
@@ -297,7 +367,7 @@ def main() -> None:
 
     array = zarr.open_array(store_path, mode="r")
     for k, (y, x) in enumerate(spot_cells):
-        decoded = decode_era5_archive(array[:, :, y, x], dict(array.attrs))
+        decoded = decode_era5_archive(array[:, :n_hours, y, x], dict(array.attrs))
         for i, name in enumerate(variables):
             source = spot_source[name][:, k]
             kind, step_or_scale, _ = ERA5_ARCHIVE_ENCODING[name]
@@ -330,19 +400,28 @@ def main() -> None:
         sum(p.stat().st_size for p in files) / 2**20,
     )
 
-    # Publish: ERA5_archive/<week start>.zarr. upload_store writes the chunks,
-    # then the array metadata, then the root zarr.json, and the API treats a week
-    # without its root metadata as missing (it falls back to Google), so a
-    # half-uploaded week is never read. Rebuilding a week overwrites it in place.
+    # Publish. upload_store writes the chunks, then the array metadata, then the
+    # root zarr.json, and readers treat a store without its root metadata as
+    # missing, so a half-uploaded week is never read. A versioned week goes to a
+    # new path and only then does its pointer move (publish_store), so a reader
+    # never sees a store change under it; the pointer's run_time is the last hour
+    # with data, which the daily job compares with Google's to decide on a rebuild.
     if args.upload:
-        remote = open_remote(
-            args.upload, "S3", os.getenv("AWS_KEY", ""), os.getenv("AWS_SECRET", "")
-        )
+        remote = open_archive_remote(args.upload)
         t_up = time.perf_counter()
         name = f"{ERA5_ARCHIVE_STORE_DIR}/{week_start.isoformat()}.zarr"
-        upload_store(store_path, remote, name)
+        if args.publish == "immutable":
+            upload_store(store_path, remote, name)
+            published = name
+        else:
+            complete_through = str(times[-1].astype("datetime64[h]"))
+            published = publish_store(store_path, remote, name, complete_through)
         logger.info(
-            "Published %s/%s in %.0f s", args.upload, name, time.perf_counter() - t_up
+            "Published %s/%s (%s) in %.0f s",
+            args.upload,
+            published,
+            args.publish,
+            time.perf_counter() - t_up,
         )
 
 

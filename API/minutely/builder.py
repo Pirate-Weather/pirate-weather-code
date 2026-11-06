@@ -658,6 +658,24 @@ def _process_aigefs_ptype_with_temperature(
     ).astype(int)
 
 
+def _era5_minutely_intensity(era5_MinuteInterpolation):
+    """ERA5 precipitation rate (mm/h) per minute: rain plus snow water equivalent."""
+    return (
+        era5_MinuteInterpolation[:, ERA5["large_scale_snowfall_rate_water_equivalent"]]
+        + era5_MinuteInterpolation[:, ERA5["convective_snowfall_rate_water_equivalent"]]
+        + era5_MinuteInterpolation[:, ERA5["large_scale_rain_rate"]]
+        + era5_MinuteInterpolation[:, ERA5["convective_rain_rate"]]
+    ) * 3600
+
+
+def _era5_covers_minutes(era5_MinuteInterpolation):
+    """True if ERA5 has every minute of the block. Time machine prefers ERA5 over
+    GFS; an hour ERA5 hasn't reached yet (NaN) keeps GFS's minutes instead."""
+    return era5_MinuteInterpolation is not None and bool(
+        np.isfinite(_era5_minutely_intensity(era5_MinuteInterpolation)).all()
+    )
+
+
 def _process_era5_ptype(era5_MinuteInterpolation, InterTminute):
     """Process ERA5 precipitation type data."""
     ptype_era5 = era5_MinuteInterpolation[:, ERA5["precipitation_type"]]
@@ -781,6 +799,9 @@ def _calculate_precip_type_probs(
         if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
             _process_ecmwf_ptype(ecmwfMinuteInterpolation, InterTminute)
             return InterTminute
+        if "era5" in source_list and _era5_covers_minutes(era5_MinuteInterpolation):
+            _process_era5_ptype(era5_MinuteInterpolation, InterTminute)
+            return InterTminute
         if "gfs" in source_list and gfsMinuteInterpolation is not None:
             _process_gfs_ptype(gfsMinuteInterpolation, InterTminute)
             return InterTminute
@@ -809,6 +830,9 @@ def _calculate_precip_type_probs(
             return InterTminute
         if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
             _process_ecmwf_ptype(ecmwfMinuteInterpolation, InterTminute)
+            return InterTminute
+        if "era5" in source_list and _era5_covers_minutes(era5_MinuteInterpolation):
+            _process_era5_ptype(era5_MinuteInterpolation, InterTminute)
             return InterTminute
         if "gfs" in source_list and gfsMinuteInterpolation is not None:
             _process_gfs_ptype(gfsMinuteInterpolation, InterTminute)
@@ -942,6 +966,8 @@ def _calculate_intensity(
         intensity = ecmwfMinuteInterpolation[:, ECMWF["intensity"]] * 3600
     elif "gefs" in source_list and gefsMinuteInterpolation is not None:
         intensity = gefsMinuteInterpolation[:, GEFS["accum"]]
+    elif "era5" in source_list and _era5_covers_minutes(era5_MinuteInterpolation):
+        intensity = _era5_minutely_intensity(era5_MinuteInterpolation)
     elif "gfs" in source_list and gfsMinuteInterpolation is not None:
         intensity = dbz_to_rate(gfsMinuteInterpolation[:, GFS["refc"]], precipTypes)
         refc_used = True
@@ -962,16 +988,7 @@ def _calculate_intensity(
             + gepsMinuteInterpolation[:, GEPS["freezing_rain"]]
         )
     elif "era5" in source_list and era5_MinuteInterpolation is not None:
-        intensity = (
-            era5_MinuteInterpolation[
-                :, ERA5["large_scale_snowfall_rate_water_equivalent"]
-            ]
-            + era5_MinuteInterpolation[
-                :, ERA5["convective_snowfall_rate_water_equivalent"]
-            ]
-            + era5_MinuteInterpolation[:, ERA5["large_scale_rain_rate"]]
-            + era5_MinuteInterpolation[:, ERA5["convective_rain_rate"]]
-        ) * 3600
+        intensity = _era5_minutely_intensity(era5_MinuteInterpolation)
 
     return intensity, precipTypes, refc_used
 

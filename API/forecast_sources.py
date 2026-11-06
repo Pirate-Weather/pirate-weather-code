@@ -146,7 +146,10 @@ def build_source_metadata(
     if use_etopo:
         metadata.add("ETOPO1")
 
-    if isinstance(era5_merged, np.ndarray):
+    # Listed only if it has data for the request: a recent time-machine request
+    # can read ERA5 rows that are all NaN (hours ERA5 hasn't reached yet, which
+    # GFS history fills), and code that branches on "era5" assumes values.
+    if isinstance(era5_merged, np.ndarray) and np.isfinite(era5_merged[:, 1:]).any():
         metadata.add("era5")
 
     # RRFS (include=rrfs). Each block is listed under the grid it came from
