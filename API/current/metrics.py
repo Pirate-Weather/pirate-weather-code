@@ -2220,8 +2220,9 @@ def build_current_section(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
 
-    # Populate AQ concentration fields from aq_inputs (version >= 2)
-    if aq_inputs is not None:
+    # Populate AQ concentration fields from aq_inputs. Only version 2 responses
+    # return these fields or the AQI.
+    if aq_inputs is not None and version >= 2:
         # Linear interpolation between hours 0 and 1
         def _fill_curr_aq(col_key, src_key, clip_min, clip_max):
             arr = aq_inputs.get(src_key)
@@ -2249,16 +2250,28 @@ def build_current_section(
             def _through_current(arr):
                 return arr[:current_hours] if arr is not None else None
 
-            aqi_arr = compute_aqi_with_lead_in(
-                aqiSystem if aqiSystem is not None else unitSystem,
-                aq_inputs.get("lead_in"),
-                pm25=_through_current(aq_inputs.get("pm25")),
-                pm10=_through_current(aq_inputs.get("pm10")),
-                o3=_through_current(aq_inputs.get("o3")),
-                no2=_through_current(aq_inputs.get("no2")),
-                so2=_through_current(aq_inputs.get("so2")),
-                co=_through_current(aq_inputs.get("co")),
-            )
+            current_series = {
+                pollutant: _through_current(aq_inputs.get(pollutant))
+                for pollutant in ("pm25", "pm10", "o3", "no2", "so2", "co")
+            }
+            # The hourly block computed the same averages from clipped
+            # concentrations. Where clipping changed nothing in these hours,
+            # which is nearly always, its AQI is this one and saves about 0.6 ms.
+            hourly_aqi, hourly_series = aq_inputs.get("hourly_aqi", (None, None))
+            if hourly_aqi is not None and all(
+                series is not None
+                and np.array_equal(
+                    series, hourly_series[pollutant][:current_hours], equal_nan=True
+                )
+                for pollutant, series in current_series.items()
+            ):
+                aqi_arr = hourly_aqi[:current_hours]
+            else:
+                aqi_arr = compute_aqi_with_lead_in(
+                    aqiSystem if aqiSystem is not None else unitSystem,
+                    aq_inputs.get("lead_in"),
+                    **current_series,
+                )
             if len(aqi_arr) > 0:
                 aqi_idx1 = min(idx1, len(aqi_arr) - 1)
                 aqi_idx2 = min(idx2, len(aqi_arr) - 1)

@@ -7,7 +7,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from API.constants.shared_const import MISSING_DATA
+# Zero to 9 to account for the hours before 6am in day 8
+INDEXED_DAYS = 9
+# Hours outside every window of a daily statistic
+NO_DAY_INDEX = -999
 
 
 @dataclass
@@ -53,23 +56,30 @@ def _build_day_array(
     ).astype(np.int32)
 
 
-def _assign_range(
-    target: np.ndarray,
-    source: np.ndarray,
+def _window_index(
+    hour_array_grib: np.ndarray,
+    starts: np.ndarray,
+    ends: np.ndarray,
     *,
-    start: int,
-    end: int,
     include_start: bool,
-    include_end: bool,
-    value: int,
-) -> None:
-    lower_cmp = source >= start if include_start else source > start
-    upper_cmp = source <= end if include_end else source < end
-    target[lower_cmp & upper_cmp] = value
+) -> np.ndarray:
+    """The day whose window holds each hour, or NO_DAY_INDEX.
 
-
-def _finalize_index(values: np.ndarray) -> np.ndarray:
-    return np.nan_to_num(values, nan=-999).astype(int)
+    A day's window never overlaps the next day's, so the only candidate is the
+    latest window starting at or before the hour. Windows include their start and
+    exclude their end, or the reverse when ``include_start`` is False.
+    """
+    side = "right" if include_start else "left"
+    latest_start = (
+        np.searchsorted(starts[:INDEXED_DAYS], hour_array_grib, side=side) - 1
+    )
+    candidate = np.clip(latest_start, 0, INDEXED_DAYS - 1)
+    before_end = (
+        hour_array_grib < ends[candidate]
+        if include_start
+        else hour_array_grib <= ends[candidate]
+    )
+    return np.where((latest_start >= 0) & before_end, candidate, NO_DAY_INDEX)
 
 
 def calculate_time_indexing(
@@ -111,89 +121,45 @@ def calculate_time_indexing(
             hourly_half_night_index=zero_index.copy(),
         )
 
-    hourly_day_index = np.full(len(hour_array_grib), MISSING_DATA)
-    hourly_day_6am_index = np.full(len(hour_array_grib), MISSING_DATA)
-    hourly_high_index = np.full(len(hour_array_grib), MISSING_DATA)
-    hourly_low_index = np.full(len(hour_array_grib), MISSING_DATA)
-    hourly_half_day_index = np.full(len(hour_array_grib), MISSING_DATA)
-    hourly_half_night_index = np.full(len(hour_array_grib), MISSING_DATA)
-
-    # Zero to 9 to account for the hours before 6am in day 8
-    for d in range(9):
-        _assign_range(
-            hourly_day_index,
-            hour_array_grib,
-            start=day_array_grib[d],
-            end=day_array_grib[d + 1],
-            include_start=True,
-            include_end=False,
-            value=d,
-        )
-        _assign_range(
-            hourly_day_6am_index,
-            hour_array_grib,
-            start=day_array_6am_grib[d],
-            end=day_array_6am_grib[d + 1],
-            include_start=True,
-            include_end=False,
-            value=d,
-        )
-        _assign_range(
-            hourly_half_day_index,
-            hour_array_grib,
-            start=day_array_6am_grib[d],
-            end=day_array_6pm_grib[d],
-            include_start=True,
-            include_end=False,
-            value=d,
-        )
-        _assign_range(
-            hourly_half_night_index,
-            hour_array_grib,
-            start=day_array_6pm_grib[d],
-            end=day_array_6am_grib[d + 1],
-            include_start=True,
-            include_end=False,
-            value=d,
-        )
-        _assign_range(
-            hourly_high_index,
-            hour_array_grib,
-            start=day_array_6am_grib[d],
-            end=day_array_6pm_grib[d],
-            include_start=False,
-            include_end=True,
-            value=d,
-        )
-        _assign_range(
-            hourly_low_index,
-            hour_array_grib,
-            start=day_array_6pm_grib[d],
-            end=day_array_6am_grib[d + 1],
-            include_start=False,
-            include_end=True,
-            value=d,
-        )
+    next_day_6am = day_array_6am_grib[1:]
+    hourly_day_index = _window_index(
+        hour_array_grib, day_array_grib, day_array_grib[1:], include_start=True
+    )
+    hourly_day_6am_index = _window_index(
+        hour_array_grib, day_array_6am_grib, next_day_6am, include_start=True
+    )
+    hourly_half_day_index = _window_index(
+        hour_array_grib, day_array_6am_grib, day_array_6pm_grib, include_start=True
+    )
+    hourly_half_night_index = _window_index(
+        hour_array_grib, day_array_6pm_grib, next_day_6am, include_start=True
+    )
+    hourly_high_index = _window_index(
+        hour_array_grib, day_array_6am_grib, day_array_6pm_grib, include_start=False
+    )
+    hourly_low_index = _window_index(
+        hour_array_grib, day_array_6pm_grib, next_day_6am, include_start=False
+    )
 
     # Replace missing values by forward-filling from the last valid day index.
     # This handles hours that fall outside the expected day ranges, ensuring they are assigned to the most recent valid day index rather than being left as missing.
     # For DST
-    if np.any(np.isnan(hourly_day_index)):
-        mask = np.isnan(hourly_day_index)
-        idx = np.where(~mask, np.arange(len(hourly_day_index)), 0)
+    missing_day = hourly_day_index == NO_DAY_INDEX
+    if np.any(missing_day):
+        idx = np.where(~missing_day, np.arange(len(hourly_day_index)), 0)
         np.maximum.accumulate(idx, out=idx)
-        hourly_day_index[mask] = hourly_day_index[idx[mask]]
-        # If there are still NaNs (at the beginning), fill with 0.
-        hourly_day_index[np.isnan(hourly_day_index)] = 0
+        hourly_day_index[missing_day] = hourly_day_index[idx[missing_day]]
+        # If there are still missing days (at the beginning), use the first day.
+        hourly_day_index[hourly_day_index == NO_DAY_INDEX] = 0
 
     return TimeIndexing(
         day_array_grib=day_array_grib,
         day_array_6am_grib=day_array_6am_grib,
         day_array_6pm_grib=day_array_6pm_grib,
-        hourly_day_index=_finalize_index(hourly_day_index),
-        hourly_day_6am_index=_finalize_index(hourly_day_6am_index),
-        hourly_high_index=_finalize_index(hourly_high_index),
-        hourly_low_index=_finalize_index(hourly_low_index),
-        hourly_half_day_index=_finalize_index(hourly_half_day_index),
-        hourly_half_night_index=_finalize_index(hourly_half_night_index),
+        hourly_day_index=hourly_day_index,
+        hourly_day_6am_index=hourly_day_6am_index,
+        hourly_high_index=hourly_high_index,
+        hourly_low_index=hourly_low_index,
+        hourly_half_day_index=hourly_half_day_index,
+        hourly_half_night_index=hourly_half_night_index,
     )

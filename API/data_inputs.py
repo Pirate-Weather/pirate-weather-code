@@ -1287,7 +1287,10 @@ def prepare_aq_inputs(
         # Using a tolerance of one full SILAM time-step (3600 s) ensures the
         # nearest available hour is always matched while still rejecting gaps
         # larger than one hour.
+        # A row with no data has a NaN time. argmin stops at the first NaN, which
+        # would unmatch every hour and lose the model, so those rows can't match.
         time_col = data[:, 0].astype(float)
+        time_col[np.isnan(time_col)] = np.inf
         request_hours = np.asarray(request_times, dtype=float)
         diff = np.abs(time_col[np.newaxis, :] - request_hours[:, np.newaxis])
         best = np.argmin(diff, axis=1)

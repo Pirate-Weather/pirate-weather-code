@@ -318,6 +318,15 @@ gives the 24 hours before midnight, for the averages only. No extra reads: the s
 read whole and SILAM keeps 48 h of history. RAQDPS only reaches back to its latest run, so
 a window crossing the run time uses SILAM before it, per hour.
 
+### Response speedups across the request path (2026-11-06)
+Handler median on local stores (9 locations, 15 rounds, warm): default 13.2 -> 10.0 ms (p95
+18.0 -> 11.3), `version=2` 12.9 -> 10.7, `extend=hourly` 14.1 -> 12.6, day_night 14.8 -> 13.1,
+`exclude=summary` 11.2 -> 9.3. Responses identical to the previous code on 240 real requests
+read from OVH. The biggest parts: no AQI below version 2 (1.5 ms), current AQI reused from
+the hourly AQI when clipping changed nothing (0.6 ms), and a distance bound on the 2-D grid
+lookup (up to 5.7 ms outside the RAQDPS domain). In the TESTING stages almost all of a
+request's ~200 ms is the synchronous alert reads, through zarr-python on S3.
+
 ### Daily aggregation stacked, half-day work skipped, TESTING reads S3 directly (2026-11-06)
 `_aggregate_stats` stacks each window's hours into a (day, hour, variable) array instead of
 looping over days, and the half-day aggregates, display values and rounding only run when

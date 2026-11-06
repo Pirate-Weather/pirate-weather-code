@@ -37,7 +37,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
-from numpy.lib.stride_tricks import sliding_window_view
+from numpy.lib.stride_tricks import as_strided
 
 # ---------------------------------------------------------------------------
 # EPA averaging helpers
@@ -52,6 +52,23 @@ NOWCAST_HOURS = 12
 # Hours before the requested series that the AQI's averages can look back on: the
 # longest averaging window is 24 h.
 AQ_LEAD_IN_HOURS = 24
+_NOWCAST_POWERS = np.arange(NOWCAST_HOURS)
+
+
+def _trailing_windows(padded: np.ndarray, window: int) -> np.ndarray:
+    """Read-only view of shape (..., n - window + 1, window) along the last axis.
+
+    The same as sliding_window_view without its Python-level argument handling;
+    the AQI takes several windows per request.
+    """
+    *lead, n_hours = padded.shape
+    strides = padded.strides
+    return as_strided(
+        padded,
+        shape=(*lead, n_hours - window + 1, window),
+        strides=(*strides[:-1], strides[-1], strides[-1]),
+        writeable=False,
+    )
 
 
 def nowcast_pm(conc: np.ndarray) -> np.ndarray:
@@ -82,8 +99,9 @@ def nowcast_pm(conc: np.ndarray) -> np.ndarray:
     # algorithm treats the same as a missing hour.
     pad_shape = (*conc.shape[:-1], NOWCAST_HOURS - 1)
     padded = np.concatenate((np.full(pad_shape, np.nan), conc), axis=-1)
-    windows = sliding_window_view(padded, NOWCAST_HOURS, axis=-1)[..., ::-1]
-    valid = ~np.isnan(windows)
+    windows = _trailing_windows(padded, NOWCAST_HOURS)[..., ::-1]
+    # A value equals itself unless it is NaN: one ufunc call instead of two
+    valid = np.equal(windows, windows)
 
     # Validity check: at least 2 of the 3 most-recent hours must be valid
     has_recent = valid[..., :3].sum(axis=-1) >= 2
@@ -94,7 +112,7 @@ def nowcast_pm(conc: np.ndarray) -> np.ndarray:
     with np.errstate(divide="ignore", invalid="ignore"):
         w = np.where(max_c == 0.0, 1.0, np.maximum(min_c / max_c, 0.5))
         # Hour j back gets weight w**j; missing hours get no weight
-        weights = np.where(valid, w[..., np.newaxis] ** np.arange(NOWCAST_HOURS), 0.0)
+        weights = np.where(valid, w[..., np.newaxis] ** _NOWCAST_POWERS, 0.0)
         total_weight = weights.sum(axis=-1)
         weighted_sum = (weights * np.where(valid, windows, 0.0)).sum(axis=-1)
         out = weighted_sum / total_weight
@@ -125,8 +143,8 @@ def rolling_mean(conc: np.ndarray, window: int) -> np.ndarray:
     # array are padded with NaN and so ignored like any missing hour.
     pad_shape = (*conc.shape[:-1], window - 1)
     padded = np.concatenate((np.full(pad_shape, np.nan), conc), axis=-1)
-    windows = sliding_window_view(padded, window, axis=-1)
-    valid = ~np.isnan(windows)
+    windows = _trailing_windows(padded, window)
+    valid = np.equal(windows, windows)
     counts = valid.sum(axis=-1)
     sums = np.where(valid, windows, 0.0).sum(axis=-1)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -307,15 +325,30 @@ def _aqi_from_breakpoints(conc: float, bp: list, aqi_vals: list) -> float:
     return float(aqi_vals[-1])
 
 
+# The breakpoint tables are constants, so each converts to arrays once.
+_BREAKPOINT_ARRAYS: dict[tuple, tuple[np.ndarray, np.ndarray]] = {}
+
+
+def _breakpoint_arrays(bp: list, aqi_vals: list) -> tuple[np.ndarray, np.ndarray]:
+    key = (tuple(bp), tuple(aqi_vals))
+    arrays = _BREAKPOINT_ARRAYS.get(key)
+    if arrays is None:
+        arrays = (
+            np.asarray(bp, dtype=np.float64),
+            np.asarray(aqi_vals, dtype=np.float64),
+        )
+        _BREAKPOINT_ARRAYS[key] = arrays
+    return arrays
+
+
 def _aqi_from_breakpoints_array(
     conc: np.ndarray, bp: list, aqi_vals: list
 ) -> np.ndarray:
     """``_aqi_from_breakpoints`` over an array, with the same result per value."""
-    bp_arr = np.asarray(bp, dtype=np.float64)
-    vals = np.asarray(aqi_vals, dtype=np.float64)
+    bp_arr, vals = _breakpoint_arrays(bp, aqi_vals)
     # The scalar version takes the first interval with bp[i] <= conc <= bp[i + 1];
     # with sorted breakpoints that is the first i where bp[i + 1] >= conc.
-    i = np.clip(np.searchsorted(bp_arr[1:], conc, side="left"), 0, len(bp_arr) - 2)
+    i = np.minimum(np.searchsorted(bp_arr[1:], conc, side="left"), len(bp_arr) - 2)
     bp_lo = bp_arr[i]
     bp_hi = bp_arr[i + 1]
     idx_lo = vals[i]
@@ -326,13 +359,14 @@ def _aqi_from_breakpoints_array(
         interp = np.where(
             bp_hi == bp_lo, idx_lo, np.round(idx_lo + ratio * (idx_hi - idx_lo))
         )
-    # Outside the table (including below its first breakpoint) the scalar
-    # version caps at the maximum.
-    with np.errstate(invalid="ignore"):
+        # Outside the table (including below its first breakpoint) the scalar
+        # version caps at the maximum.
         in_table = (conc >= bp_arr[0]) & (conc <= bp_arr[-1])
-        missing = np.isnan(conc) | (conc < 0)
+        # NaN or negative: one comparison, since NaN >= 0 is False
+        missing = ~(conc >= 0)
     out = np.where(in_table, interp, vals[-1])
-    return np.where(missing, np.nan, out)
+    out[missing] = np.nan
+    return out
 
 
 def _max_sub_index(*sub_indices: np.ndarray) -> np.ndarray:

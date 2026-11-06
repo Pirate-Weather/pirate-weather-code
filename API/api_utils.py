@@ -179,6 +179,18 @@ def clipLog(data, min_val, max_val, name):
     lowest_plausible = min(min_val, min_val * 0.75 - 2)
     highest_plausible = max(max_val, max_val * 1.25)
 
+    # The current section clips about 18 scalars per request, and the array path
+    # below is five numpy calls each. NaN passes through, as it does in np.clip.
+    if isinstance(data, float):
+        if math.isnan(data):
+            return np.float64(data)
+        if lowest_plausible <= data <= highest_plausible:
+            if data < min_val:
+                return np.float64(min_val)
+            if data > max_val:
+                return np.float64(max_val)
+            return np.float64(data)
+
     clipped = np.clip(data, min_val, max_val)
     too_low = np.less(data, lowest_plausible)
     too_high = np.greater(data, highest_plausible)
@@ -829,40 +841,18 @@ def remove_conditional_fields(
     if not fields_to_remove:
         return data
 
-    # Fast path: list of dicts
-    if isinstance(data, list):
-        for item in data:
-            if not isinstance(item, dict):
-                continue  # skip non-dicts defensively
-            pop = item.pop  # cache bound method to avoid repeated lookups
-            for field in fields_to_remove:
-                pop(field, None)
-    else:
-        # Single dict
-        if isinstance(data, dict):
-            pop = data.pop
-            for field in fields_to_remove:
-                pop(field, None)
-
-    # For older API versions, downgrade precip types that didn't exist
-    # in v1 responses. Keep internal calculations using 'ice'/'mixed',
-    # but map them to 'sleet' in the final API output when version < 2.
-    if version is not None and version < 2:
-
-        def _downgrade_precip(obj):
-            if isinstance(obj, dict):
-                precip_type = obj.get("precipType")
-                if isinstance(precip_type, str) and precip_type in ("ice", "mixed"):
-                    obj["precipType"] = PRECIP_TYPES["sleet"]
-                for value in obj.values():
-                    if isinstance(value, (dict, list)):
-                        _downgrade_precip(value)
-            elif isinstance(obj, list):
-                for item in obj:
-                    if isinstance(item, (dict, list)):
-                        _downgrade_precip(item)
-
-        _downgrade_precip(data)
+    # Each response block is a dict, or a list of dicts, of scalars. Before version
+    # 2, precip types that didn't exist yet are shown as sleet; internal calculations
+    # keep 'ice' and 'mixed'.
+    downgrade_precip = version < 2
+    for item in data if isinstance(data, list) else [data]:
+        if not isinstance(item, dict):
+            continue  # skip non-dicts defensively
+        pop = item.pop  # cache bound method to avoid repeated lookups
+        for field in fields_to_remove:
+            pop(field, None)
+        if downgrade_precip and item.get("precipType") in ("ice", "mixed"):
+            item["precipType"] = PRECIP_TYPES["sleet"]
 
     return data
 

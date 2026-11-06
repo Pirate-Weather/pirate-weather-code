@@ -12,19 +12,13 @@ from astral import sun as astral_sun
 
 from API.utils.geo import _polar_is_all_day
 
-UNIX_EPOCH = np.datetime64(datetime.datetime(1970, 1, 1, 0, 0, 0))
+UNIX_EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.UTC)
+ONE_SECOND = datetime.timedelta(seconds=1)
 
 
 def datetime_to_unix_seconds(value: datetime.datetime) -> np.int32:
     """Convert a timezone-aware datetime to unix seconds in UTC."""
-    return (
-        (
-            np.datetime64(value.astimezone(datetime.UTC).replace(tzinfo=None))
-            - UNIX_EPOCH
-        )
-        .astype("timedelta64[s]")
-        .astype(np.int32)
-    )
+    return np.int32((value - UNIX_EPOCH) // ONE_SECOND)
 
 
 def timedelta_to_seconds(delta: np.timedelta64) -> np.int32:
