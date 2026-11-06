@@ -65,13 +65,20 @@ index), 37 ms to find a week missing; values within half a step of Google's.
 Still to do: daily ERA5T appends (recent weeks fall back to Google until then), and
 open a week with one metadata read instead of two (KvStore read + `ts.open`).
 
-Backfill estimate: ~4,500 weeks from 1940; each pulls 7.2 GiB from Google (20 source
-variables x 168 hourly 2.2 MiB chunks), so ~32 TiB in total. The read took 35 s
-(~190 MiB/s) on 2026-11-03 and 125 s on 2026-11-04 (Google or a busy test server; the
-int16 encoding adds ~1 s per variable); write 15 s, upload ~6-10 s to RBX at the store's
-1.1 GB. So ~1-2.5 min per week sequential, 3-8 days. With ~12 GB per worker, 6-8 weeks
-in parallel fit a 128 GB VM; the download (~50 h at 190 MiB/s) is then the bound, about
-2 days. Check the build VM's bandwidth cap and Google's sustained throughput first.
+Backfill done (2026-11-04 to 11-06): bucket `pirate-era5` (RBX, High Performance),
+`ERA5_archive/<week>.zarr` for 4,478 weeks, 1940-12-30 .. 2026-10-19 (complete weeks
+to Google's ERA5T end, 2026-10-29), 5.27 TB, ~1.1 GB per week in every decade. Built
+with `scripts/backfill_era5_archive.py`: 2020-2026 on a b3-64 in RBX-A (4 at a time,
+2.9 h), 1941-2019 on an r3-128 in GRA11 uploading to RBX (8 at a time, 5.1 h + 15.1 h,
+~3.4 weeks/min, bound by Google reads at ~110-180 s per week). API config:
+`ERA5_ARCHIVE=s3://pirate-era5`, `ERA5_ARCHIVE_S3_ENDPOINT=https://s3.rbx.io.cloud.ovh.net`,
+`ERA5_ARCHIVE_S3_REGION=rbx`. Starts at 1941: ERA5's forecast fields (gusts,
+precipitation, radiation, cloud base) are missing for 1940-01-01 00-06 UTC.
+Source quirks met: Google stalled for minutes once (one week hung; hence the per-week
+timeout), and ERA5 has spurious CAPE spikes over steep terrain (up to ~2e6 J/kg in the
+Andes), now capped at 20,000 J/kg (101 weeks before 2000 and a few after).
+Still to do: rebuild the 17 ERA5T weeks (2026-06-29 onward, attribute `era5t`) once
+Google's final ERA5 covers them, and add weekly appends for new ERA5T weeks.
 
 ### ERA5: tune rounding and compression for storage cost
 The one-week test store (`scripts/build_era5_point_test_store.py`, 2015-06-29, 18
