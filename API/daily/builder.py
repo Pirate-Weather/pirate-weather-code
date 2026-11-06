@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -65,6 +64,34 @@ def _circular_mean_by_day(directions, day_index, daily_days):
     return np.mod(np.degrees(np.arctan2(sin_sum, cos_sum)), 360.0)
 
 
+def _most_common_precip_type(hour_types, day_of_row, daily_days):
+    """Each day's most common precipitation type, in one pass over the hours.
+
+    A day takes its most common wet type even when dry hours outnumber it, ties
+    going to the type seen first; only a day with no wet hours is dry. Hours
+    without a type count as dry.
+    """
+    codes = np.where(np.isnan(hour_types), 0, hour_types).astype(np.intp)
+    n_codes = int(codes.max()) + 1
+    if n_codes == 1:
+        return np.zeros(daily_days)
+
+    counts = np.bincount(
+        day_of_row * n_codes + codes, minlength=daily_days * n_codes
+    ).reshape(daily_days, n_codes)
+    # Later assignments win, so walking the hours backwards leaves each type's
+    # first hour. These must be index arrays: numpy flips a negative-stride view.
+    backwards = np.arange(codes.size - 1, -1, -1)
+    first_hour = np.zeros((daily_days, n_codes), dtype=np.intp)
+    first_hour[day_of_row[backwards], codes[backwards]] = backwards
+
+    # Most hours wins; a difference of one hour outweighs any first-seen offset.
+    score = counts * (codes.size + 1) - first_hour
+    score[counts == 0] = np.iinfo(np.intp).min
+    score[:, 0] = np.iinfo(np.intp).min
+    return score.argmax(axis=1).astype(float)
+
+
 def _aggregate_stats(
     InterPhour,
     index_array,
@@ -80,6 +107,10 @@ def _aggregate_stats(
     """
     Aggregate statistics for daily data.
 
+    The hours are stacked into a (day, hour, variable) array and reduced along
+    the hour axis, which replaced about ten numpy calls per day per window. The
+    forecast hours ascend, so each day's hours are one run in ``index_array``.
+
     Args:
         InterPhour: Hourly interpolated data.
         index_array: Array of indices mapping hours to days.
@@ -88,62 +119,68 @@ def _aggregate_stats(
         calc_sum: Whether to calculate the sum.
         calc_max: Whether to calculate the maximum.
         calc_min: Whether to calculate the minimum.
-        calc_argmax: Whether to calculate the index of the maximum.
-        calc_argmin: Whether to calculate the index of the minimum.
+        calc_argmax: Whether to calculate the time of the maximum.
+        calc_argmin: Whether to calculate the time of the minimum.
         calc_precip: Whether to calculate precipitation type.
 
     Returns:
-        Tuple containing lists of aggregated statistics:
-        (mean, sum, max, min, argmax, argmin, precip_type)
+        Tuple of (day, variable) arrays, None where not requested:
+        (mean, sum, max, min, argmax, argmin), then the (day,) precip type.
     """
-    res_mean = []
-    res_sum = []
-    res_max = []
-    res_min = []
-    res_argmax = []
-    res_argmin = []
-    res_precip = np.zeros(daily_days)
+    in_window = (index_array >= 0) & (index_array < daily_days)
+    day_of_row = index_array[in_window]
+    rows = InterPhour[in_window]
 
-    for mIDX in range(daily_days):
-        day_rows = np.flatnonzero(index_array == mIDX)
-        n_rows = day_rows.size
-        if n_rows > 0 and day_rows[-1] - day_rows[0] + 1 == n_rows:
-            # The hours of a day are a contiguous run, so a slice (a view)
-            # replaces the boolean-mask copy.
-            filtered_data = InterPhour[day_rows[0] : day_rows[-1] + 1]
-        else:
-            # Empty or non-contiguous selection: keep the original mask path
-            # (an empty day raises/warns exactly as before).
-            filtered_data = InterPhour[index_array == mIDX]
+    hours_per_day = np.bincount(day_of_row, minlength=daily_days)
+    if hours_per_day.min() == 0:
+        raise ValueError(f"A forecast day has no hours: {hours_per_day.tolist()}")
+    max_hours = int(hours_per_day.max())
+    first_row = np.cumsum(hours_per_day) - hours_per_day
 
-        if calc_mean and calc_sum:
-            # np.mean is add.reduce / n, so reuse the sum instead of reducing twice.
-            day_sum = np.sum(filtered_data, axis=0)
-            res_sum.append(day_sum)
-            res_mean.append(np.true_divide(day_sum, filtered_data.shape[0]))
-        elif calc_mean:
-            res_mean.append(np.mean(filtered_data, axis=0))
-        elif calc_sum:
-            res_sum.append(np.sum(filtered_data, axis=0))
+    # Windows differ in length around DST changes. Shorter ones are padded at the
+    # end with -0.0, the one value that leaves any sum unchanged, bit for bit.
+    is_padded = hours_per_day.min() != max_hours
+    if is_padded:
+        stacked = np.full((daily_days, max_hours, InterPhour.shape[1]), -0.0)
+        stacked[day_of_row, np.arange(day_of_row.size) - first_row[day_of_row]] = rows
+        padding = np.arange(max_hours) >= hours_per_day[:, np.newaxis]
+    else:
+        stacked = rows.reshape(daily_days, max_hours, InterPhour.shape[1])
+
+    res_mean = res_sum = res_max = res_min = res_argmax = res_argmin = None
+
+    # Reducing across rows adds one hour at a time, unlike np.sum along a single
+    # column (pairwise), so the sums match the hourly order to the last bit.
+    if calc_mean or calc_sum:
+        res_sum = np.add.reduce(stacked, axis=1)
+    if calc_mean:
+        res_mean = res_sum / hours_per_day[:, np.newaxis]
+
+    hour_times = rows[:, DATA_HOURLY["time"]]
+    first_row = first_row[:, np.newaxis]
+
+    # A padded hour must never win. NaN still propagates through max and min, and
+    # argmax/argmin still stop at a day's first NaN.
+    if calc_max or calc_argmax:
+        if is_padded:
+            stacked[padding] = -np.inf
         if calc_max:
-            res_max.append(np.max(filtered_data, axis=0))
-        if calc_min:
-            res_min.append(np.min(filtered_data, axis=0))
+            res_max = np.maximum.reduce(stacked, axis=1)
         if calc_argmax:
-            maxTime = np.argmax(filtered_data, axis=0)
-            res_argmax.append(filtered_data[maxTime, 0])
+            res_argmax = hour_times[first_row + stacked.argmax(axis=1)]
+    if calc_min or calc_argmin:
+        if is_padded:
+            stacked[padding] = np.inf
+        if calc_min:
+            res_min = np.minimum.reduce(stacked, axis=1)
         if calc_argmin:
-            minTime = np.argmin(filtered_data, axis=0)
-            res_argmin.append(filtered_data[minTime, 0])
-        if calc_precip:
-            dailyTypeCount = Counter(filtered_data[:, 1]).most_common(2)
-            if dailyTypeCount[0][0] == 0:
-                if len(dailyTypeCount) == 2:
-                    res_precip[mIDX] = dailyTypeCount[1][0]
-                else:
-                    res_precip[mIDX] = dailyTypeCount[0][0]
-            else:
-                res_precip[mIDX] = dailyTypeCount[0][0]
+            res_argmin = hour_times[first_row + stacked.argmin(axis=1)]
+
+    res_precip = (
+        _most_common_precip_type(rows[:, DATA_HOURLY["type"]], day_of_row, daily_days)
+        if calc_precip
+        else None
+    )
 
     return (
         res_mean,
@@ -156,57 +193,16 @@ def _aggregate_stats(
     )
 
 
-def _calculate_precip_chance(
-    InterPdaySum,
-    interp_half_day_sum,
-    interp_half_night_sum,
-    maxPchanceDay,
-    max_precip_chance_day,
-    max_precip_chance_night,
-    prepAccumUnit,
-    logger,
-    loc_tag,
-):
-    """
-    Calculate precipitation chance for day and night periods.
-
-    Args:
-        InterPdaySum: Daily sum of precipitation.
-        interp_half_day_sum: Half-day sum of precipitation.
-        interp_half_night_sum: Half-night sum of precipitation.
-        maxPchanceDay: Maximum precipitation chance for the day.
-        max_precip_chance_day: Maximum precipitation chance for the half-day.
-        max_precip_chance_night: Maximum precipitation chance for the half-night.
-        prepAccumUnit: Precipitation accumulation unit.
-        logger: Logger instance.
-        loc_tag: Location tag for logging.
-
-    Returns:
-        Tuple containing updated precipitation chances:
-        (maxPchanceDay, max_precip_chance_day, max_precip_chance_night)
-    """
+def _select_precip_type(window_sum, most_common_type, prepAccumUnit, logger, loc_tag):
+    """A window's precipitation type from its accumulations, falling back to its
+    most common hourly type."""
     try:
-        maxPchanceDay = select_daily_precip_type(
-            InterPdaySum, DATA_DAY, maxPchanceDay, PRECIP_IDX, prepAccumUnit
-        )
-        max_precip_chance_day = select_daily_precip_type(
-            interp_half_day_sum,
-            DATA_DAY,
-            max_precip_chance_day,
-            PRECIP_IDX,
-            prepAccumUnit,
-        )
-        max_precip_chance_night = select_daily_precip_type(
-            interp_half_night_sum,
-            DATA_DAY,
-            max_precip_chance_night,
-            PRECIP_IDX,
-            prepAccumUnit,
+        return select_daily_precip_type(
+            window_sum, DATA_DAY, most_common_type, PRECIP_IDX, prepAccumUnit
         )
     except Exception:
         logger.exception("select_daily_precip_type error %s", loc_tag)
-
-    return maxPchanceDay, max_precip_chance_day, max_precip_chance_night
+        return most_common_type
 
 
 def _conv_temp(arr, tempUnits):
@@ -230,12 +226,6 @@ def _build_display_data(
     InterPdayMin,
     InterPdayMax,
     InterPdaySum,
-    interp_half_day_mean,
-    interp_half_day_max,
-    interp_half_day_sum,
-    interp_half_night_mean,
-    interp_half_night_max,
-    interp_half_night_sum,
     tempUnits,
     windUnit,
     visUnits,
@@ -244,7 +234,7 @@ def _build_display_data(
     extraVars,
 ):
     """
-    Build display data for daily and half-day periods.
+    Build display data for the daily block.
 
     Args:
         InterPday: Daily mean data.
@@ -253,12 +243,6 @@ def _build_display_data(
         InterPdayMin: Daily minimum data.
         InterPdayMax: Daily maximum data.
         InterPdaySum: Daily sum data.
-        interp_half_day_mean: Half-day mean data.
-        interp_half_day_max: Half-day maximum data.
-        interp_half_day_sum: Half-day sum data.
-        interp_half_night_mean: Half-night mean data.
-        interp_half_night_max: Half-night maximum data.
-        interp_half_night_sum: Half-night sum data.
         tempUnits: Temperature unit.
         windUnit: Wind speed unit.
         visUnits: Visibility unit.
@@ -357,126 +341,9 @@ def _build_display_data(
         InterPdaySum[:, DATA_DAY["ice"]] * prepAccumUnit
     )
 
-    half_day_display_mean = interp_half_day_mean.copy()
-    half_day_display_mean[:, DATA_HOURLY["dew"]] = _conv_temp(
-        interp_half_day_mean[:, DATA_HOURLY["dew"]], tempUnits
-    )
-    half_day_display_mean[:, DATA_HOURLY["pressure"]] = (
-        interp_half_day_mean[:, DATA_HOURLY["pressure"]] / 100
-    )
-    half_day_display_mean[:, DATA_HOURLY["wind"]] = (
-        interp_half_day_mean[:, DATA_HOURLY["wind"]] * windUnit
-    )
-    half_day_display_mean[:, DATA_HOURLY["gust"]] = (
-        interp_half_day_mean[:, DATA_HOURLY["gust"]] * windUnit
-    )
-    half_day_display_mean[:, DATA_HOURLY["vis"]] = (
-        interp_half_day_mean[:, DATA_HOURLY["vis"]] * visUnits
-    )
-    half_day_display_mean[:, DATA_HOURLY["intensity"]] = (
-        interp_half_day_mean[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
-    )
-    half_day_display_mean[:, DATA_HOURLY["rain"]] = (
-        interp_half_day_mean[:, DATA_HOURLY["rain"]] * prepIntensityUnit
-    )
-    half_day_display_mean[:, DATA_HOURLY["snow"]] = (
-        interp_half_day_mean[:, DATA_HOURLY["snow"]] * prepIntensityUnit
-    )
-    half_day_display_mean[:, DATA_HOURLY["ice"]] = (
-        interp_half_day_mean[:, DATA_HOURLY["ice"]] * prepIntensityUnit
-    )
-    half_day_display_mean[:, DATA_HOURLY["vertical_velocity"]] = interp_half_day_mean[
-        :, DATA_HOURLY["vertical_velocity"]
-    ]
-
-    half_day_display_max = interp_half_day_max.copy()
-    half_day_display_max[:, DATA_HOURLY["intensity"]] = (
-        interp_half_day_max[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
-    )
-    half_day_display_max[:, DATA_HOURLY["rain"]] = (
-        interp_half_day_max[:, DATA_HOURLY["rain"]] * prepIntensityUnit
-    )
-    half_day_display_max[:, DATA_HOURLY["snow"]] = (
-        interp_half_day_max[:, DATA_HOURLY["snow"]] * prepIntensityUnit
-    )
-    half_day_display_max[:, DATA_HOURLY["ice"]] = (
-        interp_half_day_max[:, DATA_HOURLY["ice"]] * prepIntensityUnit
-    )
-
-    half_day_display_sum = interp_half_day_sum.copy()
-    half_day_display_sum[:, DATA_HOURLY["rain"]] = (
-        interp_half_day_sum[:, DATA_HOURLY["rain"]] * prepAccumUnit
-    )
-    half_day_display_sum[:, DATA_HOURLY["snow"]] = (
-        interp_half_day_sum[:, DATA_HOURLY["snow"]] * prepAccumUnit
-    )
-    half_day_display_sum[:, DATA_HOURLY["ice"]] = (
-        interp_half_day_sum[:, DATA_HOURLY["ice"]] * prepAccumUnit
-    )
-
-    half_night_display_mean = interp_half_night_mean.copy()
-    half_night_display_mean[:, DATA_HOURLY["dew"]] = _conv_temp(
-        interp_half_night_mean[:, DATA_HOURLY["dew"]], tempUnits
-    )
-    half_night_display_mean[:, DATA_HOURLY["pressure"]] = (
-        interp_half_night_mean[:, DATA_HOURLY["pressure"]] / 100
-    )
-    half_night_display_mean[:, DATA_HOURLY["wind"]] = (
-        interp_half_night_mean[:, DATA_HOURLY["wind"]] * windUnit
-    )
-    half_night_display_mean[:, DATA_HOURLY["gust"]] = (
-        interp_half_night_mean[:, DATA_HOURLY["gust"]] * windUnit
-    )
-    half_night_display_mean[:, DATA_HOURLY["vis"]] = (
-        interp_half_night_mean[:, DATA_HOURLY["vis"]] * visUnits
-    )
-    half_night_display_mean[:, DATA_HOURLY["intensity"]] = (
-        interp_half_night_mean[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
-    )
-    half_night_display_mean[:, DATA_HOURLY["rain"]] = (
-        interp_half_night_mean[:, DATA_HOURLY["rain"]] * prepIntensityUnit
-    )
-    half_night_display_mean[:, DATA_HOURLY["snow"]] = (
-        interp_half_night_mean[:, DATA_HOURLY["snow"]] * prepIntensityUnit
-    )
-    half_night_display_mean[:, DATA_HOURLY["ice"]] = (
-        interp_half_night_mean[:, DATA_HOURLY["ice"]] * prepIntensityUnit
-    )
-
-    half_night_display_max = interp_half_night_max.copy()
-    half_night_display_max[:, DATA_HOURLY["intensity"]] = (
-        interp_half_night_max[:, DATA_HOURLY["intensity"]] * prepIntensityUnit
-    )
-    half_night_display_max[:, DATA_HOURLY["rain"]] = (
-        interp_half_night_max[:, DATA_HOURLY["rain"]] * prepIntensityUnit
-    )
-    half_night_display_max[:, DATA_HOURLY["snow"]] = (
-        interp_half_night_max[:, DATA_HOURLY["snow"]] * prepIntensityUnit
-    )
-    half_night_display_max[:, DATA_HOURLY["ice"]] = (
-        interp_half_night_max[:, DATA_HOURLY["ice"]] * prepIntensityUnit
-    )
-
-    half_night_display_sum = interp_half_night_sum.copy()
-    half_night_display_sum[:, DATA_HOURLY["rain"]] = (
-        interp_half_night_sum[:, DATA_HOURLY["rain"]] * prepAccumUnit
-    )
-    half_night_display_sum[:, DATA_HOURLY["snow"]] = (
-        interp_half_night_sum[:, DATA_HOURLY["snow"]] * prepAccumUnit
-    )
-    half_night_display_sum[:, DATA_HOURLY["ice"]] = (
-        interp_half_night_sum[:, DATA_HOURLY["ice"]] * prepAccumUnit
-    )
-
     if "stationPressure" in extraVars:
         daily_display_mean[:, DATA_DAY["station_pressure"]] = (
             InterPday[:, DATA_DAY["station_pressure"]] / 100
-        )
-        half_day_display_mean[:, DATA_HOURLY["station_pressure"]] = (
-            interp_half_day_mean[:, DATA_HOURLY["station_pressure"]] / 100
-        )
-        half_night_display_mean[:, DATA_HOURLY["station_pressure"]] = (
-            interp_half_night_mean[:, DATA_HOURLY["station_pressure"]] / 100
         )
 
     return (
@@ -486,13 +353,52 @@ def _build_display_data(
         daily_display_min,
         daily_display_max,
         daily_display_sum,
-        half_day_display_mean,
-        half_day_display_max,
-        half_day_display_sum,
-        half_night_display_mean,
-        half_night_display_max,
-        half_night_display_sum,
     )
+
+
+def _build_half_display_data(
+    half_mean,
+    half_max,
+    half_sum,
+    tempUnits,
+    windUnit,
+    visUnits,
+    prepIntensityUnit,
+    prepAccumUnit,
+    extraVars,
+):
+    """Display data for one half-day window (the 6am to 6pm or 6pm to 6am half)."""
+    display_mean = half_mean.copy()
+    display_mean[:, DATA_HOURLY["dew"]] = _conv_temp(
+        half_mean[:, DATA_HOURLY["dew"]], tempUnits
+    )
+    display_mean[:, DATA_HOURLY["pressure"]] = (
+        half_mean[:, DATA_HOURLY["pressure"]] / 100
+    )
+    display_mean[:, DATA_HOURLY["wind"]] = half_mean[:, DATA_HOURLY["wind"]] * windUnit
+    display_mean[:, DATA_HOURLY["gust"]] = half_mean[:, DATA_HOURLY["gust"]] * windUnit
+    display_mean[:, DATA_HOURLY["vis"]] = half_mean[:, DATA_HOURLY["vis"]] * visUnits
+
+    display_max = half_max.copy()
+    display_sum = half_sum.copy()
+    for column in ("intensity", "rain", "snow", "ice"):
+        display_mean[:, DATA_HOURLY[column]] = (
+            half_mean[:, DATA_HOURLY[column]] * prepIntensityUnit
+        )
+        display_max[:, DATA_HOURLY[column]] = (
+            half_max[:, DATA_HOURLY[column]] * prepIntensityUnit
+        )
+    for column in ("rain", "snow", "ice"):
+        display_sum[:, DATA_HOURLY[column]] = (
+            half_sum[:, DATA_HOURLY[column]] * prepAccumUnit
+        )
+
+    if "stationPressure" in extraVars:
+        display_mean[:, DATA_HOURLY["station_pressure"]] = (
+            half_mean[:, DATA_HOURLY["station_pressure"]] / 100
+        )
+
+    return display_mean, display_max, display_sum
 
 
 def _round_columns_by_decimals(arr, rounding_map):
@@ -511,15 +417,9 @@ def _apply_rounding(
     daily_display_min,
     daily_display_max,
     daily_display_sum,
-    half_day_display_mean,
-    half_day_display_max,
-    half_day_display_sum,
-    half_night_display_mean,
-    half_night_display_max,
-    half_night_display_sum,
 ):
     """
-    Apply rounding rules to display data.
+    Apply rounding rules to the daily block's display data.
 
     Args:
         daily_display_mean: Daily mean display data.
@@ -528,12 +428,6 @@ def _apply_rounding(
         daily_display_min: Daily minimum display data.
         daily_display_max: Daily maximum display data.
         daily_display_sum: Daily sum display data.
-        half_day_display_mean: Half-day mean display data.
-        half_day_display_max: Half-day maximum display data.
-        half_day_display_sum: Half-day sum display data.
-        half_night_display_mean: Half-night mean display data.
-        half_night_display_max: Half-night maximum display data.
-        half_night_display_sum: Half-night sum display data.
     """
     daily_mean_rounding_map = {
         DATA_DAY["dew"]: ROUNDING_RULES.get("dewPoint", 2),
@@ -612,6 +506,9 @@ def _apply_rounding(
         daily_display_sum[:, daily_accum_cols], accum_dec
     )
 
+
+def _apply_half_rounding(display_mean, display_max, display_sum):
+    """Apply rounding rules to one half-day window's display data."""
     half_rounding_map = {
         DATA_HOURLY["dew"]: ROUNDING_RULES.get("dewPoint", 2),
         DATA_HOURLY["pressure"]: ROUNDING_RULES.get("pressure", 2),
@@ -641,16 +538,13 @@ def _apply_rounding(
         DATA_HOURLY["k_index"]: ROUNDING_RULES.get("kIndex", 0),
     }
 
-    _round_columns_by_decimals(half_day_display_mean, half_rounding_map)
-    _round_columns_by_decimals(half_day_display_max, half_rounding_map)
-    _round_columns_by_decimals(half_night_display_mean, half_rounding_map)
-    _round_columns_by_decimals(half_night_display_max, half_rounding_map)
+    _round_columns_by_decimals(display_mean, half_rounding_map)
+    _round_columns_by_decimals(display_max, half_rounding_map)
 
     half_accum_cols = [DATA_HOURLY["rain"], DATA_HOURLY["snow"], DATA_HOURLY["ice"]]
-    for half_sum_arr in (half_day_display_sum, half_night_display_sum):
-        half_sum_arr[:, half_accum_cols] = np.round(
-            half_sum_arr[:, half_accum_cols], accum_dec
-        )
+    display_sum[:, half_accum_cols] = np.round(
+        display_sum[:, half_accum_cols], ROUNDING_RULES.get("precipAccumulation", 2)
+    )
 
 
 def _build_half_day_item(
@@ -844,12 +738,12 @@ def build_daily_section(
         log_timing("Daily start")
 
     (
-        mean_results,
-        sum_results,
-        max_results,
-        min_results,
-        argmax_results,
-        argmin_results,
+        InterPday,
+        InterPdaySum,
+        InterPdayMax,
+        InterPdayMin,
+        InterPdayMaxTime,
+        InterPdayMinTime,
         _,
     ) = _aggregate_stats(
         InterPhour,
@@ -864,9 +758,9 @@ def build_daily_section(
     )
 
     (
-        mean_6am_results,
-        sum_6am_results,
-        max_6am_results,
+        InterPday6am,
+        InterPdaySum6am,
+        InterPdayMax6am,
         _,
         _,
         _,
@@ -882,47 +776,11 @@ def build_daily_section(
     )
 
     (
-        mean_day_results,
-        sum_day_results,
-        max_day_results,
         _,
         _,
+        InterPdayHigh,
         _,
-        max_precip_chance_day,
-    ) = _aggregate_stats(
-        InterPhour,
-        hourlyHalfDayIndex,
-        daily_days,
-        calc_mean=True,
-        calc_sum=True,
-        calc_max=True,
-        calc_precip=True,
-    )
-
-    (
-        mean_night_results,
-        sum_night_results,
-        max_night_results,
-        _,
-        _,
-        _,
-        max_precip_chance_night,
-    ) = _aggregate_stats(
-        InterPhour,
-        hourlyHalfNightIndex,
-        daily_days,
-        calc_mean=True,
-        calc_sum=True,
-        calc_max=True,
-        calc_precip=True,
-    )
-
-    (
-        _,
-        _,
-        high_results,
-        _,
-        arghigh_results,
+        InterPdayHighTime,
         _,
         _,
     ) = _aggregate_stats(
@@ -937,9 +795,9 @@ def build_daily_section(
         _,
         _,
         _,
-        low_results,
+        InterPdayLow,
         _,
-        arglow_results,
+        InterPdayLowTime,
         _,
     ) = _aggregate_stats(
         InterPhour,
@@ -949,26 +807,6 @@ def build_daily_section(
         calc_argmin=True,
     )
 
-    InterPday = np.array(mean_results)
-    InterPdaySum = np.array(sum_results)
-    InterPdayMax = np.array(max_results)
-    InterPdayMin = np.array(min_results)
-    InterPdayMaxTime = np.array(argmax_results)
-    InterPdayMinTime = np.array(argmin_results)
-    InterPdayHigh = np.array(high_results)
-    InterPdayLow = np.array(low_results)
-    InterPdayHighTime = np.array(arghigh_results)
-    InterPdayLowTime = np.array(arglow_results)
-    InterPday6am = np.array(mean_6am_results)
-    InterPdaySum6am = np.array(sum_6am_results)
-    InterPdayMax6am = np.array(max_6am_results)
-    interp_half_day_sum = np.array(sum_day_results)
-    interp_half_day_mean = np.array(mean_day_results)
-    interp_half_day_max = np.array(max_day_results)
-    interp_half_night_sum = np.array(sum_night_results)
-    interp_half_night_mean = np.array(mean_night_results)
-    interp_half_night_max = np.array(max_night_results)
-
     # Bearings wrap at north, so _aggregate_stats' plain means don't apply to them
     hourly_bearing = InterPhour[:, DATA_HOURLY["bearing"]]
     InterPday[:, DATA_DAY["bearing"]] = _circular_mean_by_day(
@@ -977,41 +815,85 @@ def build_daily_section(
     InterPday6am[:, DATA_HOURLY["bearing"]] = _circular_mean_by_day(
         hourly_bearing, hourlyDay6amIndex, daily_days
     )
-    interp_half_day_mean[:, DATA_HOURLY["bearing"]] = _circular_mean_by_day(
-        hourly_bearing, hourlyHalfDayIndex, daily_days
-    )
-    interp_half_night_mean[:, DATA_HOURLY["bearing"]] = _circular_mean_by_day(
-        hourly_bearing, hourlyHalfNightIndex, daily_days
-    )
 
-    maxPchanceDay, max_precip_chance_day, max_precip_chance_night = (
-        _calculate_precip_chance(
-            InterPdaySum,
-            interp_half_day_sum,
-            interp_half_night_sum,
-            maxPchanceDay,
-            max_precip_chance_day,
-            max_precip_chance_night,
-            prepAccumUnit,
-            logger,
-            loc_tag,
-        )
+    maxPchanceDay = _select_precip_type(
+        InterPdaySum, maxPchanceDay, prepAccumUnit, logger, loc_tag
     )
 
     day_night_list = []
-    max_precip_chance_day = np.array(max_precip_chance_day).astype(int)
-    precip_type_half_day = pTypeMap[max_precip_chance_day]
-    precip_text_half_day = pTextMap[max_precip_chance_day]
-    max_precip_chance_night = np.array(max_precip_chance_night).astype(int)
-    precip_type_half_night = pTypeMap[max_precip_chance_night]
-    precip_text_half_night = pTextMap[max_precip_chance_night]
+
+    # The half-day windows only feed the day_night block, which most requests
+    # don't return; together they cost about a quarter of the aggregation.
+    if include_day_night:
+        half_windows = []
+        for half_index in (hourlyHalfDayIndex, hourlyHalfNightIndex):
+            half_mean, half_sum, half_max, _, _, _, half_type = _aggregate_stats(
+                InterPhour,
+                half_index,
+                daily_days,
+                calc_mean=True,
+                calc_sum=True,
+                calc_max=True,
+                calc_precip=True,
+            )
+            half_mean[:, DATA_HOURLY["bearing"]] = _circular_mean_by_day(
+                hourly_bearing, half_index, daily_days
+            )
+            half_type = _select_precip_type(
+                half_sum, half_type, prepAccumUnit, logger, loc_tag
+            )
+            display_mean, display_max, display_sum = _build_half_display_data(
+                half_mean,
+                half_max,
+                half_sum,
+                tempUnits,
+                windUnit,
+                visUnits,
+                prepIntensityUnit,
+                prepAccumUnit,
+                extraVars,
+            )
+            _apply_half_rounding(display_mean, display_max, display_sum)
+            half_type = half_type.astype(int)
+            half_windows.append(
+                (
+                    half_mean,
+                    half_sum,
+                    half_max,
+                    display_mean,
+                    display_max,
+                    display_sum,
+                    pTypeMap[half_type],
+                    pTextMap[half_type],
+                )
+            )
+        (
+            interp_half_day_mean,
+            interp_half_day_sum,
+            interp_half_day_max,
+            half_day_display_mean,
+            half_day_display_max,
+            half_day_display_sum,
+            precip_type_half_day,
+            precip_text_half_day,
+        ) = half_windows[0]
+        (
+            interp_half_night_mean,
+            interp_half_night_sum,
+            interp_half_night_max,
+            half_night_display_mean,
+            half_night_display_max,
+            half_night_display_sum,
+            precip_type_half_night,
+            precip_text_half_night,
+        ) = half_windows[1]
 
     dayList = []
     dayList_si = []
     dayIconList = []
     dayTextList = []
 
-    maxPchanceDay = np.array(maxPchanceDay).astype(int)
+    maxPchanceDay = maxPchanceDay.astype(int)
     PTypeDay = pTypeMap[maxPchanceDay]
     PTextDay = pTextMap[maxPchanceDay]
 
@@ -1025,12 +907,6 @@ def build_daily_section(
         daily_display_min,
         daily_display_max,
         daily_display_sum,
-        half_day_display_mean,
-        half_day_display_max,
-        half_day_display_sum,
-        half_night_display_mean,
-        half_night_display_max,
-        half_night_display_sum,
     ) = _build_display_data(
         InterPday,
         InterPdayHigh,
@@ -1038,12 +914,6 @@ def build_daily_section(
         InterPdayMin,
         InterPdayMax,
         InterPdaySum,
-        interp_half_day_mean,
-        interp_half_day_max,
-        interp_half_day_sum,
-        interp_half_night_mean,
-        interp_half_night_max,
-        interp_half_night_sum,
         tempUnits,
         windUnit,
         visUnits,
@@ -1059,12 +929,6 @@ def build_daily_section(
         daily_display_min,
         daily_display_max,
         daily_display_sum,
-        half_day_display_mean,
-        half_day_display_max,
-        half_day_display_sum,
-        half_night_display_mean,
-        half_night_display_max,
-        half_night_display_sum,
     )
 
     # The summary windows are slices of the forecast's hour columns. Without

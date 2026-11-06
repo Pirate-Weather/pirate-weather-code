@@ -318,6 +318,18 @@ gives the 24 hours before midnight, for the averages only. No extra reads: the s
 read whole and SILAM keeps 48 h of history. RAQDPS only reaches back to its latest run, so
 a window crossing the run time uses SILAM before it, per hour.
 
+### Daily aggregation stacked, half-day work skipped, TESTING reads S3 directly (2026-11-06)
+`_aggregate_stats` stacks each window's hours into a (day, hour, variable) array instead of
+looping over days, and the half-day aggregates, display values and rounding only run when
+the day_night block is returned. Daily section on 45 real requests (9 locations x 5 query
+types, stores read from OVH RBX): default 3.34 -> 2.28 ms, `exclude=summary` 1.91 -> 0.85 ms,
+day_night 5.42 -> 4.87 ms. Output is identical, sums included to the last bit (24k fuzzed
+windows). An hour with a NaN precip type now counts as dry; it used to end up as a NaN day
+type, which fails when cast to an index.
+
+The TESTING stages read the bucket named by `REMOTE_PATH` directly; the
+`api.pirateweather.net/files` proxy path is gone (it had no v31 stores).
+
 ### Daily sleet is reported as sleet (2026-11-04)
 `select_daily_precip_type` overwrote the day's hourly type with the dominant accumulation
 before its "preserve sleet" check ran, so every ice-pellet day read as freezing rain.
