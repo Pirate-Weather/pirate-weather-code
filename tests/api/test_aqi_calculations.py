@@ -246,6 +246,20 @@ def _zarr_rows(var_idx, times, **columns):
     return arr
 
 
+def test_a_nan_time_does_not_lose_the_air_quality_model():
+    """A row with no data gets a NaN time. np.argmin stops at the first NaN, so
+    one short or padded run used to unmatch every hour and silently drop the whole
+    model, losing the AQI for that location.
+    """
+    silam = _zarr_rows(SILAM, HOURS, pm25=12.0)
+    silam[5, 0] = np.nan
+
+    result = prepare_aq_inputs(N_HOURS, None, silam, HOURS)
+
+    assert np.all(result["pm25"][:5] == 12.0)
+    assert np.all(result["pm25"][6:] == 12.0)
+
+
 def test_raqdps_wins_when_both_have_data():
     """RAQDPS is the higher-resolution North American model and must take
     priority over global SILAM hour by hour, with SILAM filling hours RAQDPS

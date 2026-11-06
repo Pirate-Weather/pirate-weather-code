@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from operator import itemgetter
 
 import numpy as np
 
@@ -866,8 +867,9 @@ def build_hourly_block(
         k_index_inputs,
     )
 
-    # Populate AQ columns from aq_inputs (version >= 2 only)
-    if aq_inputs is not None:
+    # Populate AQ columns from aq_inputs. Only version 2 responses return these
+    # columns or the AQI, which costs about 0.8 ms per request here.
+    if aq_inputs is not None and version >= 2:
         try:
             num_rows = InterPhour.shape[0]
 
@@ -888,16 +890,17 @@ def build_hourly_block(
             _fill_aq_col("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
 
             # Compute AQI from pollutant concentrations
+            aqi_series = {
+                pollutant: InterPhour[:, DATA_HOURLY[pollutant]]
+                for pollutant in ("pm25", "pm10", "o3", "no2", "so2", "co")
+            }
             aqi_arr = compute_aqi_with_lead_in(
                 aqiSystem if aqiSystem is not None else unitSystem,
                 aq_inputs.get("lead_in"),
-                pm25=InterPhour[:, DATA_HOURLY["pm25"]],
-                pm10=InterPhour[:, DATA_HOURLY["pm10"]],
-                o3=InterPhour[:, DATA_HOURLY["o3"]],
-                no2=InterPhour[:, DATA_HOURLY["no2"]],
-                so2=InterPhour[:, DATA_HOURLY["so2"]],
-                co=InterPhour[:, DATA_HOURLY["co"]],
+                **aqi_series,
             )
+            # The current section reuses this when its concentrations match.
+            aq_inputs["hourly_aqi"] = (aqi_arr, aqi_series)
             # Israel AQI has a scale of -400 to 100, so we need to clip it differently than the standard AQI scale of 0-500.
             if aqiSystem == "il":
                 InterPhour[:, DATA_HOURLY["aqi"]] = np.clip(
@@ -1029,6 +1032,90 @@ def build_hourly_block(
     )
 
 
+# The per-hour objects, in response order: (key, InterPhour column). Reading ~60
+# values through itemgetter and dict(zip) is cheaper than a dict literal that
+# indexes each one. Keys that aren't a plain column read (time,
+# summary, icon, precipType, precipAccumulation) are placeholders here, set in
+# build_hourly_objects, so that the key order stays the response's.
+_HOUR_SI_FIELDS = (
+    ("time", DATA_HOURLY["time"]),
+    ("temperature", DATA_HOURLY["temp"]),
+    ("dewPoint", DATA_HOURLY["dew"]),
+    ("humidity", DATA_HOURLY["humidity"]),
+    ("windSpeed", DATA_HOURLY["wind"]),
+    ("visibility", DATA_HOURLY["vis"]),
+    ("cloudCover", DATA_HOURLY["cloud"]),
+    ("smoke", DATA_HOURLY["smoke"]),
+    ("precipType", DATA_HOURLY["type"]),
+    ("precipProbability", DATA_HOURLY["prob"]),
+    ("cape", DATA_HOURLY["cape"]),
+    ("liquidAccumulation", DATA_HOURLY["rain"]),
+    ("snowAccumulation", DATA_HOURLY["snow"]),
+    ("iceAccumulation", DATA_HOURLY["ice"]),
+    ("rainIntensity", DATA_HOURLY["rain_intensity"]),
+    ("snowIntensity", DATA_HOURLY["snow_intensity"]),
+    ("iceIntensity", DATA_HOURLY["ice_intensity"]),
+    ("precipIntensity", DATA_HOURLY["intensity"]),
+    ("precipIntensityError", DATA_HOURLY["error"]),
+    ("liftedIndex", DATA_HOURLY["lifted_index"]),
+    ("verticalVelocity", DATA_HOURLY["vertical_velocity"]),
+    ("convectiveInhibition", DATA_HOURLY["convective_inhibition"]),
+    ("kIndex", DATA_HOURLY["k_index"]),
+)
+_HOUR_DISPLAY_FIELDS = (
+    ("time", DATA_HOURLY["time"]),
+    ("summary", DATA_HOURLY["time"]),
+    ("icon", DATA_HOURLY["time"]),
+    ("precipIntensity", DATA_HOURLY["intensity"]),
+    ("precipProbability", DATA_HOURLY["prob"]),
+    ("precipIntensityError", DATA_HOURLY["error"]),
+    ("precipAccumulation", DATA_HOURLY["rain"]),
+    ("precipType", DATA_HOURLY["type"]),
+    ("rainIntensity", DATA_HOURLY["rain_intensity"]),
+    ("snowIntensity", DATA_HOURLY["snow_intensity"]),
+    ("iceIntensity", DATA_HOURLY["ice_intensity"]),
+    ("temperature", DATA_HOURLY["temp"]),
+    ("apparentTemperature", DATA_HOURLY["apparent"]),
+    ("dewPoint", DATA_HOURLY["dew"]),
+    ("humidity", DATA_HOURLY["humidity"]),
+    ("pressure", DATA_HOURLY["pressure"]),
+    ("windSpeed", DATA_HOURLY["wind"]),
+    ("windGust", DATA_HOURLY["gust"]),
+    ("windBearing", DATA_HOURLY["bearing"]),
+    ("cloudCover", DATA_HOURLY["cloud"]),
+    ("uvIndex", DATA_HOURLY["uv"]),
+    ("visibility", DATA_HOURLY["vis"]),
+    ("ozone", DATA_HOURLY["ozone"]),
+    ("smoke", DATA_HOURLY["smoke"]),
+    ("liquidAccumulation", DATA_HOURLY["rain"]),
+    ("snowAccumulation", DATA_HOURLY["snow"]),
+    ("iceAccumulation", DATA_HOURLY["ice"]),
+    ("nearestStormDistance", DATA_HOURLY["storm_dist"]),
+    ("nearestStormBearing", DATA_HOURLY["storm_dir"]),
+    ("fireIndex", DATA_HOURLY["fire"]),
+    ("feelsLike", DATA_HOURLY["feels_like"]),
+    ("solar", DATA_HOURLY["solar"]),
+    ("cape", DATA_HOURLY["cape"]),
+    ("liftedIndex", DATA_HOURLY["lifted_index"]),
+    ("verticalVelocity", DATA_HOURLY["vertical_velocity"]),
+    ("convectiveInhibition", DATA_HOURLY["convective_inhibition"]),
+    ("kIndex", DATA_HOURLY["k_index"]),
+)
+# Display fields returned as whole numbers
+_HOUR_DISPLAY_INT_FIELDS = (
+    ("windBearing", DATA_HOURLY["bearing"]),
+    ("nearestStormBearing", DATA_HOURLY["storm_dir"]),
+    ("cape", DATA_HOURLY["cape"]),
+    ("liftedIndex", DATA_HOURLY["lifted_index"]),
+    ("convectiveInhibition", DATA_HOURLY["convective_inhibition"]),
+    ("kIndex", DATA_HOURLY["k_index"]),
+)
+_HOUR_SI_KEYS = tuple(key for key, _ in _HOUR_SI_FIELDS)
+_hour_si_values = itemgetter(*(column for _, column in _HOUR_SI_FIELDS))
+_HOUR_DISPLAY_KEYS = tuple(key for key, _ in _HOUR_DISPLAY_FIELDS)
+_hour_display_values = itemgetter(*(column for _, column in _HOUR_DISPLAY_FIELDS))
+
+
 def build_hourly_objects(
     *,
     hour_array_grib: np.ndarray,
@@ -1076,73 +1163,50 @@ def build_hourly_objects(
         hold None for hours outside ``display_hours``; the icon/text lists hold
         only the hours that were built.
     """
-    hourList = []
-    hourList_si = []
+    n_hours = len(hour_array_grib)
+    built_hours = (
+        range(n_hours)
+        if display_hours is None
+        else range(max(display_hours.start, 0), min(display_hours.stop, n_hours))
+    )
+    hourList = [None] * n_hours
+    hourList_si = [None] * n_hours
     hourIconList = []
     hourTextList = []
+    if not built_hours:
+        return hourList, hourList_si, hourIconList, hourTextList
 
-    # Convert the arrays to Python lists once: indexing 2-D arrays element by
-    # element (~70 scalars per hour) used to dominate this function. The values
-    # are the same, as Python floats rather than numpy scalars.
-    hour_times = hour_array_grib.tolist()
-    si_rows = InterPhour.tolist()
-    display_rows = hourly_display.tolist()
-    sunrise_by_hour = InterSday[hourlyDayIndex, DATA_DAY["sunrise"]].tolist()
-    sunset_by_hour = InterSday[hourlyDayIndex, DATA_DAY["sunset"]].tolist()
-    precip_types = PTypeHour.tolist()
+    # Convert the returned rows to Python lists once: indexing 2-D arrays element
+    # by element (~70 scalars per hour) used to dominate this function. The values
+    # are the same, as Python floats rather than numpy scalars. The response
+    # objects, their text and icon are only built for the hours that are returned;
+    # the daily text reads the hourly matrix through HourColumns.
+    start, stop = built_hours.start, built_hours.stop
+    hour_times = hour_array_grib[start:stop].tolist()
+    si_rows = InterPhour[start:stop].tolist()
+    display_rows = hourly_display[start:stop].tolist()
+    day_of_hour = hourlyDayIndex[start:stop]
+    sunrise_by_hour = InterSday[day_of_hour, DATA_DAY["sunrise"]].tolist()
+    sunset_by_hour = InterSday[day_of_hour, DATA_DAY["sunset"]].tolist()
+    precip_types = PTypeHour[start:stop].tolist()
     if version >= 2 and inc_airqualitydetails:
         # numpy rounding (not Python's round) to match the previous output
         aq_rounded = {
-            key: np.round(InterPhour[:, DATA_HOURLY[key]], 1).tolist()
+            key: np.round(InterPhour[start:stop, DATA_HOURLY[key]], 1).tolist()
             for key in ("pm25", "pm10", "o3", "no2", "so2", "co")
         }
 
-    for idx in range(len(hour_times)):
-        # The response objects, their text and icon are only built for the
-        # hours that are returned. The daily text reads the hourly matrix
-        # through HourColumns, so the SI object is only needed for those too.
-        if display_hours is not None and idx not in display_hours:
-            hourList.append(None)
-            hourList_si.append(None)
-            continue
+    for row, idx in enumerate(built_hours):
+        hour_time = hour_times[row]
+        si = si_rows[row]
+        disp = display_rows[row]
+        isDay = sunrise_by_hour[row] <= hour_time <= sunset_by_hour[row]
+        hour_time_int = int(hour_time) if not math.isnan(hour_time) else 0
 
-        hour_time = hour_times[idx]
-        si = si_rows[idx]
-        disp = display_rows[idx]
-        isDay = sunrise_by_hour[idx] <= hour_time <= sunset_by_hour[idx]
-
-        accum_display = (
-            disp[DATA_HOURLY["rain"]]
-            + disp[DATA_HOURLY["snow"]]
-            + disp[DATA_HOURLY["ice"]]
-        )
-
-        hourItem_si = {
-            "time": int(hour_time),
-            "temperature": si[DATA_HOURLY["temp"]],
-            "dewPoint": si[DATA_HOURLY["dew"]],
-            "humidity": si[DATA_HOURLY["humidity"]],
-            "windSpeed": si[DATA_HOURLY["wind"]],
-            "visibility": si[DATA_HOURLY["vis"]],
-            "cloudCover": si[DATA_HOURLY["cloud"]],
-            "smoke": si[DATA_HOURLY["smoke"]],
-            "precipType": precip_types[idx],
-            "precipProbability": si[DATA_HOURLY["prob"]],
-            "cape": si[DATA_HOURLY["cape"]],
-            "liquidAccumulation": si[DATA_HOURLY["rain"]],
-            "snowAccumulation": si[DATA_HOURLY["snow"]],
-            "iceAccumulation": si[DATA_HOURLY["ice"]],
-            "rainIntensity": si[DATA_HOURLY["rain_intensity"]],
-            "snowIntensity": si[DATA_HOURLY["snow_intensity"]],
-            "iceIntensity": si[DATA_HOURLY["ice_intensity"]],
-            "precipIntensity": si[DATA_HOURLY["intensity"]],
-            "precipIntensityError": si[DATA_HOURLY["error"]],
-            "liftedIndex": si[DATA_HOURLY["lifted_index"]],
-            "verticalVelocity": si[DATA_HOURLY["vertical_velocity"]],
-            "convectiveInhibition": si[DATA_HOURLY["convective_inhibition"]],
-            "kIndex": si[DATA_HOURLY["k_index"]],
-        }
-        hourList_si.append(hourItem_si)
+        hourItem_si = dict(zip(_HOUR_SI_KEYS, _hour_si_values(si)))
+        hourItem_si["time"] = hour_time_int
+        hourItem_si["precipType"] = precip_types[row]
+        hourList_si[idx] = hourItem_si
 
         if summaryText:
             hourText, hourIcon = calculate_text(hourItem_si, isDay, "hour", icon)
@@ -1153,47 +1217,18 @@ def build_hourly_objects(
                 is_day=isDay,
             )
 
-        hourItem = {
-            "time": int(hour_time) if not math.isnan(hour_time) else 0,
-            "summary": hourText,
-            "icon": hourIcon,
-            "precipIntensity": disp[DATA_HOURLY["intensity"]],
-            "precipProbability": disp[DATA_HOURLY["prob"]],
-            "precipIntensityError": disp[DATA_HOURLY["error"]],
-            "precipAccumulation": accum_display,
-            "precipType": precip_types[idx],
-            "rainIntensity": disp[DATA_HOURLY["rain_intensity"]],
-            "snowIntensity": disp[DATA_HOURLY["snow_intensity"]],
-            "iceIntensity": disp[DATA_HOURLY["ice_intensity"]],
-            "temperature": disp[DATA_HOURLY["temp"]],
-            "apparentTemperature": disp[DATA_HOURLY["apparent"]],
-            "dewPoint": disp[DATA_HOURLY["dew"]],
-            "humidity": disp[DATA_HOURLY["humidity"]],
-            "pressure": disp[DATA_HOURLY["pressure"]],
-            "windSpeed": disp[DATA_HOURLY["wind"]],
-            "windGust": disp[DATA_HOURLY["gust"]],
-            "windBearing": _safe_int(disp[DATA_HOURLY["bearing"]]),
-            "cloudCover": disp[DATA_HOURLY["cloud"]],
-            "uvIndex": disp[DATA_HOURLY["uv"]],
-            "visibility": disp[DATA_HOURLY["vis"]],
-            "ozone": disp[DATA_HOURLY["ozone"]],
-            "smoke": disp[DATA_HOURLY["smoke"]],
-            "liquidAccumulation": disp[DATA_HOURLY["rain"]],
-            "snowAccumulation": disp[DATA_HOURLY["snow"]],
-            "iceAccumulation": disp[DATA_HOURLY["ice"]],
-            "nearestStormDistance": disp[DATA_HOURLY["storm_dist"]],
-            "nearestStormBearing": _safe_int(disp[DATA_HOURLY["storm_dir"]]),
-            "fireIndex": disp[DATA_HOURLY["fire"]],
-            "feelsLike": disp[DATA_HOURLY["feels_like"]],
-            "solar": disp[DATA_HOURLY["solar"]],
-            "cape": _safe_int(disp[DATA_HOURLY["cape"]]),
-            "liftedIndex": _safe_int(disp[DATA_HOURLY["lifted_index"]]),
-            "verticalVelocity": disp[DATA_HOURLY["vertical_velocity"]],
-            "convectiveInhibition": _safe_int(
-                disp[DATA_HOURLY["convective_inhibition"]]
-            ),
-            "kIndex": _safe_int(disp[DATA_HOURLY["k_index"]]),
-        }
+        hourItem = dict(zip(_HOUR_DISPLAY_KEYS, _hour_display_values(disp)))
+        hourItem["time"] = hour_time_int
+        hourItem["summary"] = hourText
+        hourItem["icon"] = hourIcon
+        hourItem["precipAccumulation"] = (
+            disp[DATA_HOURLY["rain"]]
+            + disp[DATA_HOURLY["snow"]]
+            + disp[DATA_HOURLY["ice"]]
+        )
+        hourItem["precipType"] = precip_types[row]
+        for key, column in _HOUR_DISPLAY_INT_FIELDS:
+            hourItem[key] = _safe_int(disp[column])
 
         if "stationPressure" in extraVars:
             hourItem["stationPressure"] = disp[DATA_HOURLY["station_pressure"]]
@@ -1205,26 +1240,22 @@ def build_hourly_objects(
                 round(aqi_val) if not math.isnan(aqi_val) else np.nan
             )
             if inc_airqualitydetails:
-                hourItem["pm25"] = aq_rounded["pm25"][idx]
-                hourItem["pm10"] = aq_rounded["pm10"][idx]
-                hourItem["ozoneConcentration"] = aq_rounded["o3"][idx]
-                hourItem["no2Concentration"] = aq_rounded["no2"][idx]
-                hourItem["so2Concentration"] = aq_rounded["so2"][idx]
-                hourItem["coConcentration"] = aq_rounded["co"][idx]
+                hourItem["pm25"] = aq_rounded["pm25"][row]
+                hourItem["pm10"] = aq_rounded["pm10"][row]
+                hourItem["ozoneConcentration"] = aq_rounded["o3"][row]
+                hourItem["no2Concentration"] = aq_rounded["no2"][row]
+                hourItem["so2Concentration"] = aq_rounded["so2"][row]
+                hourItem["coConcentration"] = aq_rounded["co"][row]
 
         if version < 2:
             # Before version 2, apparentTemperature and feelsLike were the same
             hourItem["apparentTemperature"] = hourItem["feelsLike"]
 
-        if timeMachine and not summaryText:
-            hourItem["summary"] = hourText
-            hourItem["icon"] = hourIcon
-
         if timeMachine and not tmExtra:
             hourItem.pop("uvIndex", None)
             hourItem.pop("ozone", None)
 
-        hourList.append(hourItem)
+        hourList[idx] = hourItem
         hourIconList.append(hourIcon)
         hourTextList.append(hourItem["summary"])
 

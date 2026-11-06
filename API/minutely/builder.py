@@ -1121,10 +1121,6 @@ def _process_minute_items(
         InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
     )
 
-    minuteSleetIntensity = np.maximum(
-        InterPminute[:, DATA_MINUTELY["ice_intensity"]], 0
-    )
-
     if not refc_used:
         for arr in [
             minuteRainIntensity,
