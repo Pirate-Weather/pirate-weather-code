@@ -31,6 +31,7 @@ import google_crc32c
 import numpy as np
 import tensorstore as ts
 import zarr
+from botocore.exceptions import NoCredentialsError
 from numcodecs.zstd import Zstd
 
 from API.constants.api_const import MAX_ZARR_READ_RETRIES
@@ -459,7 +460,15 @@ async def refresh_stores(
                 )
             else:
                 opened = await open_model_store(root, version)
-        except (ValueError, OSError, KeyError, zarr.errors.BaseZarrError) as exc:
+        except (
+            ValueError,
+            OSError,
+            KeyError,
+            zarr.errors.BaseZarrError,
+            # s3fs lets this through untranslated when the pointer was readable
+            # anonymously but the alert store has no credentials to open with.
+            NoCredentialsError,
+        ) as exc:
             logger.warning("Could not open %s, keeping the held version: %s", name, exc)
             return
         setattr(stores, attr, opened)
