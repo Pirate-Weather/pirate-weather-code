@@ -8,9 +8,10 @@ grid. Publishes ``DWD_MOSMIX.zarr``, the grid-cell-to-station map
 ``DWD_MOSMIX_stations.pickle`` and ``DWD_MOSMIX.time.pickle`` (the KML IssueTime).
 The store starts at the first MOSMIX-S time step (IssueTime + 1 h).
 
-Why does it need ~20 GB of RAM to process a 40 MB KMZ? Zarr does not support
-sparse arrays and the gridded MOSMIX-S data is mostly empty; see
-https://github.com/zarr-developers/zarr-specs/issues/245.
+A 40 MB KMZ grids to about 1 GB per variable: Zarr does not support sparse arrays
+and the gridded MOSMIX-S data is mostly empty, see
+https://github.com/zarr-developers/zarr-specs/issues/245. Variables are therefore
+gridded and written one at a time.
 
 Multiple stations can map to the same grid cell (e.g. OSAKA 47772 and OSAKA
 AIRPORT 47771 are ~10 km apart); the closest station wins.
@@ -30,7 +31,6 @@ import numpy as np
 import pandas as pd
 import requests
 import xarray as xr
-from dask.diagnostics import ProgressBar
 from metpy.calc import relative_humidity_from_dewpoint
 from metpy.units import units
 from pykml import parser
@@ -554,9 +554,10 @@ def fill_station_gaps(
     return df
 
 
-def interpolate_dwd_to_grid_knearest_dask(
+def write_dwd_grid_to_zarr(
     df,
     var_cols,
+    zarr_path,
     radius_km,
     grid_tree,
     k_max=4,
@@ -565,12 +566,9 @@ def interpolate_dwd_to_grid_knearest_dask(
     lon_col="longitude",
     station_col="station_id",
     dtype=np.float32,
-    log="print",  # "print" | "tqdm" | "none"
-    print_every=10,  # used if log="print"
-    time_chunk=24,  # Dask chunk size in time
 ):
     """
-    Vectorized nearest-neighbour grid interpolation with dense, Dask-backed output.
+    Grid the station forecasts to the nearest cells and write them to ``zarr_path``.
 
     Each dataframe row is assigned to up to k_max nearest grid cells
     within radius_km. For each (time, lat, lon) grid cell, ONLY THE NEAREST
@@ -580,13 +578,19 @@ def interpolate_dwd_to_grid_knearest_dask(
     this function (see ``fill_station_gaps``), so that the nearest station always
     has a valid value and no abrupt source switches occur.
 
+    A dense grid is ~1 GB per variable and only ~5,000 stations' cells are ever
+    non-NaN. Variables are filled and written one at a time, so only one is in
+    memory: holding all 12 for a single write peaked at 16.6 GB.
+
     Parameters
     ----------
     df : pandas.DataFrame
         Columns: station_col, time_col, lat_col, lon_col, var_cols.
         Lat/lon in degrees. Lon assumed in [0, 360) for the GFS grid.
-    var_cols : str or list of str
-        Variables to interpolate.
+    var_cols : sequence of str
+        Variables to grid.
+    zarr_path : str
+        Store to create, with dims (time, lat, lon) and one array per variable.
     radius_km : float
         Max radius in km for a station to influence a grid cell.
     grid_tree : sklearn.neighbors.BallTree
@@ -597,27 +601,7 @@ def interpolate_dwd_to_grid_knearest_dask(
         Column names.
     dtype : numpy dtype
         Output dtype (np.float32 recommended).
-    log : {"print","tqdm","none"}
-        Logging mode.
-    print_every : int
-        Print frequency if log="print".
-    time_chunk : int
-        Dask chunk size for the time dimension.
-
-    Returns
-    -------
-    xr.Dataset
-        Dataset with dims (time, lat, lon); each data_var is a dense,
-        Dask-backed 3D array. Each grid cell/time uses the closest station
-        within radius_km, or NaN if none.
     """
-    if isinstance(var_cols, str):
-        var_cols = [var_cols]
-
-    def _log(msg):
-        if log == "print":
-            logger.info(msg)
-
     gfs_lats = GFS_GRID_LATS
     gfs_lons = GFS_GRID_LONS
     ny = gfs_lats.size
@@ -626,8 +610,6 @@ def interpolate_dwd_to_grid_knearest_dask(
     # -------------------------------------------------
     # 1) Station → k-nearest neighbours on grid
     # -------------------------------------------------
-    _log("Querying k-nearest neighbours for stations…")
-
     tree = grid_tree
 
     station_meta = df.drop_duplicates(subset=station_col)[
@@ -650,16 +632,12 @@ def interpolate_dwd_to_grid_knearest_dask(
     # -------------------------------------------------
     # 2) Time indexing & sorting
     # -------------------------------------------------
-    _log("Indexing time dimension…")
-
     df_sorted = df.sort_values(time_col)
     unique_times = df_sorted[time_col].drop_duplicates().to_numpy()
     nt = len(unique_times)
 
     if nt == 0:
-        return xr.Dataset(
-            coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons}
-        )
+        raise ValueError("DWD MOSMIX station data has no valid times")
 
     time_to_idx = {t: i for i, t in enumerate(unique_times)}
     t_idx = df_sorted[time_col].map(time_to_idx).to_numpy()  # shape (n_rows,)
@@ -670,8 +648,6 @@ def interpolate_dwd_to_grid_knearest_dask(
     # -------------------------------------------------
     # 3) Expand row → neighbour grid indices (vectorized)
     # -------------------------------------------------
-    _log("Linking rows to neighbour grid cells…")
-
     # Each row maps to k_max neighbours for its station
     neigh_flat = inds_flat[stn_idx_full]  # (n_rows, k_max)
     neigh_time = np.repeat(t_idx[:, None], k_max, axis=1)  # (n_rows, k_max)
@@ -683,21 +659,6 @@ def interpolate_dwd_to_grid_knearest_dask(
     flat_dist = neigh_dist.ravel()
 
     valid = flat_flat >= 0
-    if not np.any(valid):
-        # No neighbours within radius_km at all
-        ds = xr.Dataset()
-        for col in var_cols:
-            arr = np.full((nt, ny, nx), np.nan, dtype=dtype)
-            darr = da.from_array(arr, chunks=(min(time_chunk, nt), ny, nx))
-            ds[col] = xr.DataArray(
-                darr,
-                dims=("time", "lat", "lon"),
-                coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons},
-                name=col,
-            )
-        _log("Done (no valid neighbours within radius; all NaNs).")
-        return ds
-
     flat_flat = flat_flat[valid].astype(np.int64)
     flat_time = flat_time[valid].astype(np.int64)
     flat_dist = flat_dist[valid].astype(np.float32)
@@ -728,8 +689,6 @@ def interpolate_dwd_to_grid_knearest_dask(
     # -------------------------------------------------
     # 4) For each grid cell/time, find the nearest station (single pass)
     # -------------------------------------------------
-    _log("Computing nearest-station per grid cell/time (argmin)…")
-
     # Sort candidates by cell index, then distance, then station_id.
     # lexsort uses the last key as the primary sort key.
     order = np.lexsort((station_sort_rep, flat_dist, linear_index))
@@ -748,60 +707,33 @@ def interpolate_dwd_to_grid_knearest_dask(
     best_lin = best_lin[mask_radius]
     best_row = best_row[mask_radius]
 
-    # If still nothing, everything is NaN
-    if best_lin.size == 0:
-        ds = xr.Dataset()
-        for col in var_cols:
-            arr = np.full((nt, ny, nx), np.nan, dtype=dtype)
-            darr = da.from_array(arr, chunks=(min(time_chunk, nt), ny, nx))
-            ds[col] = xr.DataArray(
-                darr,
-                dims=("time", "lat", "lon"),
-                coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons},
-                name=col,
-            )
-        _log("Done (no winners within radius; all NaNs).")
-        return ds
-
     # -------------------------------------------------
-    # 5) Build dense NumPy arrays for each variable and wrap with Dask
+    # 5) Fill and write one variable at a time
     # -------------------------------------------------
-    _log(f"Building dense Dask arrays for {len(var_cols)} variable(s)…")
-
-    data_vars = {}
-    var_iter = tqdm(var_cols, desc="Variables") if log == "tqdm" else var_cols
-
-    for col in var_iter:
-        vals = df_sorted[col].to_numpy().astype(dtype)
-
-        # Allocate flattened grid
-        arr_flat = np.full(n_cells, np.nan, dtype=dtype)
-
-        # Assign values of chosen rows to their grid cells
+    process_chunk = CHUNK_SIZES["DWD"]
+    for var_number, col in enumerate(var_cols):
+        grid = np.full(n_cells, np.nan, dtype=dtype)
         # Note: if the chosen row's value is NaN, the cell is NaN.
-        arr_flat[best_lin] = vals[best_row]
+        grid[best_lin] = df_sorted[col].to_numpy().astype(dtype)[best_row]
 
-        # Reshape back to (time, lat, lon)
-        arr = arr_flat.reshape(nt, ny, nx)
-
-        # Wrap in Dask
-        chunk_t = min(time_chunk, nt) if nt > 0 else 1
-        darr = da.from_array(arr, chunks=(chunk_t, ny, nx))
-
-        data_vars[col] = xr.DataArray(
-            darr,
-            dims=("time", "lat", "lon"),
-            coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons},
-            name=col,
+        var_ds = xr.Dataset(
+            {
+                col: xr.DataArray(
+                    # Tiles slice the grid without copying it, and name=False skips
+                    # hashing 1 GB per variable for a dask key nothing reuses
+                    da.from_array(
+                        grid.reshape(nt, ny, nx),
+                        chunks=(nt, process_chunk, process_chunk),
+                        name=False,
+                    ),
+                    dims=("time", "lat", "lon"),
+                    coords={"time": unique_times, "lat": gfs_lats, "lon": gfs_lons},
+                )
+            }
         )
-
-    _log("Building xarray.Dataset (dense, dask-backed)…")
-
-    ds = xr.Dataset(data_vars=data_vars)
-
-    _log("Done. Dataset is lazy; ready for .to_zarr() or .compute().")
-
-    return ds
+        var_ds.to_zarr(zarr_path, mode="w" if var_number == 0 else "a")
+        del var_ds, grid
+        logger.info("Gridded DWD variable %s", col)
 
 
 def build_grid_to_stations_map(
@@ -917,30 +849,6 @@ def build_grid_to_stations_map(
     return grid_to_stations
 
 
-def process_and_interpolate_df(df_input, grid_tree):
-    """Standardize the station DataFrame, fill per-station gaps and grid it."""
-    df_processed = process_dwd_df(df_input)
-
-    # Fill per-station NaN gaps before gridding so that nearest-station-wins
-    # always finds a valid value and never leaves a grid cell NaN due to a
-    # single missing report (e.g. RR1c 5–6 h gaps, DD 3–4 h gaps).
-    df_processed = fill_station_gaps(df_processed)
-
-    gridded_ds = interpolate_dwd_to_grid_knearest_dask(
-        df_processed,
-        var_cols=zarr_vars,
-        radius_km=radius_km,
-        grid_tree=grid_tree,
-        time_col="time",
-        lat_col="latitude",
-        lon_col="longitude",
-        station_col="station_id",
-        log="none",
-    )
-
-    return gridded_ds
-
-
 def main() -> None:
     """Run the DWD MOSMIX ingest."""
     logging.basicConfig(
@@ -991,18 +899,13 @@ def main() -> None:
         return
     logger.info("Processing DWD_MOSMIX run %s", base_time)
 
-    # %% Standardize, fill station gaps and grid onto the GFS grid
-    # One tree serves both the gridding and the station map
+    # One tree serves both the station map and the gridding
     grid_tree = build_gfs_grid_tree()
-
-    # The store holds the latest forecast only; its first row is the first
-    # MOSMIX-S forecast time step (one hour after IssueTime).
-    gridded_dwd_ds = process_and_interpolate_df(df_data, grid_tree)
 
     # %% Build the grid-cell-to-station map the API uses for station metadata
     logger.info("Building grid-to-stations mapping")
     grid_to_stations_map = build_grid_to_stations_map(
-        df_data,  # Use original df_data which has station_name
+        df_data,
         grid_tree,
         radius_km=radius_km,
         lat_col="latitude",
@@ -1017,29 +920,23 @@ def main() -> None:
         pickle.dump(grid_to_stations_map, f)
     logger.info("Station map saved to %s", station_map_file)
 
-    # %% Write the gridded data to disk, then fill short time gaps per cell
-    gridded_dwd_ds_chunk = gridded_dwd_ds.chunk(
-        {
-            "time": len(gridded_dwd_ds.time),
-            "lat": CHUNK_SIZES["DWD"],
-            "lon": CHUNK_SIZES["DWD"],
-        }
+    # %% Standardize, fill station gaps, then grid onto the GFS grid on disk
+    # Fill per-station NaN gaps before gridding so that nearest-station-wins
+    # always finds a valid value and never leaves a grid cell NaN due to a
+    # single missing report (e.g. RR1c 5-6 h gaps, DD 3-4 h gaps).
+    # The store holds the latest forecast only; its first row is the first
+    # MOSMIX-S forecast time step (one hour after IssueTime).
+    df_data = fill_station_gaps(process_dwd_df(df_data))
+    write_dwd_grid_to_zarr(
+        df_data,
+        zarr_vars,
+        forecast_process_path + "_chunk.zarr",
+        radius_km=radius_km,
+        grid_tree=grid_tree,
     )
+    del df_data, grid_tree
 
-    # Strip existing encoding so Zarr writes the new chunks we specified
-    for var in gridded_dwd_ds_chunk.variables:
-        if "chunks" in gridded_dwd_ds_chunk[var].encoding:
-            del gridded_dwd_ds_chunk[var].encoding["chunks"]
-        if "preferred_chunks" in gridded_dwd_ds_chunk[var].encoding:
-            del gridded_dwd_ds_chunk[var].encoding["preferred_chunks"]
-
-    # Writing the dense gridded arrays to disk first keeps the gap filling below
-    # from holding them all in memory
-    with ProgressBar():
-        gridded_dwd_ds_chunk.to_zarr(forecast_process_path + "_chunk.zarr", mode="w")
-    del gridded_dwd_ds_chunk
-    del gridded_dwd_ds
-
+    # %% Fill short time gaps per cell
     ds_chunk_disk = xr.open_zarr(forecast_process_path + "_chunk.zarr", chunks="auto")
 
     logger.info("Interpolating gaps and extrapolating edges")

@@ -113,12 +113,10 @@ base_catalog_url = "https://thredds.silam.fmi.fi/thredds/catalog"
 silam_dataset_path = "silam_glob_v6_1_sfc/files"
 silam_filename_pattern = re.compile(r"SILAM-AQ-sfc-glob_v6_1_(\d{10})\.nc4$")
 
-# The history merge reads the history stores straight from the history remote,
-# which from S3 needs parallel reads (RTMA: 239 s at 64 workers, over 7 min at
-# 2). The worker count also sets how many final-store tiles are in memory at
-# once, and these tiles span every variable and forecast hour, so 12 (as GFS).
-DEFAULT_ZARR_WORKERS = 12
-DEFAULT_ZARR_CONCURRENCY = 12
+# Peak memory scales with this count: each thread holds a final-store shard, which
+# spans every variable and forecast hour. 4 matches the ingest instance's vCPUs.
+DEFAULT_ZARR_WORKERS = 4
+DEFAULT_ZARR_CONCURRENCY = 4
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR

@@ -797,12 +797,13 @@ results); the storage and read-path measurements behind the current design are i
   writes many objects needs many requests in flight, or fewer, larger objects.
 - Uploads are bounded by bytes in flight (`upload_inflight_mib`) as well as count;
   256 multi-MB shards at once timed out against OVH.
-- Peak ingest memory scales with write threads (`zarr_store_workers`). Some
-  ingests default to `os.cpu_count()`, which in a container is the node's core
-  count; set the thread count explicitly per job (see `TODO.md`).
-- Every ingest needs at most ~2 cores (measured); jobs are mostly I/O-bound or run
-  single-threaded steps (wgrib2, DWD parsing). Memory and working disk set the
-  instance size; `TODO.md` lists per-model peaks.
+- Peak ingest memory scales with write threads (`zarr_store_workers`), and with
+  any processing tile that doesn't split into whole final shards: `CHUNK_SIZES`
+  must divide `FINAL_SHARD_SIZES`, or tiles stay in memory until their neighbours
+  are written.
+- Ingests run on 2 cores, and 4 cores saves 0-15% (measured on DWD, GFS, NBM and
+  ECMWF). Memory and working disk set the instance size; `TODO.md` lists
+  per-model peaks.
 - NOMADS pacing adapts (starts at 1 s, backs off on rate-limit responses). Avoid
   Herbie probes per file; AIGEFS downloads each file with a single GET. The AWS
   "EAGLE" AIGEFS objects are an experimental model, not a mirror of NOMADS.

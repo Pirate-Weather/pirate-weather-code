@@ -7,7 +7,7 @@ directly with xarray/cfgrib (no wgrib2 conversion) and de-accumulated in
 xarray/dask. Storm distance/direction are derived from precipitation.
 
 The first 6 hours of each earlier cycle in the last ``HISTORY_PERIODS["GFS"]``
-hours are archived as ``GFS_Hist_v4<run>.zarr`` stores (tarred on S3). The
+hours are archived as ``GFS_Hist_v5<run>.zarr`` stores (tarred on S3). The
 history and the forecast are stacked, interpolated to an hourly axis and
 published as ``GFS.zarr`` and ``GFS.time.pickle``. The forecast store starts ``HISTORY_PERIODS["GFS"]`` hours
 before the first forecast lead (run + 1 h).
@@ -106,9 +106,10 @@ GFS_DUVB_MATCH_STRING = ":DUVB:surface:"
 # is negative by convention and routinely below the range minimum (-100 J/kg).
 GFS_EXCLUDED_STATS_VARIABLES = ["CIN"]
 
-# Archived history stores. The version changes whenever the stored variables
-# change, so history written with the old variable set is rebuilt, not merged.
-GFS_HISTORIC_STORE_PREFIX = "GFS_Hist_v4"
+# Archived history stores. The version changes whenever the stored variables or
+# the processing tile change, so older history is rebuilt, not merged. Merging
+# tiles of another size holds neighbouring tiles in memory (14.9 GB against 3.5 GB).
+GFS_HISTORIC_STORE_PREFIX = "GFS_Hist_v5"
 
 # Precipitation rate (mm/h) that counts as a storm cell for storm distance/direction
 GFS_STORM_APCP_THRESHOLD_MM_H = 0.2
@@ -226,9 +227,10 @@ force_update = _parse_bool_env(os.getenv("force_update", ""))
 
 GFS_DOWNLOAD_RETRIES = positive_int_env("herbie_download_retries", 5)
 GFS_RETRY_SLEEP_SECONDS = positive_int_env("herbie_retry_sleep_seconds", 20)
-# GFS writes many large variables; these defaults were tuned for the GFS host.
-DEFAULT_ZARR_WORKERS = 12
-DEFAULT_ZARR_CONCURRENCY = 12
+# Peak memory scales with this count: each thread holds a final-store shard.
+# 4 matches the ingest instance's vCPUs.
+DEFAULT_ZARR_WORKERS = 4
+DEFAULT_ZARR_CONCURRENCY = 4
 
 
 def download_gfs_subset(
