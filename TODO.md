@@ -148,36 +148,6 @@ checked against full one-week builds; reads from an RBX-A VM against RBX buckets
 ### Move to OVHCloud
 Including a Terraform setup script.
 
-### DWD MOSMIX: cut the 16.4 GB memory peak
-DWD is the only ingest that fits no 2-core instance up to 16 GB (one pod per job
-in Kubernetes): it peaks at 16.4 GB against ~4.4 GB for the rest of the run
-(2026-10-23 end-to-end run). The spike lasts a few seconds, while the gridded
-stations are written to `_chunk.zarr`. `interpolate_dwd_to_grid_knearest_dask`
-fills one dense NumPy array per variable (240 times x 720 x 1440 float32, ~1 GB
-each) and wraps each in `da.from_array`, so all 12 are in memory together when
-`to_zarr` runs, plus its rechunk copies. Fill and write one variable at a time
-(or scatter the nearest-station values straight into a zarr per time chunk:
-only cells within 50 km of a station are ever non-NaN) so the peak is about one
-variable. Check the ~4.4 GB KML/DataFrame plateau too, then size the pod; the
-target is under ~12 GB for a 2c/16 GB instance, or under 6 GB for 2c/8 GB.
-
-### Set write threads explicitly for each job (Kubernetes)
-Each write thread holds about one shard (up to ~150 MB, plus its bitrounded
-copy and compression buffers), so peak memory scales with the thread count.
-The defaults differ by ingest and some follow the machine:
-- `os.cpu_count()`: AIGFS, AIGEFS, NBM. In a pod this is the node's core
-  count, not the pod's CPU limit, so on a 16-core node NBM would write with 16
-  threads and its memory would depend on where the pod lands.
-- 64: RTMA, URMA. 12: GFS, ECMWF, SILAM. 4: ECMWF_AIFS. 2: the rest.
-- Dask work outside `write_final_zarr` that is not wrapped in
-  `dask.config.set(num_workers=...)` also defaults to one thread per node core.
-
-Set `zarr_store_workers` (and `zarr_async_concurrency`) in every job's pod spec,
-sized to its CPU and memory limits, and replace the `os.cpu_count()` defaults
-with a fixed value so a missing setting cannot scale with the node. The
-2026-10-23 peaks were measured on a 4-core VM with these defaults; re-measure
-each job at its chosen thread count before fixing the pod's memory limit.
-
 ### Read the alert grids (and maybe DWD) with tensorstore
 The NWS and WMO alert grids are now sharded (10 x 10 chunks in 100 x 100 shards:
 ~276 and ~1,400 objects instead of 25,793 and 133,633), but they are
@@ -192,18 +162,6 @@ measure. WMO's gridding also peaks at ~6 GB on one core.
 DWD MOSMIX is a 720 x 1440 grid that is NaN except at ~5,000 stations; a
 station-indexed store (or keeping only the shards with stations) may suit it
 better than a mostly-empty grid. Check its size and read time first.
-
-### NBM: interpolate in 100 x 100 tiles
-NBM's interpolate + final write is the fleet's memory peak (24.0 GB). Rechunking
-the `interp_time_take_blend` input to 100 x 100 tiles cut the peak to 19.6 GB for
-+24 s (369 vs 345 s) with a byte-identical store (same final 5 x 5 chunks, so
-reads are unchanged). Measured end to end on the 2026-10-23 03Z run; the patch
-used was a one-line rechunk before the blend.
-
-### NBM: release memory before publishing
-NBM holds ~10 GB of RSS through the whole 17 min upload of 416,807 objects. Free
-the interpolated arrays (or publish from a fresh process) before uploading so the
-upload doesn't pin memory another ingest on the host could use.
 
 ### NBM: latest-run search waits on missing files
 The latest-run probe checks 36 GRIB files with Herbie; when the newest cycle is
@@ -289,6 +247,36 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### Every ingest under 16 GB (2026-11-07)
+A processing tile that doesn't divide evenly into final shards stays in memory until the
+tiles sharing its shards are written. `CHUNK_SIZES` now divides `FINAL_SHARD_SIZES` (NBM,
+GEFS and ECMWF 198, GFS 96, GDPS 150), and a test pins it. DWD fills and writes one
+variable at a time instead of holding all 12. ECMWF frees each lead's precipitation
+statistics as it goes. NBM now publishes at about 1.5 GiB instead of ~10 GB with no change
+to the publish itself (local publish; an OVH upload wasn't run).
+
+Write threads no longer follow the node: the `os.cpu_count()` defaults are gone, RTMA and
+URMA default to 8, and `configure_zarr_writes` fixes dask's thread count
+(`dask_num_workers`, 4). Peaks below are VmHWM, with the final stores byte-identical
+(sha256 of every file) to `fa87fe1` on the same cycle. The capped runs share cached
+downloads, so their times compare with each other but not with a full ingest.
+
+| Model | Old peak | New peak | 4 cores, 14 GiB cap | 2 cores, 7 GiB cap |
+|---|---|---|---|---|
+| DWD | 16.9 GiB | 6.7 GiB | 440 s | 421 s |
+| GFS | 10.4 GiB | 3.3 GiB | 933 s | 1061 s |
+| NBM | 8.9 GiB at 4 threads | 3.7 GiB | 552 s | 649 s |
+| ECMWF | 9.1 GiB | 5.3 GiB | 2113 s | 2272 s |
+| GDPS | 8.3 GiB | 5.1 GiB | not run | not run |
+| GEFS | 6.4 GiB | 6.0 GiB | not run | not run |
+
+AIFS (5.6 GiB), AIGEFS (2.1) and AIGFS (1.9) only changed thread defaults.
+
+History merged at a different tile holds tiles in memory (GFS 14.9 GB), so GFS history
+moved to `GFS_Hist_v5`, written at the new tile. The first run rebuilds all 48 stores
+(8.9 GB): 1642 s and 4.7 GiB with a local publish, against 933 s warm, plus the upload,
+which wasn't measured. The store built on rebuilt history is byte-identical too.
 
 ### DWD doesn't fill over long gaps (2026-11-04)
 Long gaps are genuinely missing data, and now stay missing so another model fills those

@@ -5,6 +5,7 @@ import importlib
 import pytest
 
 from API.constants import model_const
+from API.ingest_utils import CHUNK_SIZES, FINAL_SHARD_SIZES
 from API.raqdps_utils import RAQDPS_OUTPUT_VARS
 
 _HRRR_LAYOUT = {
@@ -208,3 +209,16 @@ def test_api_index_map_matches_ingest_variable_order(
         for key, idx in index_map.items()
     }
     assert actual == expected
+
+
+def test_processing_tiles_split_into_whole_final_shards():
+    """Protect the ingest memory limit: when a shard straddles processing tiles, every
+    tile stays in memory until its neighbours are written (NBM 8.9 GiB against 3.7 GiB,
+    GFS 10.4 GiB against 3.3 GiB), with no error and an identical store, so a chunk or
+    shard change would otherwise only show up as an out-of-memory job in production.
+    """
+    # RAQDPS shards are only ~18 MB, so its 250-cell tiles have never mattered
+    misaligned_on_purpose = {"RAQDPS"}
+    for model, shard in FINAL_SHARD_SIZES.items():
+        if model in CHUNK_SIZES and model not in misaligned_on_purpose:
+            assert CHUNK_SIZES[model] % shard == 0, model

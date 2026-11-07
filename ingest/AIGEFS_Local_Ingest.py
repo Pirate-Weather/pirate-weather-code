@@ -187,7 +187,7 @@ def main() -> None:
     # Use the repository Herbie templates for the current AWS/NOMADS paths
     register_aws_aigfs_aigefs_templates()
     # The final write used dask's default thread pool (one thread per CPU).
-    zarr_store_workers = configure_zarr_writes(default_workers=os.cpu_count() or 2)
+    zarr_store_workers = configure_zarr_writes()
 
     process_chunk = CHUNK_SIZES["GEFS"]
     final_chunk = FINAL_CHUNK_SIZES["GEFS"]

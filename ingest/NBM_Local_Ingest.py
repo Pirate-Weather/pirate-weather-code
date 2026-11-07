@@ -278,8 +278,8 @@ def main() -> None:
     # Bound Herbie request times and pace NOMADS requests (rate-limited per IP)
     configure_herbie_request_timeouts()
 
-    # The final write used dask's default thread pool (one thread per CPU).
-    zarr_store_workers = configure_zarr_writes(default_workers=os.cpu_count() or 2)
+    # One thread per vCPU of the ingest instance: 3.8 GB peak, and 7% shorter than 2
+    zarr_store_workers = configure_zarr_writes(default_workers=4)
 
     process_chunk = CHUNK_SIZES["NBM"]
     final_chunk = FINAL_CHUNK_SIZES["NBM"]

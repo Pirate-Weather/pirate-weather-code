@@ -182,7 +182,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
     # The AIFS final write has always used 4 workers (env can still override).
-    zarr_store_workers = configure_zarr_writes(default_workers=4)
+    zarr_store_workers = configure_zarr_writes()
 
     process_chunk = CHUNK_SIZES["ECMWF"]
     final_chunk = FINAL_CHUNK_SIZES["ECMWF"]
