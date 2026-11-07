@@ -369,6 +369,7 @@ def main() -> None:
         wgrib2_path,
         forecast_process_path + "_wgrib2",
         "GDPS",
+        process_chunk,
         wgrib2_args,
     )
 

@@ -262,7 +262,7 @@ def main() -> None:
         wgrib2_path,
         forecast_process_path + "_wgrib2",
         "HRDPS",
-        "",
+        process_chunk,
     )
 
     if not np.array_equal(xarray_forecast_merged["time"].values, forecast_valid_times):

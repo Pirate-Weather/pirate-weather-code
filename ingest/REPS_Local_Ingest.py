@@ -343,6 +343,7 @@ def convert_reps_run(
         wgrib2_path,
         process_path + "_wgrib2",
         f"REPS {dataset_label} run {run_time}",
+        CHUNK_SIZES["REPS"],
         "-set_ext_name 1",
     )
 

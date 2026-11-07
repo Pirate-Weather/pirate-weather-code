@@ -283,6 +283,7 @@ def convert_fields_to_netcdf(
     wgrib2_exe: str,
     nc_prefix: str,
     description: str,
+    process_chunk: int,
     wgrib2_args: str = "",
 ) -> tuple[xr.Dataset, list[str]]:
     """Convert each field's GRIB files to its own NetCDF at the same time.
@@ -299,6 +300,7 @@ def convert_fields_to_netcdf(
         wgrib2_exe: Path to the wgrib2 executable.
         nc_prefix: Path prefix for the per-field NetCDF files.
         description: What is converted, including the model, for errors.
+        process_chunk: The model's processing tile, in grid cells.
         wgrib2_args: Extra wgrib2 arguments placed before ``-netcdf``.
 
     Returns:
@@ -322,11 +324,19 @@ def convert_fields_to_netcdf(
         for future in futures:
             future.result()
 
-    datasets = [xr.open_dataset(nc_path, chunks={}) for nc_path in nc_paths]
+    datasets = [xr.open_dataset(nc_path) for nc_path in nc_paths]
+    # Read in processing tiles from the start. Opened with chunks={} each variable
+    # is one dask chunk, so the write holds whole fields in memory to cut them into
+    # tiles (GDPS 12.0 GB against 5.0 GB). Fields with fewer leads than the others
+    # are padded when written, not held in memory.
+    tiled_datasets = [
+        dataset.chunk(
+            {dim: -1 if dim == "time" else process_chunk for dim in dataset.sizes}
+        )
+        for dataset in datasets
+    ]
     # Each variable is in one file and the coordinates are shared, so take them
     # from the first file; the default compat would load every array to compare.
-    # Dask-backed (one chunk per stored NetCDF chunk) so that fields with fewer
-    # leads than the others are padded when written, not held in memory.
-    merged = xr.merge(datasets, compat="override", join="outer")
+    merged = xr.merge(tiled_datasets, compat="override", join="outer")
     merged.set_close(lambda: [dataset.close() for dataset in datasets])
     return merged, nc_paths

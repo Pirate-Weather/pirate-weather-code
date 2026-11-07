@@ -289,16 +289,20 @@ over everything. `download_fields_concurrently` now fetches 4 fields at once
 (`msc_download_fields`), splitting `herbie_download_threads` (20) between them so the
 connection count to the MSC datamart does not grow, and `convert_fields_to_netcdf`
 runs one wgrib2 per field, 4 at once (`msc_convert_workers`), then merges the files
-lazily (dask, `compat="override"`: the default compat loads everything, 26 GB on GDPS).
+lazily, read in processing tiles (dask, `compat="override"`: the default compat loads
+everything, 26 GB on GDPS, and one dask chunk per field held whole fields, 12.2 GiB).
 Final stores are byte-identical to the old code (sha256 of every file). Cycle
 2026-11-06 12Z, 4 cores (`taskset`), `zarr_store_workers=2`, cold downloads:
 
 | Model | Old: download / convert / total | New: download / convert / total | Peak RSS (VmHWM) | Scratch |
 |-------|---------------------------------|---------------------------------|-------------------------|---------|
-| HRDPS | 286 / 272 / 739 s | 151 / 108 / 466 s (335 s in an earlier run) | 3.0 -> 7.1 GB | 14 GB |
-| GDPS  | 870 / 744 / 2,313 s | 432 / 368 / 1,450 s (1,219-1,294 s in earlier runs) | 8.1 -> 10.4 GB | 36-40 GB |
-| REPS  | 169 / 176 / 406 s | 90 / 81 / 226 s | 1.5 -> 4.6 GB | 9 GB |
-| GEPS  | 207 / 212 / 463 s | 166 / 123 / 328 s | 2.2 -> 4.6 GB | 8.5 GB |
+| HRDPS | 286 / 272 / 739 s | 151 / 108 / 466 s (335 s in an earlier run) | 3.0 -> 0.8 GiB | 14 GB |
+| GDPS  | 870 / 744 / 2,313 s | 432 / 368 / 1,450 s (1,219-1,294 s in earlier runs) | 8.1 -> 2.1 GiB | 36-40 GB |
+| REPS  | 169 / 176 / 406 s | 90 / 81 / 226 s | 1.5 -> 1.5 GiB | 9 GB |
+| GEPS  | 207 / 212 / 463 s | 166 / 123 / 328 s | 2.2 -> 2.2 GiB | 8.5 GB |
+
+New peaks were measured separately, on later cycles, with `ingest-memory-16gb`'s tiles
+(GDPS 150). Stores match with and without reading in tiles.
 
 Download time varies a lot run to run. With 4 fields at once MSC sometimes refused
 connections (ConnectTimeout, several fields at the same second); the field's retry then

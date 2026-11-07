@@ -369,6 +369,7 @@ def main() -> None:
         wgrib2_path,
         forecast_process_path + "_wgrib2",
         "GEPS",
+        process_chunk,
         "-set_ext_name 1",
     )
 
