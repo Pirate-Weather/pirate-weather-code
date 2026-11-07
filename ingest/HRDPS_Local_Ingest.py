@@ -20,15 +20,13 @@ import dask
 import dask.array as da
 import numpy as np
 import pandas as pd
-import xarray as xr
 from dotenv import find_dotenv, load_dotenv
 
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.ingest_grib_utils import (
-    cat_gribs,
+    convert_fields_to_netcdf,
     download_and_validate_subset,
-    quote_path,
-    run_checked,
+    download_fields_concurrently,
 )
 from API.ingest_utils import (
     CHUNK_SIZES,
@@ -156,7 +154,11 @@ skip_hrdps_wgrib2_validation = os.getenv(
 
 
 def download_hrdps_variable(
-    base_time: pd.Timestamp, variable: str, level: str, herbie_save_dir: str
+    base_time: pd.Timestamp,
+    variable: str,
+    level: str,
+    herbie_save_dir: str,
+    max_threads: int,
 ) -> list[str]:
     """Download and validate every lead of one HRDPS field with bounded retries."""
     return download_and_validate_subset(
@@ -173,6 +175,7 @@ def download_hrdps_variable(
         herbie_retry_sleep_seconds=HRDPS_RETRY_SLEEP_SECONDS,
         herbie_kwargs={"variable": variable, "level": level},
         wgrib2_exe=wgrib2_path.strip(),
+        download_max_threads=max_threads,
     )
 
 
@@ -235,12 +238,15 @@ def main() -> None:
     ).values
 
     # %% Download each field, then convert all of them to one NetCDF
-    grib_list = []
-    for variable, level in HRDPS_MATCH_STRINGS:
-        grib_files = download_hrdps_variable(
-            base_time, variable, level, herbie_save_dir
-        )
-        grib_list += grib_files
+    downloaded = download_fields_concurrently(
+        HRDPS_MATCH_STRINGS,
+        lambda variable, level, threads: download_hrdps_variable(
+            base_time, variable, level, herbie_save_dir, threads
+        ),
+    )
+    for (variable, level), grib_files in zip(
+        HRDPS_MATCH_STRINGS, downloaded, strict=True
+    ):
         logger.info(
             "Download completed for HRDPS forecast %s:%s, %s files downloaded.",
             variable,
@@ -248,18 +254,16 @@ def main() -> None:
             len(grib_files),
         )
 
-    # Feed wgrib2 the files in lead order so every message arrives in valid-time
-    # order; the path breaks ties so the merge is deterministic.
-    grib_list = sorted(grib_list, key=lambda path: (grib_lead_hour(path), path))
-
-    merged_nc_path = forecast_process_path + "_wgrib2_merged.nc"
-    run_checked(
-        f"{cat_gribs(grib_list)} | "
-        f"{quote_path(wgrib2_path.strip())} - "
-        f"-netcdf {quote_path(merged_nc_path)}",
-        "HRDPS wgrib2 NetCDF conversion",
+    # Convert the fields at the same time; each field's files go to wgrib2 in
+    # lead order so its messages arrive in valid-time order.
+    field_gribs = [sorted(grib_files, key=grib_lead_hour) for grib_files in downloaded]
+    xarray_forecast_merged, merged_nc_paths = convert_fields_to_netcdf(
+        field_gribs,
+        wgrib2_path,
+        forecast_process_path + "_wgrib2",
+        "HRDPS",
+        "",
     )
-    xarray_forecast_merged = xr.open_dataset(merged_nc_path)
 
     if not np.array_equal(xarray_forecast_merged["time"].values, forecast_valid_times):
         raise RuntimeError(
@@ -310,7 +314,8 @@ def main() -> None:
     xarray_forecast_merged.close()
 
     # The merged NetCDF is large and no longer needed
-    os.remove(merged_nc_path)
+    for nc_path in merged_nc_paths:
+        os.remove(nc_path)
 
     # %% Stack the variables into the (variable, time, y, x) layout the API reads
     unix_epoch = np.datetime64(0, "s")

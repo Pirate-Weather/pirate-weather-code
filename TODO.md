@@ -217,13 +217,6 @@ happened for ~5 min (no CPU, no network) before "Starting final URMA merge from
 283 hourly stores" (4,275 s), then 2.5 min opening the stores one at a time. Find
 the wait; the store opens fall under "Open the history stores in parallel".
 
-### Canadian models: parallel GRIB conversion
-HRDPS, GDPS, REPS and GEPS download one variable at a time (~6 MB/s from the MSC
-datamart), then convert on a single core: GDPS spends 12.6 min downloading and
-11 min converting (writing ~31 GB of intermediates and reading ~87 GB back) of a
-39 min run; HRDPS 4.5 + 4.5 min of 18. Run the downloads and conversions 3-4 at
-a time, and avoid re-reading the intermediate files.
-
 ### Test an NFS share as the publish target
 Same flow as object storage, with an NFS share (OVH offers up to 16,000 IOPS /
 128 MiB/s) in place of the bucket: ingests publish to the share (`open_remote`
@@ -289,6 +282,29 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### Canadian ingests download and convert 4 fields at a time (2026-11-07)
+HRDPS, GDPS, REPS and GEPS fetched one field at a time and ran one `cat | wgrib2 -netcdf`
+over everything. `download_fields_concurrently` now fetches 4 fields at once
+(`msc_download_fields`), splitting `herbie_download_threads` (20) between them so the
+connection count to the MSC datamart does not grow, and `convert_fields_to_netcdf`
+runs one wgrib2 per field, 4 at once (`msc_convert_workers`), then merges the files
+lazily (dask, `compat="override"`: the default compat loads everything, 26 GB on GDPS).
+Final stores are byte-identical to the old code (sha256 of every file). Cycle
+2026-11-06 12Z, 4 cores (`taskset`), `zarr_store_workers=2`, cold downloads:
+
+| Model | Old: download / convert / total | New: download / convert / total | Peak RSS (VmHWM) | Scratch |
+|-------|---------------------------------|---------------------------------|-------------------------|---------|
+| HRDPS | 286 / 272 / 739 s | 151 / 108 / 466 s (335 s in an earlier run) | 3.0 -> 7.1 GB | 14 GB |
+| GDPS  | 870 / 744 / 2,313 s | 432 / 368 / 1,450 s (1,219-1,294 s in earlier runs) | 8.1 -> 10.4 GB | 36-40 GB |
+| REPS  | 169 / 176 / 406 s | 90 / 81 / 226 s | 1.5 -> 4.6 GB | 9 GB |
+| GEPS  | 207 / 212 / 463 s | 166 / 123 / 328 s | 2.2 -> 4.6 GB | 8.5 GB |
+
+Download time varies a lot run to run. With 4 fields at once MSC sometimes refused
+connections (ConnectTimeout, several fields at the same second); the field's retry then
+re-downloads all of its files because retries use `overwrite=True` even though files are
+written atomically. Not seen in the old serial runs. Follow-up: skip files that already
+exist on a retry, and reuse connections (a `requests.Session` per field).
 
 ### DWD doesn't fill over long gaps (2026-11-04)
 Long gaps are genuinely missing data, and now stay missing so another model fills those
