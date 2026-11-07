@@ -30,10 +30,9 @@ from API.constants.shared_const import (
     INGEST_VERSION_STR,
 )
 from API.ingest_grib_utils import (
-    cat_gribs,
+    convert_fields_to_netcdf,
     download_and_validate_subset,
-    quote_path,
-    run_checked,
+    download_fields_concurrently,
 )
 from API.ingest_utils import (
     CHUNK_SIZES,
@@ -146,6 +145,7 @@ def download_reps_variable(
     forecast_hours: list[int],
     dataset_label: str,
     herbie_save_dir: str,
+    max_threads: int,
 ) -> list[str]:
     """Download and validate the given leads of one REPS field with bounded retries."""
     return download_and_validate_subset(
@@ -161,6 +161,7 @@ def download_reps_variable(
         herbie_retry_sleep_seconds=REPS_RETRY_SLEEP_SECONDS,
         herbie_kwargs={"variable": variable, "level": level},
         wgrib2_exe=wgrib2_path.strip(),
+        download_max_threads=max_threads,
     )
 
 
@@ -307,14 +308,23 @@ def convert_reps_run(
 ) -> tuple[xr.Dataset, str]:
     """Download one REPS run's leads and convert them to a validated NetCDF.
 
-    Returns the opened dataset and the NetCDF path, which the caller removes.
+    Returns the opened dataset and the NetCDF paths, which the caller removes.
     """
-    grib_list = []
-    for variable, level in REPS_MATCH_STRINGS:
-        grib_files = download_reps_variable(
-            run_time, variable, level, forecast_hours, dataset_label, herbie_save_dir
-        )
-        grib_list += grib_files
+    downloaded = download_fields_concurrently(
+        REPS_MATCH_STRINGS,
+        lambda variable, level, threads: download_reps_variable(
+            run_time,
+            variable,
+            level,
+            forecast_hours,
+            dataset_label,
+            herbie_save_dir,
+            threads,
+        ),
+    )
+    for (variable, level), grib_files in zip(
+        REPS_MATCH_STRINGS, downloaded, strict=True
+    ):
         logger.info(
             "Download completed for REPS %s %s:%s, %s files downloaded.",
             dataset_label,
@@ -323,20 +333,19 @@ def convert_reps_run(
             len(grib_files),
         )
 
-    # Feed wgrib2 the files in lead order so every message arrives in valid-time
-    # order; the path breaks ties so the merge is deterministic.
-    grib_list = sorted(grib_list, key=lambda path: (grib_lead_hour(path), path))
-
+    # Convert the fields at the same time; each field's files go to wgrib2 in
+    # lead order so its messages arrive in valid-time order.
     # -set_ext_name gives each member its own variable name (see
     # find_member_variables) instead of overwriting one another
-    merged_nc_path = process_path + "_wgrib2_merged.nc"
-    run_checked(
-        f"{cat_gribs(grib_list)} | "
-        f"{quote_path(wgrib2_path.strip())} - "
-        f"-set_ext_name 1 -netcdf {quote_path(merged_nc_path)}",
-        f"REPS {dataset_label} run {run_time} wgrib2 NetCDF conversion",
+    field_gribs = [sorted(grib_files, key=grib_lead_hour) for grib_files in downloaded]
+    xarray_merged, merged_nc_paths = convert_fields_to_netcdf(
+        field_gribs,
+        wgrib2_path,
+        process_path + "_wgrib2",
+        f"REPS {dataset_label} run {run_time}",
+        CHUNK_SIZES["REPS"],
+        "-set_ext_name 1",
     )
-    xarray_merged = xr.open_dataset(merged_nc_path)
 
     expected_valid_times = (
         pd.Timestamp(run_time) + pd.to_timedelta(forecast_hours, unit="h")
@@ -347,7 +356,7 @@ def convert_reps_run(
             f"{xarray_merged['time'].values} do not match the expected leads "
             f"{forecast_hours}"
         )
-    return xarray_merged, merged_nc_path
+    return xarray_merged, merged_nc_paths
 
 
 def main() -> None:
@@ -401,7 +410,7 @@ def main() -> None:
     ).values
 
     # %% Download, convert and reduce the forecast run
-    xarray_forecast_merged, merged_nc_path = convert_reps_run(
+    xarray_forecast_merged, merged_nc_paths = convert_reps_run(
         base_time,
         REPS_FORECAST_HOURS,
         "forecast",
@@ -419,7 +428,8 @@ def main() -> None:
     xarray_forecast_merged.close()
 
     # The merged NetCDF is large and no longer needed
-    os.remove(merged_nc_path)
+    for nc_path in merged_nc_paths:
+        os.remove(nc_path)
 
     # %% Stack the forecast into the (variable, time, y, x) layout the API reads
     unix_epoch = np.datetime64(0, "s")
