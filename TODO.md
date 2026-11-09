@@ -241,21 +241,28 @@ members, 24 h window, global grid), the share of members wet at any hour exceeds
 hourly maximum by 11.8 points on average where any member is wet (p90 29); cells at
 30-50 % average 62 %. The ensemble ingests (GEFS, AIGEFS, GEPS, REPS, ECMWF IFS, AIFS)
 now append per-hour member bitmask words to their stores (`Precipitation_Member_Mask_<w>`,
-24 members per float32 word, exact under `KEEPBITS`, nearest-neighbour interpolated,
-columns appended so older stores still read), and `API/daily/builder.py` ORs them over
-each local window (midnight day, 6am-6am icon window, day/night halves; today from the
-current hour) and popcounts, taking the first ensemble in precipitation priority that
+24 members per float32 word, exact under `KEEPBITS`, columns appended so older stores
+still read). Each hour takes the word of the lead whose accumulation interval contains it
+(`next_lead_vars` in `interp_time_take_blend`; nearest neighbour would hand the first
+hours of a day the interval that ended at midnight). `API/daily/builder.py` ORs the words
+over each local window (midnight day, 6am-6am icon window, day/night halves; today from
+the current hour) and popcounts, taking the first ensemble in precipitation priority that
 covers the whole window. The result is never below the hourly maximum, which also covers
-Time Machine and stores from before the masks. Member counts are
-`shared_const.ENSEMBLE_MEMBER_COUNTS`; the ingests fail before publishing on a mismatch
-(REPS confirmed 21; GEPS 21, IFS 51 and AIFS 51 still to be confirmed by a run).
+Time Machine, stores from before the masks and the ECMWF history period (the history
+runs skip the masks). Member counts are `shared_const.ENSEMBLE_MEMBER_COUNTS`; the
+ingests fail before publishing on a mismatch (REPS confirmed 21; GEPS 21, IFS 51 and
+AIFS 51 still to be confirmed by a run).
 
 Measured on this machine, cycle 2026-11-09 06Z, local publish: GEFS 741 s, 6.2 GiB peak
-(6.0 before), store 1,271 MiB (1,106); REPS 268 s, 1.6 GiB, store 320 MiB (297). A point
-read returns the same single chunk, now 9/7 (GEFS) or 16/13 (ECMWF) of the bytes; the
-daily reduction costs about 0.25 ms per request for all four windows. Toronto's third
-forecast day went from 30 % to 50 %, Seattle's from 80 % to 97 %. Deploy the API before
-the ingests: `_merge_simple_source` used to fail on a store wider than its column map.
+(6.0 before), store 1,271 MiB (a 7-variable copy of the same store is 1,107 MiB, matching
+production); REPS 268 s, 1.6 GiB, store 320 MiB (297). A point read returns the same
+single chunk, now 9/7 (GEFS) or 16/13 (ECMWF) of the bytes: a local tensorstore point
+read of the GEFS store took 0.25 ms against 0.21 ms for the 7-variable copy (280 random
+points, page cache warm). The daily reduction costs about 0.25 ms per request for all
+four windows. ECMWF shards grow from 146 to 180 MB uncompressed (`FINAL_SHARD_SIZES`
+comment); its run was not measured. Toronto's third forecast day went from 30 % to 50 %,
+Seattle's from 80 % to 97 %. Deploy the API before the ingests: `_merge_simple_source`
+used to fail on a store wider than its column map.
 
 ### Google ERA5 opened without dask (2026-11-09)
 `init_ERA5` opened Google ERA5 with dask in 24 h chunks: a graph of 273 variables x 55,152

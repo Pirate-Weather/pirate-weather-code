@@ -109,9 +109,9 @@ zarr_vars = (
     "APCP_StdDev",
     *MEMBER_MASK_VARS,
 )
-# Categorical precipitation type and the member masks (a blend of two member
-# sets is meaningless) are interpolated with nearest neighbour
-NEAREST_INTERP_VARS = ("ptype", *MEMBER_MASK_VARS)
+# Categorical precipitation type is interpolated with nearest neighbour; the
+# member masks take the lead whose accumulation interval contains the hour
+NEAREST_INTERP_VARS = ("ptype",)
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -271,7 +271,9 @@ def main() -> None:
         for name, word in zip(
             MEMBER_MASK_VARS,
             pack_member_mask(
-                wet_members.transpose("number", ...).data, AIFS_MEMBER_COUNT
+                wet_members.transpose("number", ...).data,
+                AIFS_MEMBER_COUNT,
+                label=f"ECMWF AIFS ensemble run {base_time}",
             ),
             strict=True,
         )
@@ -413,6 +415,7 @@ def main() -> None:
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
         nearest_vars=[zarr_vars.index(v) for v in NEAREST_INTERP_VARS],
+        next_lead_vars=[zarr_vars.index(v) for v in MEMBER_MASK_VARS],
         dtype="float32",
         fill_value=np.nan,
     )

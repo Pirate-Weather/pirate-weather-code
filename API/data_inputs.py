@@ -321,8 +321,9 @@ def _collect_precip_member_masks(num_hours, order, ensemble_data):
     """The ensembles' per-hour member bitmask words, in precipitation priority
     order, for the daily probability (API/daily/builder.py). Each entry is
     ``(source, (num_hours, words) array, member_count)``; sources are kept apart
-    because their member counts differ. A store published before the masks is
-    narrower than its column map and is skipped."""
+    because their member counts differ. The merge pads every model to its column
+    map, so a store published before the masks gives NaN words, which the daily
+    builder treats as uncovered."""
     masks = []
     for source in order:
         entry = ensemble_data.get(source)
@@ -330,8 +331,6 @@ def _collect_precip_member_masks(num_hours, order, ensemble_data):
             continue
         merged, index_map, member_count = entry
         columns = member_mask_columns(index_map)
-        if merged.shape[1] <= max(columns):
-            continue
         masks.append(
             (
                 source,

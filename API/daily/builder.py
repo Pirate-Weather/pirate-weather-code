@@ -233,6 +233,8 @@ def _member_precip_share(
     in_window = np.concatenate(in_window)
     day_of_row = np.concatenate(day_of_row)
     slots = windows * daily_days
+    if np.any(np.diff(day_of_row) < 0):
+        raise ValueError("Window day indices must be one ascending run per day")
 
     # The hours ascend, so each slot's rows are one run; reduceat over the runs
     # (a slot with no rows would otherwise be given its neighbour's first row)

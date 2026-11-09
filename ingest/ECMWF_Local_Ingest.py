@@ -144,12 +144,12 @@ zarr_vars = (
 # rh is derived after the hourly interpolation (append_relative_humidity); the
 # rest are read from GRIB and kept in the intermediate and history stores.
 PROCESS_VARS = tuple(var for var in zarr_vars if var != "rh")
-# History stores from before the member masks lack them; the API only needs the
-# masks for hours still ahead, so a history store is not rebuilt for them
+# The history stores carry no member masks: the API only uses them for hours
+# still ahead, so the history runs skip the work and older stores stay valid
 HISTORY_VARS = tuple(var for var in PROCESS_VARS if var not in MEMBER_MASK_VARS)
-# Categorical precipitation type and the member masks (a blend of two member
-# sets is meaningless) are interpolated with nearest neighbour
-NEAREST_INTERP_VARS = ("ptype", *MEMBER_MASK_VARS)
+# Categorical precipitation type is interpolated with nearest neighbour; the
+# member masks take the lead whose accumulation interval contains the hour
+NEAREST_INTERP_VARS = ("ptype",)
 
 # Peak memory scales with this count: each thread holds a final-store shard, which
 # spans every variable and forecast hour. 4 matches the ingest instance's vCPUs.
@@ -239,9 +239,12 @@ def write_ifs_ensemble_precip_stats(
     lead_hours: list[int],
     zarr_path: str,
     member_count: int = ECMWF_IFS_MEMBER_COUNT,
+    member_masks: bool = True,
+    run_label: str = "ECMWF IFS ensemble",
 ) -> xr.Dataset:
     """Reduce the IFS ensemble total precipitation to hourly-rate statistics
-    and per-lead member bitmasks.
+    and, for the forecast run, per-lead member bitmasks (``member_masks``; the
+    history runs skip them, see HISTORY_VARS).
 
     At 0.1 degrees one lead is 50 members x 6.5 M cells (1.3 GB as float32), and
     a lazy multi-file cfgrib open peaked at 11 GB for a single lead. So each lead
@@ -289,7 +292,11 @@ def write_ifs_ensemble_precip_stats(
         # and which members they are, for the daily probability
         wet_members = rate > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H / MM_PER_M
         precip_prob = wet_members.sum(axis=0, dtype=np.float32) / member_count
-        mask_words = pack_member_mask(wet_members, member_count)
+        mask_words = (
+            pack_member_mask(wet_members, member_count, label=run_label)
+            if member_masks
+            else []
+        )
         del wet_members
 
         dims = ("step", "latitude", "longitude")
@@ -301,7 +308,9 @@ def write_ifs_ensemble_precip_stats(
                 **{
                     name: (dims, word[np.newaxis])
                     for name, word in zip(
-                        member_mask_var_names(member_count), mask_words, strict=True
+                        member_mask_var_names(member_count) if member_masks else (),
+                        mask_words,
+                        strict=True,
                     )
                 },
             },
@@ -472,7 +481,10 @@ def main() -> None:
         base_time, ECMWF_FORECAST_HOURS, "enfo", ECMWF_ENFO_MATCH_STRING
     )
     xr_ensoOut = write_ifs_ensemble_precip_stats(
-        ens_paths, ECMWF_FORECAST_HOURS, forecast_process_path + "_ens.zarr"
+        ens_paths,
+        ECMWF_FORECAST_HOURS,
+        forecast_process_path + "_ens.zarr",
+        run_label=f"ECMWF IFS ensemble run {base_time}",
     )
 
     # Deterministic fields
@@ -528,8 +540,13 @@ def main() -> None:
         ens_his_paths = download_ecmwf_subset(
             hist_run_time, ECMWF_HISTORY_LEAD_HOURS, "enfo", ECMWF_ENFO_MATCH_STRING
         )
+        # No member masks: the API only uses them for hours still ahead
         xr_enso_hisOut = write_ifs_ensemble_precip_stats(
-            ens_his_paths, ECMWF_HISTORY_LEAD_HOURS, hist_process_path + "_ens.zarr"
+            ens_his_paths,
+            ECMWF_HISTORY_LEAD_HOURS,
+            hist_process_path + "_ens.zarr",
+            member_masks=False,
+            run_label=f"ECMWF IFS ensemble history run {hist_timestamp}",
         )
 
         xarray_hist_merged = step_to_valid_time(
@@ -571,7 +588,7 @@ def main() -> None:
         name, local_path = name_and_path
         open_history_store(history_remote, name, ("time", *HISTORY_VARS), local_path)
         ds = xr.open_zarr(local_path, consolidated=False)
-        # Member masks are NaN for history runs stored before them
+        # Member masks are NaN over the history period (see HISTORY_VARS)
         for var in MEMBER_MASK_VARS:
             if var not in ds.data_vars:
                 ds[var] = xr.full_like(ds["Precipitation_Prob"], np.nan)
@@ -639,6 +656,7 @@ def main() -> None:
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
         nearest_vars=[PROCESS_VARS.index(v) for v in NEAREST_INTERP_VARS],
+        next_lead_vars=[PROCESS_VARS.index(v) for v in MEMBER_MASK_VARS],
         dtype="float32",
         fill_value=np.nan,
     )

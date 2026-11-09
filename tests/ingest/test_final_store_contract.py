@@ -112,10 +112,12 @@ def test_member_mask_words_survive_the_store_round_trip(tmp_path):
     """The daily probability popcounts member bitmask words that travel as
     float32 through the whole ingest tail: the invalid-range mask (whose ceiling
     is below 2^24), the hourly interpolation (a blend of two member sets is
-    meaningless; they must take the nearest lead's), chunk padding, bitrounding
-    and the sharded store. Any of those can flip a bit, which is a member gained
-    or lost with no error, so the words read back must equal the packed input
-    and give the brute-force "wet at any hour" share.
+    meaningless; each hour must take the lead whose accumulation interval
+    contains it, or a day's OR picks up the interval that ended at its first
+    hour), chunk padding, bitrounding and the sharded store. Any of those can
+    flip a bit, which is a member gained or lost with no error, so the words
+    read back must equal the packed input and give the brute-force "wet at any
+    hour" share.
     """
     rng = np.random.default_rng(1)
     members = ENSEMBLE_MEMBER_COUNTS["GEFS"]
@@ -131,7 +133,7 @@ def test_member_mask_words_survive_the_store_round_trip(tmp_path):
         da.stack([prob, *words], axis=0), ignoreAxis=mask_indices
     )
     hourly = interp_time_take_blend(
-        stacked, lead_times, hourly_times, nearest_vars=mask_indices
+        stacked, lead_times, hourly_times, next_lead_vars=mask_indices
     )
     remote, _ = _write_and_publish(
         tmp_path, hourly, variables=variables, times=hourly_times
@@ -142,9 +144,11 @@ def test_member_mask_words_survive_the_store_round_trip(tmp_path):
         WeatherParallel().zarr_read("HRRR", _load(api_dir).HRRR_Zarr, 7, 5)
     )
 
-    nearest_lead = np.abs(hourly_times[:, None] - lead_times[None, :]).argmin(axis=1)
+    # Hour h belongs to the lead strictly after it; the last hour has none
+    following_lead = np.searchsorted(lead_times, hourly_times, side="right")
     expected_words = np.column_stack([w.compute()[:, 5, 7] for w in words])
-    np.testing.assert_array_equal(point[:, 2:4], expected_words[nearest_lead])
+    np.testing.assert_array_equal(point[:-1, 2:4], expected_words[following_lead[:-1]])
+    assert np.isnan(point[-1, 2:4]).all()
     # The probability itself still blends linearly between leads
     np.testing.assert_allclose(
         point[:, 1],
@@ -155,7 +159,8 @@ def test_member_mask_words_survive_the_store_round_trip(tmp_path):
     share = _member_precip_share(
         [("gefs", point[:, 2:4], members)], [np.zeros(10, dtype=int)], 1, 0
     )
-    assert share[0, 0] == wet[:, :, 5, 7].any(axis=1).mean()
+    # The 9 covered hours span leads 1-3 (intervals (0, 3], (3, 6], (6, 9])
+    assert share[0, 0] == wet[:, 1:, 5, 7].any(axis=1).mean()
 
 
 def test_old_version_is_kept_until_readers_move_on(tmp_path, monkeypatch):

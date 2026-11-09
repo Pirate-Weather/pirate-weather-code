@@ -613,7 +613,11 @@ def merge_hourly_models(
 
     if "gefs" in metadata.source_list and isinstance(data_gefs, np.ndarray):
         gefs_merged = _merge_simple_source(
-            data_gefs, base_day_utc_grib, num_hours, data_gefs.shape[1]
+            data_gefs,
+            base_day_utc_grib,
+            num_hours,
+            max(GEFS.values()) + 1,
+            source_columns=data_gefs.shape[1],
         )
 
     if "hrdps" in metadata.source_list and isinstance(data_hrdps, np.ndarray):

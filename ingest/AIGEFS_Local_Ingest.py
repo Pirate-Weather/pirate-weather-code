@@ -323,7 +323,12 @@ def main() -> None:
     }
     # Which members are wet at each lead, for the daily probability
     daskOutput.update(
-        zip(MEMBER_MASK_VARS, pack_member_mask(wet_members, AIGEFS_MEMBER_COUNT))
+        zip(
+            MEMBER_MASK_VARS,
+            pack_member_mask(
+                wet_members, AIGEFS_MEMBER_COUNT, label=f"AIGEFS run {base_time}"
+            ),
+        )
     )
 
     # Write each statistic to disk; computing them all at once overflows memory
@@ -365,13 +370,13 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # %% Interpolate to hourly and write the final store
-    # A blend of two member sets is meaningless, so the mask words take the
-    # nearest lead's set
+    # A blend of two member sets is meaningless: each hour takes the mask of
+    # the lead whose accumulation interval contains it
     daskVarArrayStackDiskInterp = interp_time_take_blend(
         daskVarArrayStackDisk,
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
-        nearest_vars=MEMBER_MASK_INDICES,
+        next_lead_vars=MEMBER_MASK_INDICES,
         dtype="float32",
         fill_value=np.nan,
     )

@@ -226,6 +226,7 @@ def write_ensemble_stats(
     zarr_path: str,
     process_chunk: int,
     zarr_store_workers: int,
+    run_label: str,
 ) -> None:
     """Reduce the converted members to the ensemble statistics and write them."""
     spatial_dims = next(iter(xarray_merged.data_vars.values())).dims[-2:]
@@ -277,17 +278,16 @@ def write_ensemble_stats(
 
         # Spread, probability and member masks only for total precipitation
         if var_prefix == "APCP":
-            if member_count != GEPS_MEMBER_COUNT:
-                raise RuntimeError(
-                    f"GEPS run has {member_count} members, expected "
-                    f"{GEPS_MEMBER_COUNT} (ENSEMBLE_MEMBER_COUNTS)"
-                )
             stats_vars["APCP_StdDev"] = stacked.std(axis=0)
             wet_members = stacked > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H
             stats_vars["Precipitation_Prob"] = wet_members.sum(axis=0) / member_count
-            # Which members are wet at each lead, for the daily probability
+            # Which members are wet at each lead, for the daily probability; the
+            # run fails here when its member count differs from the constant
             stats_vars.update(
-                zip(MEMBER_MASK_VARS, pack_member_mask(wet_members, member_count))
+                zip(
+                    MEMBER_MASK_VARS,
+                    pack_member_mask(wet_members, GEPS_MEMBER_COUNT, label=run_label),
+                )
             )
 
     stats_ds = xr.Dataset(
@@ -407,6 +407,7 @@ def main() -> None:
         forecast_process_path + "_.zarr",
         process_chunk,
         zarr_store_workers,
+        f"GEPS run {base_time}",
     )
     xarray_forecast_merged.close()
 
@@ -459,13 +460,13 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # %% Interpolate to hourly and write the final store
-    # A blend of two member sets is meaningless, so the mask words take the
-    # nearest lead's set
+    # A blend of two member sets is meaningless: each hour takes the mask of
+    # the lead whose accumulation interval contains it
     daskVarArrayStackDiskInterp = interp_time_take_blend(
         daskVarArrayStackDisk,
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
-        nearest_vars=MEMBER_MASK_INDICES,
+        next_lead_vars=MEMBER_MASK_INDICES,
         dtype="float32",
         fill_value=np.nan,
     )

@@ -6,13 +6,28 @@ import numpy as np
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.constants.model_const import ECMWF, GEFS
-from API.constants.shared_const import ENSEMBLE_MEMBER_COUNTS
+from API.constants.shared_const import (
+    ENSEMBLE_MEMBER_COUNTS,
+    MEMBER_MASK_BITS_PER_WORD,
+)
 from API.daily.builder import _member_precip_share, build_daily_section
-from API.ingest_utils import pack_member_mask
 from tests.helpers.model_arrays import hourly_inputs
 
 HOURS = 24
 HOUR_SECONDS = 3600
+
+
+def _pack(wet):
+    """(member, HOURS) boolean -> (HOURS, words) float words, as the ingests
+    store them (pack_member_mask; not imported, as the API test environment has
+    no ingest dependencies). Bit m of word w is member 24 w + m."""
+    member_count = wet.shape[0]
+    words = []
+    for first in range(0, member_count, MEMBER_MASK_BITS_PER_WORD):
+        bits = wet[first : first + MEMBER_MASK_BITS_PER_WORD]
+        weights = 2.0 ** np.arange(bits.shape[0])
+        words.append(weights @ bits)
+    return np.column_stack(words)
 
 
 def _mask_words(member_count, wet_hours_by_member):
@@ -20,7 +35,7 @@ def _mask_words(member_count, wet_hours_by_member):
     wet = np.zeros((member_count, HOURS), dtype=bool)
     for member, hours in wet_hours_by_member.items():
         wet[member, hours] = True
-    return np.column_stack(pack_member_mask(wet, member_count)).astype(float)
+    return _pack(wet)
 
 
 def _gefs_merged(words):
@@ -107,11 +122,15 @@ def test_daily_pop_counts_members_wet_at_any_hour():
     )
     assert from_six.day_list[0]["precipProbability"] == 0.07
 
-    # Without masks (a store from before them, or Time Machine) the hourly
-    # maximum stands
-    narrow_store = _gefs_merged(words)[:, : GEFS["member_mask_0"]]
-    inputs = hourly_inputs(lat=40.0, lon=-75.0, source_list=["gefs"], gefs=narrow_store)
-    assert inputs["precip_member_masks"] == []
+    # A store from before the masks leaves the (map-padded) columns NaN, and
+    # Time Machine has no ensembles at all: the hourly maximum stands
+    old_store = _gefs_merged(words)
+    old_store[:, [GEFS["member_mask_0"], GEFS["member_mask_1"]]] = np.nan
+    inputs = hourly_inputs(lat=40.0, lon=-75.0, source_list=["gefs"], gefs=old_store)
+    no_masks = _build_one_day(
+        InterPhour, precip_member_masks=inputs["precip_member_masks"]
+    )
+    assert no_masks.day_list[0]["precipProbability"] == 0.03
     no_masks = _build_one_day(InterPhour, precip_member_masks=[])
     assert no_masks.day_list[0]["precipProbability"] == 0.03
 
@@ -130,9 +149,7 @@ def test_daily_pop_uses_one_fully_covering_ensemble():
     ecmwf_wet = (np.arange(ecmwf_members) < 10)[:, np.newaxis] & (
         np.arange(HOURS) == 0
     )[np.newaxis, :]
-    ecmwf_words = np.column_stack(pack_member_mask(ecmwf_wet, ecmwf_members)).astype(
-        float
-    )
+    ecmwf_words = _pack(ecmwf_wet)
     ecmwf_words[12:] = np.nan
     day_index = np.zeros(HOURS, dtype=int)
     masks = [
