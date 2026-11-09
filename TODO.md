@@ -251,6 +251,11 @@ four 49 h reads (incl. lon 0 and a polar point): output byte-identical to the ol
 5.9-6.5 s per read instead of 8.4-9.3 s, process memory 985 MiB instead of 1,747 MiB.
 Reads the own ERA5 archive covers are unchanged.
 
+Google ERA5 is now also opened only on the first fallback (`open_google_era5`), not at
+startup: RBX logged no fallback in 1,822 historic requests over 72 h, so a worker
+normally never opens it. `init_ERA5` adds 16 MiB instead of opening the dataset; the
+first fallback pays the ~1.3 s open once per worker.
+
 ### Every ingest under 16 GB (2026-11-07)
 A processing tile that doesn't divide evenly into final shards stays in memory until the
 tiles sharing its shards are written. `CHUNK_SIZES` now divides `FINAL_SHARD_SIZES` (NBM,

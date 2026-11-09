@@ -52,7 +52,7 @@ from API.constants.shared_const import (
     LIBREWXR_GRID_WIDTH,
     LIBREWXR_MAX_NOWCAST_AGE_SECONDS,
 )
-from API.io.ZarrHelpers import read_era5_archive_point
+from API.io.ZarrHelpers import open_google_era5, read_era5_archive_point
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
 
@@ -543,6 +543,7 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
             num_hours,
         )
 
+    open_google_era5(era5_data)
     abslat_era5 = np.abs(era5_data["ERA5_lats"] - lat)
     abslon_era5 = np.abs(era5_data["ERA5_lons"] - lon)
     y_p = np.argmin(abslat_era5)
