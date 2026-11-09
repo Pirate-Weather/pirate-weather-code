@@ -8,6 +8,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,11 +24,15 @@ from zarr.abc.store import (
 from zarr.core.buffer import Buffer, BufferPrototype
 from zarr.storage import FsspecStore
 
+from API.constants.model_const import ERA5_SOURCE_VARS
+
 logger = logging.getLogger(__name__)
 
 
 ERA5_ZARR_URL = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
-ERA5_DASK_CHUNKS = {"time": 24}
+# Threads for one Google ERA5 point read: one per source variable plus the
+# precipitation neighbourhood, so a fallback read waits for one round trip, not 19.
+ERA5_READ_THREADS = len(ERA5_SOURCE_VARS) + 1
 ERA5_CACHE_VERSION = "cache-store-v1"
 ERA5_CACHE_MAX_SIZE = 20 * 1024**3
 ERA5_CACHE_DIR_DEFAULT = "ERA5_cache"
@@ -232,10 +237,11 @@ def init_ERA5(cache_dir: str | None = None):
         size_limit=_get_era5_cache_max_size(),
     )
 
-    dsERA5 = xr.open_zarr(
-        cache_store,
-        chunks=ERA5_DASK_CHUNKS,
-    )
+    # chunks=None opens lazily without dask. With dask in 24 h chunks, the task
+    # graph for 273 variables x 55,152 chunks cost every worker ~0.7 GiB at open and
+    # ~1.2 GiB more after a few reads; a point read only needs a few chunks per
+    # variable, which _load_era5_slice fetches in parallel on ERA5_read_pool.
+    dsERA5 = xr.open_zarr(cache_store, chunks=None)
     source = ERA5_ZARR_URL
 
     ERA5_lats = dsERA5["latitude"].values
@@ -252,6 +258,9 @@ def init_ERA5(cache_dir: str | None = None):
         "ERA5_source": source,
         # Read first when configured; Google is the fallback (_load_era5_slice).
         "ERA5_archive": init_ERA5_archive(),
+        "ERA5_read_pool": ThreadPoolExecutor(
+            max_workers=ERA5_READ_THREADS, thread_name_prefix="era5-read"
+        ),
     }
 
     return ERA5_Data

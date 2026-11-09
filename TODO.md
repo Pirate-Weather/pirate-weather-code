@@ -241,6 +241,16 @@ some fields use `clipLog`, others `np.clip`.
 
 ## Done
 
+### Google ERA5 opened without dask (2026-11-09)
+`init_ERA5` opened Google ERA5 with dask in 24 h chunks: a graph of 273 variables x 55,152
+chunks in every process that loads ERA5 (historic workers and dev). On RBX a historic
+worker sat at 1.8-2.0 GiB against 0.5 GiB for a prod worker. It now opens with
+`chunks=None`, and `_load_era5_slice` reads the 18 point series and the precipitation
+window in parallel on `ERA5_read_pool`. Measured locally against live Google ERA5 with
+four 49 h reads (incl. lon 0 and a polar point): output byte-identical to the old code,
+5.9-6.5 s per read instead of 8.4-9.3 s, process memory 985 MiB instead of 1,747 MiB.
+Reads the own ERA5 archive covers are unchanged.
+
 ### Every ingest under 16 GB (2026-11-07)
 A processing tile that doesn't divide evenly into final shards stays in memory until the
 tiles sharing its shards are written. `CHUNK_SIZES` now divides `FINAL_SHARD_SIZES` (NBM,
