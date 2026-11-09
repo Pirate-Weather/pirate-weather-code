@@ -48,7 +48,7 @@ def positive_int_env(name: str, default: int) -> int:
 
 BASE_DIR = os.getenv("BASE_DIR", "/mnt/nvme/data/ProdTest3")
 # bucket/prefix the ingests publish to (their forecast_path + ingest version)
-REMOTE_PATH = os.getenv("REMOTE_PATH", "piratezarr2/ForecastTar_v2/v31")
+REMOTE_PATH = os.getenv("REMOTE_PATH", "piratezarr2/ForecastTar_v2/v32")
 SAVE_TYPE = os.getenv("save_type", "S3")
 SYNC_INTERVAL = positive_int_env("SYNC_INTERVAL", 300)
 DOWNLOAD_CONCURRENCY = positive_int_env("SYNC_CONCURRENCY", 32)

@@ -1165,6 +1165,7 @@ async def PW_Forecast(
             current_hour_time=None
             if timeMachine
             else int(hour_array_grib[int(baseTimeOffset)]),
+            precip_member_masks=inputs["precip_member_masks"],
         )
     dayList = daily_section.day_list
     dayList_si = daily_section.day_list_si

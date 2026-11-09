@@ -36,7 +36,7 @@ Several environmental variables are also used to control the API, including:
 - `save_type`: If data should be saved to S3 (`S3`) or locally (`Download`).
 - `forecast_path` / `historic_path`: Where published stores and short-term history go: a local directory, or `bucket/prefix` when `save_type` is `S3`.
 - `s3_endpoint`, `s3_region`, `s3_storage_class`: Optional settings for a non-AWS object store (for OVH, e.g. `https://s3.bhs.io.cloud.ovh.net`, `bhs` and `EXPRESS_ONEZONE` for High Performance).
-- `REMOTE_PATH`: The `bucket/prefix` of the published stores, including the ingest version (e.g. `pirate-forecast/forecast/v31`). `store_sync` copies from here, and the `TESTING` stages read from here directly when `save_type` is `S3`, using `s3_endpoint`, `s3_region` and the standard `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
+- `REMOTE_PATH`: The `bucket/prefix` of the published stores, including the ingest version (e.g. `pirate-forecast/forecast/v32`). `store_sync` copies from here, and the `TESTING` stages read from here directly when `save_type` is `S3`, using `s3_endpoint`, `s3_region` and the standard `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`.
 - `upload_concurrency`: How many objects are uploaded at once when publishing (default 256).
 - `save_path`: Where the ingested data should be saved.
 
@@ -199,7 +199,7 @@ Two options are available to do this via Docker- either download a static copy o
 For Option 1:
 
 ```
-docker run -e STAGE=TESTING -e save_type=S3 -e REMOTE_PATH=<BUCKET>/<PREFIX>/v31 -e s3_endpoint=<ENDPOINT> -e s3_region=<REGION> -e AWS_ACCESS_KEY_ID=<KEY> -e AWS_SECRET_ACCESS_KEY=<SECRET> -p 8000:8000 public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8000 
+docker run -e STAGE=TESTING -e save_type=S3 -e REMOTE_PATH=<BUCKET>/<PREFIX>/v32 -e s3_endpoint=<ENDPOINT> -e s3_region=<REGION> -e AWS_ACCESS_KEY_ID=<KEY> -e AWS_SECRET_ACCESS_KEY=<SECRET> -p 8000:8000 public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8000 
 
 curl 127.0.0.1:8083/forecast/123456/45.4215,-75.6972
 ```
@@ -209,7 +209,7 @@ To make changes to the underlying code, a docker volume can be mounted over of t
 ```
 git clone https://github.com/Pirate-Weather/pirate-weather-code.git
 
-docker run -e STAGE=TESTING -e save_type=S3 -e REMOTE_PATH=<BUCKET>/<PREFIX>/v31 -e s3_endpoint=<ENDPOINT> -e s3_region=<REGION> -e AWS_ACCESS_KEY_ID=<KEY> -e AWS_SECRET_ACCESS_KEY=<SECRET> -p 8000:8000 -v ~/pirate-weather-code/API:/app public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8000 
+docker run -e STAGE=TESTING -e save_type=S3 -e REMOTE_PATH=<BUCKET>/<PREFIX>/v32 -e s3_endpoint=<ENDPOINT> -e s3_region=<REGION> -e AWS_ACCESS_KEY_ID=<KEY> -e AWS_SECRET_ACCESS_KEY=<SECRET> -p 8000:8000 -v ~/pirate-weather-code/API:/app public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8000 
 ```
   
 For Option 2:

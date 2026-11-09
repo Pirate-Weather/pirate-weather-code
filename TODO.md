@@ -263,8 +263,8 @@ four windows. ECMWF shards grow from 146 to 180 MB uncompressed (`FINAL_SHARD_SI
 comment); its run was not measured. Toronto's third forecast day went from 30 % to 50 %,
 Seattle's from 80 % to 97 %. The ingest version moved to v32 so the ingests publish
 the wider stores to a new prefix while the running API keeps reading v31; the API side
-(daily builder, merge width fix, API version a6) is a separate PR that follows once the
-v32 stores exist. `_merge_simple_source` used to fail on a store wider than its column map.
+(daily builder, merge width fix, API version a6, reading v32) followed in a separate PR
+once the v32 stores existed. `_merge_simple_source` used to fail on a store wider than its column map.
 
 ### Google ERA5 opened without dask (2026-11-09)
 `init_ERA5` opened Google ERA5 with dask in 24 h chunks: a graph of 273 variables x 55,152
