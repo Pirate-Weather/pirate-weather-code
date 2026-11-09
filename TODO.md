@@ -14,8 +14,8 @@ Work through the open items in this order, small ones first:
 1. Small: reload the DWD station and RAQDPS lat/lon pickles when the sync updates
    them; re-publish the README developer snapshot in the sharded layout; consistent
    clipping (#760).
-2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689); only list
-   the sources used (#554); next-update field (#668).
+2. Bigger: future dates in time machine (#689); only list the sources used (#554);
+   next-update field (#668).
 
 ## v3 goals
 
@@ -48,11 +48,6 @@ benchmarks. Replay a day of real request coordinates against the new reader to
 pick the cache size (the shard indexes alone are ~35 MB), and check the write
 peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
 
-### Confirm the KEEPBITS steps for the less-used variables
-`KEEPBITS` (`API/ingest_utils.py`) bitrounds every stored variable to twice its
-output step. The steps for VVEL, PM_FRP_column, BLH and the Storm_Distance maximum
-were assumed, not checked against how the API uses them.
-
 ### Future dates in time machine
 [pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): Dark
 Sky allowed time-machine requests for future dates; Pirate Weather returns HTTP 400.
@@ -71,6 +66,21 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### KEEPBITS steps confirmed for the less-used variables (2026-11-09)
+Checked with `numcodecs.BitRound` against how the API uses each field; no bit counts
+changed, only the comments in `KEEPBITS` (`API/ingest_utils.py`).
+- `VVEL_500mb` (8 bits; GFS, GDPS, HRDPS, Pa/s): output `verticalVelocity` at 2 dp,
+  clipped to +/-30 Pa/s. Max error 0.016 Pa/s up to 16 Pa/s, 0.031 at the clip; the
+  thunderstorm text score (-vv/0.5) is unaffected.
+- `PM_FRP_column` (11 bits; SILAM, ug/m2) and `BLH` (10 bits; SILAM, m): never output,
+  only inputs to the fallback smoke (FRP / clip(3*BLH, 2000, 6000)). Relative error
+  2^-12 on FRP and <= 1 m on BLH keep the derived smoke within 0.073 %.
+- `Storm_Distance` (11 bits; GFS): stored in metres and uncapped. Error 0.8 km at
+  5000 km, 4.1 km at 20,000 km, below the 0.25 degree grid it is measured on.
+
+Bitround precision is not part of the store schema, so a bit-count change never needs
+an `INGEST_VERSION_STR` bump.
 
 ### Moved to OVHCloud (2026-11)
 The API, the ingests, LibreWXR and the daily ERA5 job run on OVH's RBX Kubernetes
