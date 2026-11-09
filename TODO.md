@@ -6,6 +6,16 @@ then move the entry to Done.
 
 ## Bugs
 
+### `clipLog` has no margin past a negative minimum or a zero maximum
+`lowest_plausible = min(min_val, min_val * 0.75 - 2)` is just `min_val` when the minimum
+is negative (and `max_val * 1.25` is `max_val` at or below 0), so a value even slightly
+past such a bound becomes NaN instead of clamping, against the docstring. The current
+feels-like and lifted index (and anything else with a negative minimum) blank below
+their minimum, e.g. wind chills below -60 C. `tests/api/test_clip_log.py` pins the
+behaviour on purpose ("as before"). A margin of `0.25 * abs(bound)` (plus 2 below the
+minimum) would fix it and let the hourly feels-like move to `clipLog`; CIN's 0 maximum
+would still need its own rule.
+
 ## Improvements
 
 ## Plan (2026-11-09)
