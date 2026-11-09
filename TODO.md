@@ -1,194 +1,38 @@
 # TODO
 
-Known bugs found during the v3 test-suite review (2026-10-19). Each has been confirmed
-by reading the code; none is fixed yet. When fixing one, add a single regression test
-that would have caught it, then remove the entry.
+Open bugs, improvements and v3 goals, then a log of finished work with its measured
+results. When fixing a bug, add a single regression test that would have caught it,
+then move the entry to Done.
 
 ## Bugs
 
 ## Improvements
+
+## Plan (2026-11-09)
+
+Work through the open items in this order, small ones first:
+1. Small: reload the DWD station and RAQDPS lat/lon pickles when the sync updates
+   them; re-publish the README developer snapshot in the sharded layout; consistent
+   clipping (#760).
+2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689); only list
+   the sources used (#554); next-update field (#668).
 
 ## v3 goals
 
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done
 there (forecast/historic split, test refactor, ingest standardization) are not listed.
 
-### LibreWXR for maps, radar coverage and minutely precipitation
-Plan in [pirateweather discussion #414](https://github.com/Pirate-Weather/pirateweather/discussions/414#discussioncomment-18934138):
-use LibreWXR's global radar nowcast for minutely precipitation worldwide (likely
-better than HRRR sub-hourly even inside its domain), and mirror its cache to S3 so
-render nodes can run in several regions with the last good data if the pipeline fails.
-- [x] Minutely store: `ingest/LibreWXR_Local_Ingest.py`, run by LibreWXR's nowcast
-  hook once per nowcast, publishes `LibreWXR.zarr` (see Done, 2026-11-02).
-- [ ] Upstream the hooks: branch `cycle-hooks` of the LibreWXR fork adds
-  `LIBREWXR_HOOK_STATE_CMD` / `LIBREWXR_HOOK_NOWCAST_CMD` / `LIBREWXR_HOOK_LIGHTNING_CMD`
-  (`src/librewxr/hooks.py`); submit it as a PR to JoshuaKimsey/LibreWXR.
-- [x] Mirror the LibreWXR cache to object storage for render nodes: done inside
-  LibreWXR as "snapshot sync" (fork branch `network-split`, on top of `cycle-hooks`,
-  for LibreWXR issue #51): the pipeline publishes each `state.json` and the files it
-  names to an fsspec URL (`LIBREWXR_SNAPSHOT_SYNC_URL`, S3 or `file://`), and
-  `python -m librewxr.snapshot_pull` on a render host pulls them into its cache,
-  rewrites the pipeline's absolute paths, writes `state.json` last and prunes the
-  per-node caches. Measured on this host: ~1 GB raw per 10-minute cycle at full
-  regions. Nothing is needed on the Pirate Weather side.
-- [ ] Deploy: run LibreWXR's pipeline service from the `pirate-librewxr` image
-  (`Docker/pirate-librewxr-dockerfile`: LibreWXR from the fork branch plus this
-  repo's code; built and pushed to ECR Public by `build.yml`, build-checked by
-  `sanity.yml`) with `LIBREWXR_HOOK_NOWCAST_CMD` and `LIBREWXR_SNAPSHOT_SYNC_URL`
-  set. Switch `LIBREWXR_REF` in both workflows to an upstream release tag once
-  the hooks and snapshot sync PRs are merged.
+### LibreWXR: build from the upstream release
+The hooks and snapshot sync are upstream (JoshuaKimsey/LibreWXR #55 and #56, released
+in v0.9.0), but `LIBREWXR_REF` in `build.yml` and `sanity.yml` still names the fork
+branch `network-split`. Switch both to `v0.9.0`, then move the RBX `librewxr` image
+pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
 
-### Own ERA5 dataset
-Only the needed variables, chunked for point reads, based on the Google ARCO pipeline
-the API reads today (`ar/full_37-1h-0p25deg-chunk-1.zarr-v3`, one whole-globe chunk per
-hour and variable). Design so far: the 18 surface variables the API reads, 1940 to
-present, `(variable, time, y, x)` with 120 h time blocks and 8 x 8 point tiles, one
-shard per 120 h block; about 11-19 TB. Daily ERA5T appends (about 6 days behind) and a
-monthly replacement with final ERA5 (3 months behind). Prototype one month first.
-Replaces `init_ERA5` (`API/io/ZarrHelpers.py`) and `_load_era5_slice`
-(`API/request/grid_indexing.py`), including the 20 GB disk cache.
-`scripts/build_era5_point_test_store.py` now builds the int16 layout measured below
-(`ERA5_ARCHIVE*` in `API/constants/model_const.py`, `encode_era5_archive_field` /
-`write_era5_archive_zarr` in `API/ingest_utils.py`, `decode_era5_archive` in
-`API/io/ZarrHelpers.py`, contract test `tests/ingest/test_era5_archive.py`): 19
-variables including direct solar (`fdir`) and cloud base height (`cbh`, NaN where there
-is none). Real 2015-06-29 week (2026-11-04): 1125 MiB, 121 objects, 11.4 GB peak
-memory (27 GB for the float32 builder), 15 s write, 2:22 wall; 16 spot cells x 19
-variables decode within one quantization step of Google's values.
-The API reads it first when `ERA5_ARCHIVE` is set (`s3://bucket/prefix` or a local
-directory; `ERA5_ARCHIVE_S3_ENDPOINT` / `_REGION` for the BHS private endpoint):
-`_load_era5_slice` -> `read_era5_archive_point`, which returns Google's layout and
-units, so nothing downstream changed. A request touching any week the archive lacks
-is read entirely from Google. Live, BHS private endpoint (2026-11-04): 15 ms warm,
-~1 s for the first read in a process (connection setup, week metadata and shard
-index), 37 ms to find a week missing; values within half a step of Google's.
-Still to do: daily ERA5T appends (recent weeks fall back to Google until then), and
-open a week with one metadata read instead of two (KvStore read + `ts.open`).
-
-Backfill done (2026-11-04 to 11-06): bucket `pirate-era5` (RBX, High Performance),
-`ERA5_archive/<week>.zarr` for 4,478 weeks, 1940-12-30 .. 2026-10-19 (complete weeks
-to Google's ERA5T end, 2026-10-29), 5.27 TB, ~1.1 GB per week in every decade. Built
-with `scripts/backfill_era5_archive.py`: 2020-2026 on a b3-64 in RBX-A (4 at a time,
-2.9 h), 1941-2019 on an r3-128 in GRA11 uploading to RBX (8 at a time, 5.1 h + 15.1 h,
-~3.4 weeks/min, bound by Google reads at ~110-180 s per week). API config:
-`ERA5_ARCHIVE=s3://pirate-era5`, `ERA5_ARCHIVE_S3_ENDPOINT=https://s3.rbx.io.cloud.ovh.net`,
-`ERA5_ARCHIVE_S3_REGION=rbx`. Starts at 1941: ERA5's forecast fields (gusts,
-precipitation, radiation, cloud base) are missing for 1940-01-01 00-06 UTC.
-Source quirks met: Google stalled for minutes once (one week hung; hence the per-week
-timeout), and ERA5 has spurious CAPE spikes over steep terrain (up to ~2e6 J/kg in the
-Andes), now capped at 20,000 J/kg (101 weeks before 2000 and a few after).
-Daily updates: `scripts/era5_archive_daily.py` (CronJob `ingest-era5-daily`, in the
-RBX workloads values, suspended until deployed). Final weeks are immutable
-`<week>.zarr`; ERA5T weeks and the current partial week are versioned behind
-`<week>.current.json` and republished when Google has more; weeks move to final ERA5
-when Google's does. Readers re-resolve changing weeks every 5 minutes and never read a
-store that changes under them. Its first run converts the 17 ERA5T weeks the backfill
-wrote as immutable stores (2026-06-29 onward) to versions (dry run, 2026-11-06: 18
-versioned builds, ~45 min). Tested live on a test prefix (2026-11-06): 3 weeks in 169
-s, a second run did nothing, and a reader kept serving through a republish and moved
-to the new version at its re-check.
-To do: deploy it (image with `scripts/`, unsuspend the CronJob); alert if Google's
-ERA5T end stops moving (the job exits 1 after 10 days).
-
-### ERA5: tune rounding and compression for storage cost
-The one-week test store (`scripts/build_era5_point_test_store.py`, 2015-06-29, 18
-variables, 10 x 10 inner chunks of the whole week, 100 x 100 shards) is 1885 MiB, which
-would make 1940 to present roughly 8 TB. It uses the stock `KEEPBITS` classes and Blosc
-zstd 3, so there is room to shrink it.
-
-Measured 2026-11-03 (June and January 2015 weeks; sizes from a 15 % block sample,
-checked against full one-week builds; reads from an RBX-A VM against RBX buckets):
-- **Store int16, not bitrounded float32.** Linear quantization in API units (0.1 K,
-  0.1 hPa, 0.1 m/s, 1 % cloud, ozone 2 DU, UV index 0.05, solar 2 W/m2, CAPE 10 J/kg)
-  and `round(100 * sqrt(mm))` for precipitation and rates (error <= 0.01 mm below
-  1 mm, <= 1 % above). That is finer than today's bitrounding for temperature (0.05 K
-  max error against 0.125 K), and it makes the K -> C conversion moot.
-- **Bitshuffle, not byte shuffle** (Blosc zstd 3): small ints compress far better
-  bit-plane by bit-plane. Bitround floats gain nothing from it.
-- **Hour-to-hour delta for the smooth fields only** (gust, MSLP, surface pressure,
-  temperature, dewpoint, u, v, ozone), stored as values in the array, so any zarr
-  reader works; the reader takes a cumulative sum over the chunk's hours. Delta makes
-  precipitation, cloud, radiation, CAPE and precipitation type larger. The built-in
-  `numcodecs.delta` filter is no substitute: tensorstore cannot open a store that uses
-  it, and it differences the flattened chunk (along longitude: 1090 MiB/week against
-  920; with a transpose codec to difference along time: 1276).
-- **Merge the four rain/snow rates into rain and snow** (the API only uses the sums),
-  and **precompute the 3x3 precipitation probability** as a stored variable (+1.2 %):
-  a point read then never needs a neighbouring chunk (with 10 x 10 chunks about a
-  third of points straddle a chunk edge today).
-- Result (v1: 17 vars, 10 x 10 x 168 h chunks, 100 x 100 shards): **953 MiB/week
-  against 1885 (-49 %), about 4.3 TB for 1940-2025**; Jan week -52 %. Point read
-  93 KiB against 184 KiB. Without delta (plain tensorstore-readable values) 1220 MiB.
-  A ~2 % precision set (0.2 K, 0.2 m/s, 0.2 hPa, 2 % cloud, coarser precipitation)
-  gives 805 MiB/week (3.8 TB).
-- No help: dewpoint depression instead of dewpoint (-0.4 %), time-innermost chunk
-  order (+15-35 %), separate per-variable chunks (+1 %, and 17 requests per point),
-  lz4/lz4hc, pcodec (+7 %, not readable by tensorstore), zfp (2.5x larger at this
-  chunk size). zstd 5 is -1.3 % at similar write speed; zstd 9 -3.5 % but ~30x slower.
-- Chunk shape barely moves size once bitshuffled: 5 x 5 cells costs +4.6 % for 24 KiB
-  reads, but the full-archive shard index grows from 0.75 GB to 3 GB (10 x 10 x 168 h)
-  - keep 10 x 10 unless indexes live on local disk. Day-long time chunks: 2 requests
-  per point and larger.
-- RBX High Performance, 16 reads in flight: today's layout 294-299 points/s at
-  ~40 ms p50; v1 460-493 points/s at 21 ms; 5 x 5 chunks 531-590 points/s. Without a
-  cached index (index GET + chunk GET) a read roughly doubles. RBX Standard is seek
-  bound (190-320 ms p50, p99 up to 1.7 s, ~60 points/s) whatever the layout, so the
-  time-machine path needs High Performance storage or local disk.
-- Untested idea, measured for size only: latitude bands with fewer longitudes toward
-  the poles (constant ~28 km east-west spacing, like ERA5's native reduced Gaussian
-  grid) store 64 % of the points in 75 % of the bytes (710 MiB/week); it resamples
-  Google's 0.25 deg grid, so check the API's nearest-cell lookup and values first.
-- Extra variables Google's store already has, cost per week in this encoding:
-  `fg10` gust since last hour 83 MiB (replace `i10fg` at no net cost), `mx2t`/`mn2t`
-  as offsets from `t2m` 49 MiB each, snowfall `sf` 14, snow depth `sd` ~1-2, direct
-  solar `fdir` 59, low/mid/high cloud 90/79/66, boundary layer height 80, cloud base
-  112. ERA5 has no visibility or sunshine duration; ERA5-Land and the EDA spread are
-  CDS-only.
-
-### Move to OVHCloud
-Including a Terraform setup script.
-
-### Read the alert grids (and maybe DWD) with tensorstore
-The NWS and WMO alert grids are now sharded (10 x 10 chunks in 100 x 100 shards:
-~276 and ~1,400 objects instead of 25,793 and 133,633), but they are
-variable-length string arrays, which tensorstore cannot read, so they are the
-only stores still read with zarr-python: two scalar reads per request, ~0.3-0.5
-ms against ~1.3 ms for the other 16 reads together. Re-encode them for
-tensorstore: an int32 grid of indices into a table of the distinct alert
-strings, published next to the grid (or in its attributes if small enough).
-Update `API/alerts.py` and the WMO read in `API/request/grid_indexing.py`, and
-measure. WMO's gridding also peaks at ~6 GB on one core.
-
-DWD MOSMIX is a 720 x 1440 grid that is NaN except at ~5,000 stations; a
-station-indexed store (or keeping only the shards with stations) may suit it
-better than a mostly-empty grid. Check its size and read time first.
-
-### NBM: latest-run search waits on missing files
-The latest-run probe checks 36 GRIB files with Herbie; when the newest cycle is
-only partly posted (25/36 missing), the misses took ~4 min before processing
-began. Probe with a short timeout, or check the newest candidate first and stop
-at the first complete run.
-
-### URMA: 5 min idle before the final merge
-In the cold-start run, after the last hourly store was published (3,981 s) nothing
-happened for ~5 min (no CPU, no network) before "Starting final URMA merge from
-283 hourly stores" (4,275 s), then 2.5 min opening the stores one at a time. Find
-the wait; the store opens fall under "Open the history stores in parallel".
-
-### Test an NFS share as the publish target
-Same flow as object storage, with an NFS share (OVH offers up to 16,000 IOPS /
-128 MiB/s) in place of the bucket: ingests publish to the share (`open_remote`
-already treats a mounted path as a local remote) and each API server copies new
-stores to its local disk, into a staging directory renamed into place so the API
-never sees a partial store (`API/store_sync.py` does this from S3 today; with
-sharded stores HRRR is 199 files, so the estimate below is now far lower). The
-load was file count, not bytes (HRRR unsharded: 76k files, 318 MiB): a small-file write is ~3-5 NFS operations and a copy-down read ~2-3,
-so every reader adds about as much load as the publish. Estimated peak, when NBM,
-URMA and HRRR publish together (~1,000 files/s): ~4-5k IOPS to write plus ~2.5k
-per reader, so ~12k with three readers. Copies must be parallel (rclone with high
---transfers, or obstore local-to-local); a serial cp/rsync pays a round trip per
-file. Measure on a mounted share: publishing the real HRRR store and copying it
-down to local disk (files/s, IOPS used, wall time), then size IOPS from those.
+### ERA5 archive: remaining work
+- Alert if Google's ERA5T end stops moving (the daily job exits 1 after 10 days; nothing
+  watches for that yet).
+- Open a week with one metadata read instead of two: `_resolve_era5_archive_week` reads
+  the week's `zarr.json`, then `ts.open` reads it again (`API/io/ZarrHelpers.py`).
 
 ### Remaining storage clean-up
 - Re-publish the static developer snapshot linked from `README.md` in the
@@ -196,8 +40,6 @@ down to local disk (files/s, IOPS used, wall time), then size IOPS from those.
 - Expire old history stores on the remote (nothing deletes them).
 - The DWD station and RAQDPS lat/lon pickles are loaded once at API start; the
   sync updates the files but a running worker does not reload them.
-- Run the API with several uvicorn workers in production (`--workers`); each
-  worker opens its own tensorstore context and heartbeat.
 
 ### Tune the shard and cache sizes from real requests
 `FINAL_SHARD_SIZES` follow a ~150 MB-per-shard write-memory rule and
@@ -210,10 +52,6 @@ peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
 `KEEPBITS` (`API/ingest_utils.py`) bitrounds every stored variable to twice its
 output step. The steps for VVEL, PM_FRP_column, BLH and the Storm_Distance maximum
 were assumed, not checked against how the API uses them.
-
-### Response code performance pass
-Profile the request path for room to improve; read performance is the first priority
-(AGENTS.md).
 
 ### Future dates in time machine
 [pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): Dark
@@ -233,6 +71,20 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### Moved to OVHCloud (2026-11)
+The API, the ingests, LibreWXR and the daily ERA5 job run on OVH's RBX Kubernetes
+cluster, set up with Terraform in Pirate-Weather/pirate-weather-ovh (cluster metrics
+pushed to Grafana Cloud). Production runs the API with 4 uvicorn workers and time
+machine with 2. Every API container runs the `pirate-alpine-zarr:dev` image until v3
+is released, because v0.7.4 predates the versioned stores.
+
+### LibreWXR hooks and snapshot sync upstream (2026-11-05)
+LibreWXR's nowcast/state/lightning hooks and the snapshot sync that mirrors its cache
+to object storage for render nodes are in upstream LibreWXR (#55, #56; v0.9.0). On RBX
+the `pirate-librewxr` pipeline runs `ingest/LibreWXR_Local_Ingest.py` from its nowcast
+hook and publishes snapshots to `s3://pirate-librewxr/librewxr`, which a render node
+pulls.
 
 ### Daily PoP from ensemble members (2026-11-09)
 Daily `precipProbability` was the maximum of the hourly probabilities over the local day,
@@ -334,8 +186,104 @@ New peaks were measured separately, on later cycles, with `ingest-memory-16gb`'s
 Download time varies a lot run to run. With 4 fields at once MSC sometimes refused
 connections (ConnectTimeout, several fields at the same second); the field's retry then
 re-downloads all of its files because retries use `overwrite=True` even though files are
-written atomically. Not seen in the old serial runs. Follow-up: skip files that already
-exist on a retry, and reuse connections (a `requests.Session` per field).
+written atomically. Not seen in the old serial runs.
+
+### Own ERA5 archive (2026-11-04 to 11-06)
+Replaces Google's ARCO store (`ar/full_37-1h-0p25deg-chunk-1.zarr-v3`, one whole-globe
+chunk per hour and variable) for time machine reads; Google is now only the fallback.
+`scripts/build_era5_point_test_store.py` builds the int16 layout measured below
+(`ERA5_ARCHIVE*` in `API/constants/model_const.py`, `encode_era5_archive_field` /
+`write_era5_archive_zarr` in `API/ingest_utils.py`, `decode_era5_archive` in
+`API/io/ZarrHelpers.py`, contract test `tests/ingest/test_era5_archive.py`): 19
+variables including direct solar (`fdir`) and cloud base height (`cbh`, NaN where there
+is none). Real 2015-06-29 week (2026-11-04): 1125 MiB, 121 objects, 11.4 GB peak
+memory (27 GB for the float32 builder), 15 s write, 2:22 wall; 16 spot cells x 19
+variables decode within one quantization step of Google's values.
+The API reads it first when `ERA5_ARCHIVE` is set (`s3://bucket/prefix` or a local
+directory; `ERA5_ARCHIVE_S3_ENDPOINT` / `_REGION` for the BHS private endpoint):
+`_load_era5_slice` -> `read_era5_archive_point`, which returns Google's layout and
+units, so nothing downstream changed. A request touching any week the archive lacks
+is read entirely from Google. Live, BHS private endpoint (2026-11-04): 15 ms warm,
+~1 s for the first read in a process (connection setup, week metadata and shard
+index), 37 ms to find a week missing; values within half a step of Google's.
+
+Backfill done (2026-11-04 to 11-06): bucket `pirate-era5` (RBX, High Performance),
+`ERA5_archive/<week>.zarr` for 4,478 weeks, 1940-12-30 .. 2026-10-19 (complete weeks
+to Google's ERA5T end, 2026-10-29), 5.27 TB, ~1.1 GB per week in every decade. Built
+with `scripts/backfill_era5_archive.py`: 2020-2026 on a b3-64 in RBX-A (4 at a time,
+2.9 h), 1941-2019 on an r3-128 in GRA11 uploading to RBX (8 at a time, 5.1 h + 15.1 h,
+~3.4 weeks/min, bound by Google reads at ~110-180 s per week). API config:
+`ERA5_ARCHIVE=s3://pirate-era5`, `ERA5_ARCHIVE_S3_ENDPOINT=https://s3.rbx.io.cloud.ovh.net`,
+`ERA5_ARCHIVE_S3_REGION=rbx`. Starts at 1941: ERA5's forecast fields (gusts,
+precipitation, radiation, cloud base) are missing for 1940-01-01 00-06 UTC.
+Source quirks met: Google stalled for minutes once (one week hung; hence the per-week
+timeout), and ERA5 has spurious CAPE spikes over steep terrain (up to ~2e6 J/kg in the
+Andes), now capped at 20,000 J/kg (101 weeks before 2000 and a few after).
+Daily updates: `scripts/era5_archive_daily.py`, run by the RBX CronJob
+`ingest-era5-daily` at 06:30 UTC (deployed 2026-11-06, pirate-weather-ovh #1). Final weeks are immutable
+`<week>.zarr`; ERA5T weeks and the current partial week are versioned behind
+`<week>.current.json` and republished when Google has more; weeks move to final ERA5
+when Google's does. Readers re-resolve changing weeks every 5 minutes and never read a
+store that changes under them. Its first run converts the 17 ERA5T weeks the backfill
+wrote as immutable stores (2026-06-29 onward) to versions (dry run, 2026-11-06: 18
+versioned builds, ~45 min). Tested live on a test prefix (2026-11-06): 3 weeks in 169
+s, a second run did nothing, and a reader kept serving through a republish and moved
+to the new version at its re-check.
+
+### ERA5 archive encoding chosen for storage cost (2026-11-03)
+The archive uses the int16 layout below. The one-week test store
+(`scripts/build_era5_point_test_store.py`, 2015-06-29, 18 variables, 10 x 10 inner chunks of the whole week, 100 x 100 shards) is 1885 MiB, which
+would make 1940 to present roughly 8 TB. It uses the stock `KEEPBITS` classes and Blosc
+zstd 3, so there is room to shrink it.
+
+Measured 2026-11-03 (June and January 2015 weeks; sizes from a 15 % block sample,
+checked against full one-week builds; reads from an RBX-A VM against RBX buckets):
+- **Store int16, not bitrounded float32.** Linear quantization in API units (0.1 K,
+  0.1 hPa, 0.1 m/s, 1 % cloud, ozone 2 DU, UV index 0.05, solar 2 W/m2, CAPE 10 J/kg)
+  and `round(100 * sqrt(mm))` for precipitation and rates (error <= 0.01 mm below
+  1 mm, <= 1 % above). That is finer than today's bitrounding for temperature (0.05 K
+  max error against 0.125 K), and it makes the K -> C conversion moot.
+- **Bitshuffle, not byte shuffle** (Blosc zstd 3): small ints compress far better
+  bit-plane by bit-plane. Bitround floats gain nothing from it.
+- **Hour-to-hour delta for the smooth fields only** (gust, MSLP, surface pressure,
+  temperature, dewpoint, u, v, ozone), stored as values in the array, so any zarr
+  reader works; the reader takes a cumulative sum over the chunk's hours. Delta makes
+  precipitation, cloud, radiation, CAPE and precipitation type larger. The built-in
+  `numcodecs.delta` filter is no substitute: tensorstore cannot open a store that uses
+  it, and it differences the flattened chunk (along longitude: 1090 MiB/week against
+  920; with a transpose codec to difference along time: 1276).
+- **Merge the four rain/snow rates into rain and snow** (the API only uses the sums),
+  and **precompute the 3x3 precipitation probability** as a stored variable (+1.2 %):
+  a point read then never needs a neighbouring chunk (with 10 x 10 chunks about a
+  third of points straddle a chunk edge today).
+- Result (v1: 17 vars, 10 x 10 x 168 h chunks, 100 x 100 shards): **953 MiB/week
+  against 1885 (-49 %), about 4.3 TB for 1940-2025**; Jan week -52 %. Point read
+  93 KiB against 184 KiB. Without delta (plain tensorstore-readable values) 1220 MiB.
+  A ~2 % precision set (0.2 K, 0.2 m/s, 0.2 hPa, 2 % cloud, coarser precipitation)
+  gives 805 MiB/week (3.8 TB).
+- No help: dewpoint depression instead of dewpoint (-0.4 %), time-innermost chunk
+  order (+15-35 %), separate per-variable chunks (+1 %, and 17 requests per point),
+  lz4/lz4hc, pcodec (+7 %, not readable by tensorstore), zfp (2.5x larger at this
+  chunk size). zstd 5 is -1.3 % at similar write speed; zstd 9 -3.5 % but ~30x slower.
+- Chunk shape barely moves size once bitshuffled: 5 x 5 cells costs +4.6 % for 24 KiB
+  reads, but the full-archive shard index grows from 0.75 GB to 3 GB (10 x 10 x 168 h)
+  - keep 10 x 10 unless indexes live on local disk. Day-long time chunks: 2 requests
+  per point and larger.
+- RBX High Performance, 16 reads in flight: today's layout 294-299 points/s at
+  ~40 ms p50; v1 460-493 points/s at 21 ms; 5 x 5 chunks 531-590 points/s. Without a
+  cached index (index GET + chunk GET) a read roughly doubles. RBX Standard is seek
+  bound (190-320 ms p50, p99 up to 1.7 s, ~60 points/s) whatever the layout, so the
+  time-machine path needs High Performance storage or local disk.
+- Untested idea, measured for size only: latitude bands with fewer longitudes toward
+  the poles (constant ~28 km east-west spacing, like ERA5's native reduced Gaussian
+  grid) store 64 % of the points in 75 % of the bytes (710 MiB/week); it resamples
+  Google's 0.25 deg grid, so check the API's nearest-cell lookup and values first.
+- Extra variables Google's store already has, cost per week in this encoding:
+  `fg10` gust since last hour 83 MiB (replace `i10fg` at no net cost), `mx2t`/`mn2t`
+  as offsets from `t2m` 49 MiB each, snowfall `sf` 14, snow depth `sd` ~1-2, direct
+  solar `fdir` 59, low/mid/high cloud 90/79/66, boundary layer height 80, cloud base
+  112. ERA5 has no visibility or sunshine duration; ERA5-Land and the EDA spread are
+  CDS-only.
 
 ### DWD doesn't fill over long gaps (2026-11-04)
 Long gaps are genuinely missing data, and now stay missing so another model fills those
@@ -530,27 +478,16 @@ the next source for that hour, as URMA and DWD MOSMIX already did.
   - RTMA `tp`: one point, one 2-hour gap.
 - No store had an hour missing for every variable.
 
-### Summaries: lists of three or more days or periods read awkwardly (2026-10-31)
-Weekly (`API/PirateWeeklyText.py`, `calculate_summary_text`) and next 24 hour
-(`API/PirateDailyText.py`, `_get_time_phrase`) summaries join separate days or
-periods with nested `and`s, e.g. "Rain today and Friday and Sunday and next
-Wednesday." The translations' `and` only uses a comma when its first argument
-already contains one, and no template produces one, so there is no way to say
-"today, Friday, Sunday and next Wednesday" today.
-Needs a translations change first, e.g. a `list` template that takes the items
-as one list and joins them the language's way, then use it for three or more
-items here.
+### Summaries: lists of three or more days or periods
+The weekly and next-24-hour summaries joined three or more days or periods with nested
+`and`s ("Rain today and Friday and Sunday and next Wednesday"). They now use the
+translations' `list` template (`_day_range_phrase` in `API/PirateWeeklyText.py`,
+`_get_time_phrase` in `API/PirateDailyText.py`): "today, Friday, Sunday and next Wednesday".
 
-### Weekly summary: steady temperatures (2026-10-31)
-`calculate_temp_summary` always picks rising, falling, peaking or valleying, even
-for a flat week (Honolulu: highs of 26/26/25/26/26/25/26/26 °C reads as if the
-temperature trends). Needs a translations key, e.g. `temperatures-steady`
-("highs steady around $1"). Then use it when the week's highs span a small range
-(e.g. 2 °C / 4 °F) and give the rounded mean.
-
-New keys raise `ValueError` in translations that don't have them yet; the
-`Translation.is_supported()` method can be used to switch over only once the
-installed translations support a key.
+### Weekly summary: steady temperatures
+`calculate_temp_summary` always picked rising, falling, peaking or valleying, even for a
+flat week (Honolulu highs 26/26/25/26/26/25/26/26 °C). When the week's highs span at most
+`STEADY_TEMPERATURE_RANGE_C` it now returns `temperatures-steady` with the rounded mean.
 
 ### Sharded stores, times in attributes, tensorstore reader, new sync (2026-10-23)
 - **Stores:** every final store is a sharded zarr v3 array (`FINAL_SHARD_SIZES`
