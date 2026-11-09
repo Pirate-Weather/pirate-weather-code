@@ -12,8 +12,7 @@ then move the entry to Done.
 
 Work through the open items in this order, small ones first:
 1. Small: reload the DWD station and RAQDPS lat/lon pickles when the sync updates
-   them; re-publish the README developer snapshot in the sharded layout; consistent
-   clipping (#760).
+   them; consistent clipping (#760).
 2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689); only list
    the sources used (#554); next-update field (#668).
 
@@ -35,8 +34,6 @@ pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
   the week's `zarr.json`, then `ts.open` reads it again (`API/io/ZarrHelpers.py`).
 
 ### Remaining storage clean-up
-- Re-publish the static developer snapshot linked from `README.md` in the
-  sharded, versioned layout.
 - Expire old history stores on the remote (nothing deletes them).
 - The DWD station and RAQDPS lat/lon pickles are loaded once at API start; the
   sync updates the files but a running worker does not reload them.
@@ -71,6 +68,11 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### README developer snapshot dropped (2026-11-09)
+The README's static store snapshot (November 2024, unsharded) no longer worked with the
+reader and is not being re-published. The Docker instructions now only cover reading
+stores from a bucket; the example `curl` used the wrong port (8083 for a container on 8000).
 
 ### Moved to OVHCloud (2026-11)
 The API, the ingests, LibreWXR and the daily ERA5 job run on OVH's RBX Kubernetes
