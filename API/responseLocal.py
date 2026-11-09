@@ -78,6 +78,7 @@ from API.forecast_sources import (
     add_etopo_source,
     build_source_metadata,
     merge_hourly_models,
+    next_update_time,
     select_used_sources,
 )
 from API.hourly.block import build_hourly_block
@@ -1473,6 +1474,14 @@ async def PW_Forecast(
             )
             returnOBJ["flags"]["sources"] = merge_result.metadata.used_sources
             returnOBJ["flags"]["sourceTimes"] = merge_result.metadata.used_source_times
+            if not timeMachine:
+                # When the data behind this response should next refresh (#668)
+                next_update = next_update_time(
+                    merge_result.metadata,
+                    nowTime.replace(tzinfo=datetime.UTC).timestamp(),
+                )
+                if next_update is not None:
+                    returnOBJ["flags"]["nextUpdate"] = next_update
         else:
             returnOBJ["flags"]["sources"] = sourceList
             returnOBJ["flags"]["sourceTimes"] = sourceTimes

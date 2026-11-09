@@ -14,8 +14,7 @@ Work through the open items in this order, small ones first:
 1. Small: reload the DWD station and RAQDPS lat/lon pickles when the sync updates
    them; re-publish the README developer snapshot in the sharded layout; consistent
    clipping (#760).
-2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689);
-   next-update field (#668).
+2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689).
 
 ## v3 goals
 
@@ -57,16 +56,25 @@ were assumed, not checked against how the API uses them.
 [pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): Dark
 Sky allowed time-machine requests for future dates; Pirate Weather returns HTTP 400.
 
-### Next-update field
-[pirateweather#668](https://github.com/Pirate-Weather/pirateweather/issues/668): report
-when the forecast data will next refresh. The run-time pickles and the ingest
-schedules already hold what is needed.
-
 ### Consistent clipping
 [pirate-weather-code#760](https://github.com/Pirate-Weather/pirate-weather-code/issues/760):
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### flags.nextUpdate (2026-11-09)
+[pirateweather#668](https://github.com/Pirate-Weather/pirateweather/issues/668): version 2
+forecast responses report when their data should next refresh, as `flags.nextUpdate`
+(integer unix seconds, UTC; omitted for time machine). It is the earliest expected publish
+among the sources in `flags.sources`: run time + cycle interval + publish delay, from
+`PUBLISH_SCHEDULE_HOURS` (`API/constants/shared_const.py`), with an overdue run rolled
+forward by whole cycles so the value is never past. The delays are the Ofelia/RBX start
+times plus the publish stamps of the 2026-10-31 to 11-04 local stack runs; RRFS has no
+measured run and is an estimate. The rapid sources (RTMA-RU every 15 min, HRRR and RRFS
+sub-hourly, LibreWXR every 10 min) are included, so in their domains it is often minutes
+away. `SourceMetadata.add` now takes the rounded run time and records it as unix seconds
+(`source_run_times`) alongside the sourceTimes string. Cost: about 4 us per request for
+11 used sources.
 
 ### flags.sources lists the sources used (2026-11-09)
 [pirateweather#554](https://github.com/Pirate-Weather/pirateweather/issues/554): version 2
