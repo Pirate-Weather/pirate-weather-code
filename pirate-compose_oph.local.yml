@@ -266,7 +266,7 @@ services:
   gfs_ingest:
     <<: *ingest
     container_name: pirate-ingest-gfs
-    mem_limit: 28g
+    mem_limit: 10g
     environment:
       <<: *ingest_env
       forecast_process_dir: "/work-bulk/GFS"
@@ -307,11 +307,11 @@ services:
   nbm_ingest:
     <<: *ingest
     container_name: pirate-ingest-nbm
-    mem_limit: 28g
+    mem_limit: 8g
     environment:
       <<: *ingest_env
       forecast_process_dir: "/work/NBM"
-      zarr_store_workers: "2"
+      zarr_store_workers: "4"
       # wgrib2 interpolation uses OpenMP; keep BLAS single-threaded alongside it.
       OMP_NUM_THREADS: "8"
       OMP_PROC_BIND: "spread"
@@ -450,7 +450,7 @@ services:
   ecmwf_ingest:
     <<: *ingest
     container_name: pirate-ingest-ecmwf
-    mem_limit: 18g
+    mem_limit: 11g
     environment:
       <<: *ingest_env
       forecast_process_dir: "/work-bulk/ECMWF"
@@ -523,7 +523,7 @@ services:
   dwd_mosmix_ingest:
     <<: *ingest
     container_name: pirate-ingest-dwd-mosmix
-    mem_limit: 20g
+    mem_limit: 11g
     environment:
       <<: *ingest_env
       forecast_process_dir: "/work/DWD_MOSMIX"

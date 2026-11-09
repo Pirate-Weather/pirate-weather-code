@@ -135,12 +135,10 @@ PROCESS_VARS = zarr_vars[:-1]
 # Categorical precipitation type is interpolated with nearest neighbour
 NEAREST_INTERP_VARS = ("ptype",)
 
-# The history merge reads the history stores straight from the history remote,
-# which from S3 needs parallel reads (RTMA: 239 s at 64 workers, over 7 min at
-# 2). The worker count also sets how many final-store tiles are in memory at
-# once, and these tiles span every variable and forecast hour, so 12 (as GFS).
-DEFAULT_ZARR_WORKERS = 12
-DEFAULT_ZARR_CONCURRENCY = 12
+# Peak memory scales with this count: each thread holds a final-store shard, which
+# spans every variable and forecast hour. 4 matches the ingest instance's vCPUs.
+DEFAULT_ZARR_WORKERS = 4
+DEFAULT_ZARR_CONCURRENCY = 4
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -228,7 +226,7 @@ def write_ifs_ensemble_precip_stats(
     At 0.1 degrees one lead is 50 members x 6.5 M cells (1.3 GB as float32), and
     a lazy multi-file cfgrib open peaked at 11 GB for a single lead. So each lead
     is decoded, reduced and appended to ``zarr_path`` on its own, holding only the
-    previous lead's totals for the differencing (8.9 GB peak over a full run).
+    previous lead's totals for the differencing.
     """
     paths_by_lead = {
         int(re.search(r"-(\d+)h-enfo-", os.path.basename(path)).group(1)): path
@@ -249,7 +247,7 @@ def write_ifs_ensemble_precip_stats(
             decode_timedelta=False,
             backend_kwargs={"indexpath": ""},
         ) as ens:
-            total = ens["tp"].values.astype(np.float32)
+            total = ens["tp"].values.astype(np.float32, copy=False)
             latitude = ens["latitude"].values
             longitude = ens["longitude"].values
             if float(ens["step"]) != lead:
@@ -263,6 +261,7 @@ def write_ifs_ensemble_precip_stats(
         # (3 h, or 6 h after 144 h) gives an hourly rate in m/h.
         interval_total = total if previous_total is None else total - previous_total
         rate = interval_total / (lead - previous_lead)
+        del interval_total
         previous_total = total
         previous_lead = lead
 
@@ -301,6 +300,9 @@ def write_ifs_ensemble_precip_stats(
             lead_stats.drop_vars(["latitude", "longitude"]).to_zarr(
                 zarr_path, append_dim="step", consolidated=False
             )
+        # Only the totals carry over; these would otherwise sit in memory (1.3 GB
+        # each) while the next lead decodes
+        del total, rate, precip_prob, lead_stats
 
     return xr.open_zarr(zarr_path, consolidated=False)
 

@@ -33,19 +33,21 @@ from API.constants.shared_const import (
 logger = logging.getLogger(__name__)
 
 # Shared ingest constants
+# Processing tile edge, in grid cells. A tile should split into whole final shards
+# (FINAL_SHARD_SIZES): otherwise a shard straddles tiles, and each tile stays in
+# memory until its neighbours are written. NBM at 4 threads: 9.2 GB with 200-cell
+# tiles and 99-cell shards, 3.8 GB with 198, same store, same time (measured).
 CHUNK_SIZES = {
-    "NBM": 200,
+    "NBM": 198,
     "HRRR": 200,
     "HRRR_6H": 200,
     "RRFS": 200,
     "RRFS_6H": 200,
     "RRFS_NA": 200,
     "RRFS_NA_6H": 200,
-    "GFS": 100,
-    "GEFS": 200,
-    "ECMWF": 200,
-    # IFS at 0.1 degrees: twice the 99-cell final shard, so a tile splits into whole
-    # shards and the final write never holds a row of part-used tiles in memory.
+    "GFS": 96,
+    "GEFS": 198,
+    "ECMWF": 198,
     "ECMWF_IFS": 198,
     "NBM_Fire": 200,
     "RTMA": 200,
@@ -53,7 +55,7 @@ CHUNK_SIZES = {
     "HRDPS": 200,
     "RDPS": 200,
     "REPS": 200,
-    "GDPS": 200,
+    "GDPS": 150,
     "GEPS": 200,
     "RDAQA": 250,
     "RAQDPS": 250,
@@ -450,6 +452,11 @@ def positive_int_env(name: str, default: int) -> int:
     return value
 
 
+# Threads for dask work outside the explicit zarr writes: the vCPUs of the ingest
+# instance (OVH b3-16), so memory does not depend on the node a job lands on.
+DASK_NUM_WORKERS = 4
+
+
 def configure_zarr_limits(
     requested_workers: int, requested_async_concurrency: int
 ) -> tuple[int, int]:
@@ -502,12 +509,19 @@ def configure_zarr_writes(
     Reads ``zarr_store_workers`` / ``zarr_async_concurrency`` from the environment,
     raises the open-file limit, and clamps both so large local stores do not run
     out of file descriptors.
+
+    Dask work that names no worker count would otherwise take one thread per core
+    of whatever node the job lands on, and peak memory scales with threads, so it
+    gets a fixed count too (``dask_num_workers``).
     """
+    import dask
+
     tune_nofile_limit()
     zarr_store_workers, _ = configure_zarr_limits(
         positive_int_env("zarr_store_workers", default_workers),
         positive_int_env("zarr_async_concurrency", default_async_concurrency),
     )
+    dask.config.set(num_workers=positive_int_env("dask_num_workers", DASK_NUM_WORKERS))
     return zarr_store_workers
 
 

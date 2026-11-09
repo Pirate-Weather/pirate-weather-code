@@ -95,12 +95,10 @@ RTMA_PCP_Y_OFFSET = 0
 
 # Hourly rows in the published store: the newest analysis and the 47 h before it
 RTMA_TIME_STEPS = 48
-# The history merge reads every hourly store straight from the history remote;
-# from S3 that is latency-bound, so it needs many parallel reads. RTMA's merge
-# (48 stores, ~49k chunks) took 239 s at 64 workers and over 7 min at 2 (73 s
-# from local disk), with peak memory 2.9 GB versus 2.4 GB.
-DEFAULT_ZARR_WORKERS = 64
-DEFAULT_ZARR_CONCURRENCY = 64
+# The history stores are downloaded before the merge, so these threads only read
+# local files; 8 is the count the deployed job runs with.
+DEFAULT_ZARR_WORKERS = 8
+DEFAULT_ZARR_CONCURRENCY = 8
 HOURLY_STORE_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 
 # Variables in the published store (cfgrib short names). tp is the hourly RTMA
