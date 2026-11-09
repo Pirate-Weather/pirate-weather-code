@@ -11,7 +11,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-import xarray as xr
 from scipy.spatial import cKDTree
 
 from API.constants.grid_const import (
@@ -53,7 +52,7 @@ from API.constants.shared_const import (
     LIBREWXR_GRID_WIDTH,
     LIBREWXR_MAX_NOWCAST_AGE_SECONDS,
 )
-from API.io.ZarrHelpers import read_era5_archive_point
+from API.io.ZarrHelpers import open_google_era5, read_era5_archive_point
 from API.utils.geo import is_in_north_america, lambertGridMatch
 from API.utils.timing import StepTimer
 
@@ -544,6 +543,7 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
             num_hours,
         )
 
+    open_google_era5(era5_data)
     abslat_era5 = np.abs(era5_data["ERA5_lats"] - lat)
     abslon_era5 = np.abs(era5_data["ERA5_lons"] - lon)
     y_p = np.argmin(abslat_era5)
@@ -558,24 +558,15 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
     if precip_amount_var not in era5_data["dsERA5"]:
         raise KeyError(f"Expected ERA5 precipitation variable '{precip_amount_var}'")
 
-    dataOut_ERA5_xr = era5_data["dsERA5"][list(ERA5_SOURCE_VARS)].isel(
+    ERA5_point = era5_data["dsERA5"][list(ERA5_SOURCE_VARS)].isel(
         latitude=y_p, longitude=x_p, time=slice(t_p, t_p + num_hours)
     )
-    dataOut_ERA5 = xr.concat(
-        [dataOut_ERA5_xr[var] for var in ERA5_SOURCE_VARS], dim="variable"
-    )
-    unix_times_era5 = (
-        era5_data["ERA5_times"][t_p : t_p + num_hours].astype("datetime64[s]")
-        - np.datetime64("1970-01-01T00:00:00")
-    ).astype(np.int64)  # Use cached time
-    era5_merged = np.vstack((unix_times_era5, dataOut_ERA5.values)).T
 
     n_lat = era5_data["ERA5_lats"].size
     n_lon = era5_data["ERA5_lons"].size
     y_indices = np.arange(max(y_p - 1, 0), min(y_p + 2, n_lat))
     x_indices = np.array([(x_p - 1) % n_lon, x_p, (x_p + 1) % n_lon])
-
-    precip_window = (
+    precip_window_lazy = (
         era5_data["dsERA5"][precip_amount_var]
         .isel(
             time=slice(t_p, t_p + num_hours),
@@ -583,8 +574,22 @@ def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours:
             longitude=x_indices,
         )
         .transpose("time", "latitude", "longitude")
-        .values
     )
+
+    # The dataset is opened without dask, so each .values is one blocking Google
+    # read; run them on the shared pool so a fallback costs about one round trip.
+    lazy_reads = [ERA5_point[var] for var in ERA5_SOURCE_VARS] + [precip_window_lazy]
+    read_pool = era5_data.get("ERA5_read_pool")
+    read_map = read_pool.map if read_pool is not None else map
+    loaded = list(read_map(lambda lazy_array: lazy_array.values, lazy_reads))
+    dataOut_ERA5 = np.stack(loaded[:-1])
+    precip_window = loaded[-1]
+
+    unix_times_era5 = (
+        era5_data["ERA5_times"][t_p : t_p + num_hours].astype("datetime64[s]")
+        - np.datetime64("1970-01-01T00:00:00")
+    ).astype(np.int64)  # Use cached time
+    era5_merged = np.vstack((unix_times_era5, dataOut_ERA5)).T
 
     # Estimate precipitation probability as the percentage of valid cells in the
     # 3x3 neighbourhood exceeding the measurable-precipitation threshold.

@@ -3,6 +3,7 @@
 import datetime
 import json
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import xarray as xr
@@ -167,6 +168,8 @@ def _era5_data(google, times, archive):
         "ERA5_lons": LONS,
         "ERA5_times": times,
         "ERA5_archive": archive,
+        # As in init_ERA5, so the Google fallback runs its parallel reads.
+        "ERA5_read_pool": ThreadPoolExecutor(max_workers=4),
     }
 
 

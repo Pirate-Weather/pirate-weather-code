@@ -8,6 +8,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import AsyncIterator, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -23,11 +24,15 @@ from zarr.abc.store import (
 from zarr.core.buffer import Buffer, BufferPrototype
 from zarr.storage import FsspecStore
 
+from API.constants.model_const import ERA5_SOURCE_VARS
+
 logger = logging.getLogger(__name__)
 
 
 ERA5_ZARR_URL = "gs://gcp-public-data-arco-era5/ar/full_37-1h-0p25deg-chunk-1.zarr-v3"
-ERA5_DASK_CHUNKS = {"time": 24}
+# Threads for one Google ERA5 point read: one per source variable plus the
+# precipitation neighbourhood, so a fallback read waits for one round trip, not 19.
+ERA5_READ_THREADS = len(ERA5_SOURCE_VARS) + 1
 ERA5_CACHE_VERSION = "cache-store-v1"
 ERA5_CACHE_MAX_SIZE = 20 * 1024**3
 ERA5_CACHE_DIR_DEFAULT = "ERA5_cache"
@@ -212,49 +217,71 @@ def _get_era5_cache_max_size() -> int:
     return max_size if max_size > 0 else ERA5_CACHE_MAX_SIZE
 
 
-# Function to initialize in ERA5 xarray dataset
 def init_ERA5(cache_dir: str | None = None):
-    """Open Google ERA5 through the persistent object cache."""
+    """Set up ERA5 reads: the own archive first, Google ERA5 as the fallback.
+
+    Google ERA5 is not opened here. The archive covers 1940 to the present and is
+    updated daily, so Google is only needed for a gap in the archive, a failed
+    archive read, or a host without ``ERA5_ARCHIVE``; ``open_google_era5`` opens
+    it on the first such read. A worker that never falls back never pays for it.
+    """
     cache_dir = os.environ.get("ERA5_CACHE_DIR", cache_dir or ERA5_CACHE_DIR_DEFAULT)
     cache_dir = os.path.abspath(os.path.expanduser(cache_dir))
-    object_cache_dir = os.path.join(cache_dir, ERA5_CACHE_VERSION)
-    source_store = FsspecStore.from_url(
-        ERA5_ZARR_URL,
-        storage_options={
-            "token": "anon",
-            "skip_instance_cache": True,
-        },
-        read_only=True,
-    )
-    cache_store = DiskCacheStore(
-        store=source_store,
-        cache_dir=object_cache_dir,
-        size_limit=_get_era5_cache_max_size(),
-    )
-
-    dsERA5 = xr.open_zarr(
-        cache_store,
-        chunks=ERA5_DASK_CHUNKS,
-    )
-    source = ERA5_ZARR_URL
-
-    ERA5_lats = dsERA5["latitude"].values
-    ERA5_lons = dsERA5["longitude"].values
-    ERA5_times = dsERA5["time"].values
-
-    ERA5_Data = {
-        "dsERA5": dsERA5,
-        "ERA5_lats": ERA5_lats,
-        "ERA5_lons": ERA5_lons,
-        "ERA5_times": ERA5_times,
+    return {
         "ERA5_cache_dir": cache_dir,
-        "ERA5_cache_store": cache_store,
-        "ERA5_source": source,
-        # Read first when configured; Google is the fallback (_load_era5_slice).
+        "ERA5_source": ERA5_ZARR_URL,
         "ERA5_archive": init_ERA5_archive(),
+        "ERA5_read_pool": ThreadPoolExecutor(
+            max_workers=ERA5_READ_THREADS, thread_name_prefix="era5-read"
+        ),
+        "ERA5_google_lock": threading.Lock(),
     }
 
-    return ERA5_Data
+
+def open_google_era5(era5_data: dict) -> None:
+    """Open Google ERA5 through the persistent object cache, once per process.
+
+    Adds ``dsERA5``, its ``ERA5_lats`` / ``ERA5_lons`` / ``ERA5_times`` and the
+    ``ERA5_cache_store`` to ``era5_data``. Safe to call from concurrent requests:
+    the first caller opens it (about 1.3 s) and the others wait for it.
+    """
+    if "dsERA5" in era5_data:
+        return
+    with era5_data["ERA5_google_lock"]:
+        if "dsERA5" in era5_data:
+            return
+        open_start = time.perf_counter()
+        object_cache_dir = os.path.join(era5_data["ERA5_cache_dir"], ERA5_CACHE_VERSION)
+        source_store = FsspecStore.from_url(
+            ERA5_ZARR_URL,
+            storage_options={
+                "token": "anon",
+                "skip_instance_cache": True,
+            },
+            read_only=True,
+        )
+        cache_store = DiskCacheStore(
+            store=source_store,
+            cache_dir=object_cache_dir,
+            size_limit=_get_era5_cache_max_size(),
+        )
+
+        # chunks=None opens lazily without dask. With dask in 24 h chunks, the task
+        # graph for 273 variables x 55,152 chunks cost every worker ~0.7 GiB at open
+        # and ~1.2 GiB more after a few reads; a point read only needs a few chunks
+        # per variable, which _load_era5_slice fetches in parallel on ERA5_read_pool.
+        dsERA5 = xr.open_zarr(cache_store, chunks=None)
+
+        era5_data["ERA5_lats"] = dsERA5["latitude"].values
+        era5_data["ERA5_lons"] = dsERA5["longitude"].values
+        era5_data["ERA5_times"] = dsERA5["time"].values
+        era5_data["ERA5_cache_store"] = cache_store
+        # Set last: other threads check for dsERA5 without the lock.
+        era5_data["dsERA5"] = dsERA5
+        logger.info(
+            "Opened Google ERA5 for a fallback read in %.1f s",
+            time.perf_counter() - open_start,
+        )
 
 
 def decode_era5_archive(columns: np.ndarray, attributes: dict) -> np.ndarray:
