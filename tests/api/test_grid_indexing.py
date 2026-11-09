@@ -375,3 +375,62 @@ def test_time_machine_reads_era5_and_gfs_where_each_can_contribute(
     )
 
     assert reads == expected
+
+
+def test_future_request_keeps_the_current_gfs_run():
+    """#689: run ages were measured from the requested time, so for a day five
+    days ahead even a 6 h old GFS run looked over five days stale and every
+    forecast model was dropped (HTTP 400, no sources). For a future time the
+    newest run is the forecast to serve, so its age is measured from now.
+    """
+    from API.constants.shared_const import HISTORY_PERIODS
+
+    now = datetime.datetime(2026, 11, 9, 12)
+    requested = now + datetime.timedelta(days=5)
+    run_time = now - datetime.timedelta(hours=6)
+    gfs_rows = np.full((HISTORY_PERIODS["GFS"] + 240, 20), np.nan)
+    gfs_rows[HISTORY_PERIODS["GFS"] - 1, 0] = run_time.replace(
+        tzinfo=datetime.UTC
+    ).timestamp()
+
+    async def zarr_read(model, _store, x, y):
+        return gfs_rows if model == "GFS" else False
+
+    sources = ZarrSources(
+        subh=None,
+        hrrr_6h=None,
+        hrrr=None,
+        nbm=None,
+        gfs=SimpleNamespace(shape=(20, 528, 721, 1440)),
+        ecmwf=None,
+        gefs=None,
+    )
+    result = asyncio.run(
+        calculate_grid_indexing(
+            lat=52.5,
+            lon=13.4,
+            az_lon=13.4,
+            utc_time=requested,
+            now_time=now,
+            time_machine=False,
+            ex_hrrr=1,
+            ex_nbm=1,
+            ex_gfs=0,
+            ex_urma=1,
+            ex_ecmwf=1,
+            ex_gefs=1,
+            ex_rtma_ru=1,
+            ex_dwd_mosmix=1,
+            ex_aigfs=1,
+            ex_aigefs=1,
+            ex_aifs=1,
+            read_wmo_alerts=False,
+            base_day_utc=requested,
+            num_hours=25,
+            zarr_sources=sources,
+            weather=SimpleNamespace(zarr_read=zarr_read),
+            logger=logging.getLogger(__name__),
+        )
+    )
+
+    assert result.dataOut_gfs is gfs_rows

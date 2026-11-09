@@ -346,3 +346,82 @@ def test_timemachine_range_rejects_invalid_values(query_params, message):
     with pytest.raises(HTTPException, match=message) as exc:
         _parse_timemachine_range(request, time_machine=True)
     assert exc.value.status_code == 400
+
+
+def _utc(*args):
+    return int(datetime.datetime(*args, tzinfo=datetime.UTC).timestamp())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("force_now", "request_time", "expected"),
+    [
+        pytest.param(
+            FORCE_NOW,
+            FORCE_NOW + 3 * 86400,
+            {"midnight": _utc(2025, 1, 4, 5), "hours": 24},
+            id="three-days-ahead",
+        ),
+        pytest.param(
+            _utc(2025, 10, 30, 12),
+            _utc(2025, 11, 2, 16),
+            {"midnight": _utc(2025, 11, 2, 4), "hours": 25},
+            id="fall-back-day",
+        ),
+        # The requested local day ends 209 h from now: inside the horizon.
+        pytest.param(
+            FORCE_NOW,
+            FORCE_NOW + 8 * 86400,
+            {"midnight": _utc(2025, 1, 9, 5), "hours": 24},
+            id="eight-days-ahead",
+        ),
+        pytest.param(FORCE_NOW, FORCE_NOW + 30 * 60, "now", id="within-an-hour"),
+        # The requested local day ends 233 h from now, past the GFS/GEFS stores.
+        pytest.param(FORCE_NOW, FORCE_NOW + 9 * 86400, "rejected", id="past-horizon"),
+    ],
+)
+async def test_future_request_returns_the_requested_local_day(
+    force_now, request_time, expected
+):
+    """#689: a future time returns Dark Sky's single-day shape (hourly from local
+    midnight to the next, one daily point, no minutely or alerts) instead of a
+    400. It must not be read as Time Machine (which drops the forecast-only
+    models and fields), a time within the hour must still mean now, and a day
+    the longest stores don't reach must be refused rather than served empty.
+    """
+    location = f"{NEW_YORK},{request_time}"
+
+    if expected == "rejected":
+        with pytest.raises(HTTPException, match="beyond the forecast horizon") as exc:
+            await _prepare(location, force_now=force_now)
+        assert exc.value.status_code == 400
+        return
+
+    result = await _prepare(location, force_now=force_now)
+    assert result.time_machine is False
+
+    if expected == "now":
+        assert result.future_day is False
+        assert result.utc_time == result.now_time
+        assert result.output_hours == 48
+        return
+
+    assert result.future_day is True
+    assert (result.ex_minutely, result.ex_alerts, result.read_wmo_alerts) == (
+        1,
+        1,
+        False,
+    )
+    assert (result.ex_rtma_ru, result.ex_librewxr) == (1, 1)
+    # Forecast models stay in, unlike Time Machine
+    assert (result.ex_nbm, result.ex_hrrr, result.ex_gefs, result.ex_ecmwf) == (
+        0,
+        0,
+        0,
+        0,
+    )
+    assert int(result.base_day_utc.timestamp()) == expected["midnight"]
+    assert result.hour_array_grib[0] == expected["midnight"]
+    assert result.output_days == 1
+    assert result.output_hours == expected["hours"]
+    assert len(result.hour_array) >= expected["hours"]

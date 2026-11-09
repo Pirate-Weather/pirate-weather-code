@@ -182,7 +182,9 @@ HistoricalTime = Annotated[
             "'YYYY-MM-DDTHH:MM:SS', interpreted at the requested coordinates; ISO "
             "with numeric UTC offset 'YYYY-MM-DDTHH:MM:SS+0000'; or a negative "
             "relative offset from now using s, h, or d, e.g. '-6h' or '-2d'. "
-            "Future times more than one hour ahead are rejected."
+            "A future time more than one hour ahead returns the forecast for that "
+            "local day (hourly from local midnight, one daily point, no minutely "
+            "or alerts), for days ending within about 9 days of now."
         ),
     ),
 ]

@@ -468,6 +468,12 @@ async def PW_Forecast(
     nowTime = initial.now_time
     utcTime = initial.utc_time
     timeMachine = initial.time_machine
+    futureDay = initial.future_day
+    # Time Machine and future requests (#689) return one local day: hourly from
+    # local midnight, a single daily point, time-machine style summaries. A future
+    # day is still a forecast, so the grid reads, sources, hourly and current
+    # fields stay those of a forecast (timeMachine).
+    singleDay = timeMachine or futureDay
     loc_tag = initial.loc_tag
     timing_tracker = initial.timing_tracker
     tz_offset = initial.tz_offset
@@ -714,13 +720,15 @@ async def PW_Forecast(
     # Timing Check
     timer.log("Base Times")
 
+    # Hour row of the requested time.
+    # From timestamps: subtracting two times in one ZoneInfo would compare their
+    # wall clocks, an hour out on a DST change day.
+    requestedHourOffset = (baseHour.timestamp() - baseDay.timestamp()) / 3600
     # Number of hours to start at
-    if timeMachine:
+    if singleDay:
         baseTimeOffset = 0
     else:
-        # From timestamps: subtracting two times in one ZoneInfo would compare their
-        # wall clocks, an hour out on a DST change day.
-        baseTimeOffset = (baseHour.timestamp() - baseDay.timestamp()) / 3600
+        baseTimeOffset = requestedHourOffset
 
     # 7. Merge hourly models onto a consistent time grid, starting from midnight on the requested day
     # Note that baseTime is the requested time, in TZ aware datetime format
@@ -897,7 +905,7 @@ async def PW_Forecast(
         base_time=baseTime,
         local_tz=localTZ,
         hour_array_grib=hour_array_grib,
-        time_machine=timeMachine,
+        time_machine=singleDay,
         daily_days=daily_days,
         existing_day_array_grib=day_array_grib,
     )
@@ -999,7 +1007,7 @@ async def PW_Forecast(
     # The hourly response objects and their text are only needed for the hours
     # returned. Time Machine and the legacy summaries (no summary text) take the
     # most common text over every hour, so those build them all.
-    if timeMachine or not summaryText:
+    if singleDay or not summaryText:
         hourly_display_hours = None
     elif exHourly == 1:
         hourly_display_hours = range(0)
@@ -1030,6 +1038,9 @@ async def PW_Forecast(
             InterSday=InterSday,
             hourlyDayIndex=hourlyDayIndex,
             baseTimeOffset=baseTimeOffset,
+            # A future day's currentDay* totals run from local midnight to the
+            # requested hour, as today's run to the current hour.
+            currentHourOffset=requestedHourOffset,
             timeMachine=timeMachine,
             tmExtra=tmExtra,
             prepIntensityUnit=prepIntensityUnit,
@@ -1160,10 +1171,10 @@ async def PW_Forecast(
             loc_tag=loc_tag,
             aq_inputs=aq_inputs,
             inc_airqualitydetails=incAirQualityDetails,
-            include_day_night=inc_day_night == 1 and not timeMachine,
+            include_day_night=inc_day_night == 1 and not singleDay,
             hour_columns=hour_columns,
             current_hour_time=None
-            if timeMachine
+            if singleDay
             else int(hour_array_grib[int(baseTimeOffset)]),
             precip_member_masks=inputs["precip_member_masks"],
         )
@@ -1310,13 +1321,13 @@ async def PW_Forecast(
             unit_system=unitSystem,
             hour_text_list=hourTextList,
             hour_icon_list=hourIconList,
-            time_machine=timeMachine,
+            time_machine=singleDay,
             base_time_offset_int=base_time_offset_int,
             logger=logger,
             loc_tag=loc_tag,
             hour_columns=hour_columns,
         )
-        if timeMachine:
+        if singleDay:
             output_hourList = hourList[0:ouputHours]
         else:
             output_hourList = hourList[
@@ -1332,7 +1343,7 @@ async def PW_Forecast(
             inc_airqualitydetails=incAirQualityDetails,
         )
 
-    if inc_day_night == 1 and not timeMachine:
+    if inc_day_night == 1 and not singleDay:
         returnOBJ["day_night"] = {}
         filtered_day_night_list = remove_conditional_fields(
             day_night_list,
@@ -1354,7 +1365,7 @@ async def PW_Forecast(
             icon=icon,
             day_text_list=dayTextList,
             day_icon_list=dayIconList,
-            time_machine=timeMachine,
+            time_machine=singleDay,
             logger=logger,
             loc_tag=loc_tag,
         )
