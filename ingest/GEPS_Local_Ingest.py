@@ -29,10 +29,9 @@ from API.constants.shared_const import (
     INGEST_VERSION_STR,
 )
 from API.ingest_grib_utils import (
-    cat_gribs,
+    convert_fields_to_netcdf,
     download_and_validate_subset,
-    quote_path,
-    run_checked,
+    download_fields_concurrently,
 )
 from API.ingest_utils import (
     CHUNK_SIZES,
@@ -140,7 +139,11 @@ skip_geps_wgrib2_validation = os.getenv(
 
 
 def download_geps_variable(
-    base_time: pd.Timestamp, variable: str, level: str, herbie_save_dir: str
+    base_time: pd.Timestamp,
+    variable: str,
+    level: str,
+    herbie_save_dir: str,
+    max_threads: int,
 ) -> list[str]:
     """Download and validate every lead of one GEPS field with bounded retries."""
     return download_and_validate_subset(
@@ -157,6 +160,7 @@ def download_geps_variable(
         herbie_retry_sleep_seconds=GEPS_RETRY_SLEEP_SECONDS,
         herbie_kwargs={"variable": variable, "level": level},
         wgrib2_exe=wgrib2_path.strip(),
+        download_max_threads=max_threads,
     )
 
 
@@ -339,10 +343,15 @@ def main() -> None:
     ).values
 
     # %% Download each field, then convert all of them to one NetCDF
-    grib_list = []
-    for variable, level in GEPS_MATCH_STRINGS:
-        grib_files = download_geps_variable(base_time, variable, level, herbie_save_dir)
-        grib_list += grib_files
+    downloaded = download_fields_concurrently(
+        GEPS_MATCH_STRINGS,
+        lambda variable, level, threads: download_geps_variable(
+            base_time, variable, level, herbie_save_dir, threads
+        ),
+    )
+    for (variable, level), grib_files in zip(
+        GEPS_MATCH_STRINGS, downloaded, strict=True
+    ):
         logger.info(
             "Download completed for GEPS forecast %s:%s, %s files downloaded.",
             variable,
@@ -350,20 +359,19 @@ def main() -> None:
             len(grib_files),
         )
 
-    # Feed wgrib2 the files in lead order so every message arrives in valid-time
-    # order; the path breaks ties so the merge is deterministic.
-    grib_list = sorted(grib_list, key=lambda path: (grib_lead_hour(path), path))
-
+    # Convert the fields at the same time; each field's files go to wgrib2 in
+    # lead order so its messages arrive in valid-time order.
     # -set_ext_name gives each member its own variable name (see
     # find_member_variables) instead of overwriting one another
-    merged_nc_path = forecast_process_path + "_wgrib2_merged.nc"
-    run_checked(
-        f"{cat_gribs(grib_list)} | "
-        f"{quote_path(wgrib2_path.strip())} - "
-        f"-set_ext_name 1 -netcdf {quote_path(merged_nc_path)}",
-        "GEPS wgrib2 NetCDF conversion",
+    field_gribs = [sorted(grib_files, key=grib_lead_hour) for grib_files in downloaded]
+    xarray_forecast_merged, merged_nc_paths = convert_fields_to_netcdf(
+        field_gribs,
+        wgrib2_path,
+        forecast_process_path + "_wgrib2",
+        "GEPS",
+        process_chunk,
+        "-set_ext_name 1",
     )
-    xarray_forecast_merged = xr.open_dataset(merged_nc_path)
 
     if not np.array_equal(xarray_forecast_merged["time"].values, forecast_valid_times):
         raise RuntimeError(
@@ -382,7 +390,8 @@ def main() -> None:
     xarray_forecast_merged.close()
 
     # The merged NetCDF is large and no longer needed
-    os.remove(merged_nc_path)
+    for nc_path in merged_nc_paths:
+        os.remove(nc_path)
 
     # %% Stack the statistics into the (variable, time, y, x) layout the API reads
     # The interpolation source axis is the exact forecast valid times: the stored

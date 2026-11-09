@@ -9,10 +9,12 @@ Author: Alexander Rey
 import logging
 import shlex
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Any, cast
 
 import pandas as pd
+import xarray as xr
 from herbie import FastHerbie
 
 from API.ingest_utils import (
@@ -167,7 +169,8 @@ def download_and_validate_subset(
         "product": product,
         "verbose": False,
         "save_dir": save_dir,
-        "max_threads": positive_int_env("herbie_download_threads", 20),
+        "max_threads": download_max_threads
+        or positive_int_env("herbie_download_threads", 20),
     }
     if priority is not None:
         fast_herbie_kwargs["priority"] = priority
@@ -232,3 +235,108 @@ def download_and_validate_subset(
 
     check_grib_stats(grib_files, wgrib2_exe, dataset_name, excluded_stats_variables)
     return grib_files
+
+
+def download_fields_concurrently(fields, download_field) -> list[list[str]]:
+    """Download several GRIB fields at once, keeping the connection count bounded.
+
+    MSC serves each field from its own set of files at only ~6 MB/s per
+    ingest when one field is fetched at a time, so a few fields are fetched
+    together. ``herbie_download_threads`` (default 20) is the total number of
+    connections to the datamart: it is split between the concurrent fields so
+    that running more fields at once does not open more connections.
+
+    Args:
+        fields: ``(variable, level)`` pairs to download.
+        download_field: Called as ``download_field(variable, level, threads)``;
+            downloads and validates one field using ``threads`` connections and
+            returns its GRIB paths.
+
+    Returns:
+        One list of GRIB paths per field, in the order of ``fields``, whatever
+        order the downloads finish in. The first failure is raised once the
+        in-flight fields have stopped.
+    """
+    workers = min(len(fields), positive_int_env("msc_download_fields", 4))
+    threads = max(1, positive_int_env("herbie_download_threads", 20) // workers)
+    logger.info(
+        "Downloading %d fields, %d at a time with %d connections each.",
+        len(fields),
+        workers,
+        threads,
+    )
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(download_field, variable, level, threads)
+            for variable, level in fields
+        ]
+        try:
+            return [future.result() for future in futures]
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+
+
+def convert_fields_to_netcdf(
+    field_gribs: list[list[str]],
+    wgrib2_exe: str,
+    nc_prefix: str,
+    description: str,
+    process_chunk: int,
+    wgrib2_args: str = "",
+) -> tuple[xr.Dataset, list[str]]:
+    """Convert each field's GRIB files to its own NetCDF at the same time.
+
+    One ``cat | wgrib2 -netcdf`` pass over every field is single-threaded and
+    appends records of different variables to one growing file; converting a
+    field per process uses the other cores and keeps every file small. The
+    fields are then merged on their shared time and grid coordinates, giving the
+    same variables as the single pass. ``msc_convert_workers`` (default 4) sets
+    how many wgrib2 processes run at once.
+
+    Args:
+        field_gribs: GRIB paths per field, each list already in lead order.
+        wgrib2_exe: Path to the wgrib2 executable.
+        nc_prefix: Path prefix for the per-field NetCDF files.
+        description: What is converted, including the model, for errors.
+        process_chunk: The model's processing tile, in grid cells.
+        wgrib2_args: Extra wgrib2 arguments placed before ``-netcdf``.
+
+    Returns:
+        The merged dataset (closing it closes the per-field files) and the
+        NetCDF paths, which the caller removes once the data has been written.
+    """
+    nc_paths = [f"{nc_prefix}_{index}.nc" for index in range(len(field_gribs))]
+    workers = min(len(field_gribs), positive_int_env("msc_convert_workers", 4))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [
+            executor.submit(
+                run_checked,
+                f"{cat_gribs(grib_files)} | {quote_path(wgrib2_exe.strip())} - "
+                f"{wgrib2_args} -netcdf {quote_path(nc_path)}",
+                f"{description} wgrib2 NetCDF conversion of field {index}",
+            )
+            for index, (grib_files, nc_path) in enumerate(
+                zip(field_gribs, nc_paths, strict=True)
+            )
+        ]
+        for future in futures:
+            future.result()
+
+    datasets = [xr.open_dataset(nc_path) for nc_path in nc_paths]
+    # Read in processing tiles from the start. Opened with chunks={} each variable
+    # is one dask chunk, so the write holds whole fields in memory to cut them into
+    # tiles (GDPS 12.0 GB against 5.0 GB). Fields with fewer leads than the others
+    # are padded when written, not held in memory.
+    tiled_datasets = [
+        dataset.chunk(
+            {dim: -1 if dim == "time" else process_chunk for dim in dataset.sizes}
+        )
+        for dataset in datasets
+    ]
+    # Each variable is in one file and the coordinates are shared, so take them
+    # from the first file; the default compat would load every array to compare.
+    merged = xr.merge(tiled_datasets, compat="override", join="outer")
+    merged.set_close(lambda: [dataset.close() for dataset in datasets])
+    return merged, nc_paths
