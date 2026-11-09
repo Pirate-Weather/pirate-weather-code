@@ -100,15 +100,13 @@ def _aligned_rows(
         src_start = 0
     else:
         dest_start = 0
-        src_start = nearest_index(times, base_timestamp)
         # A day that starts after the store ends (a future request, #689) has
         # no rows here: the nearest row would be the store's last hour, copied
-        # onto local midnight.
-        nearest_time = times[src_start]
-        if not np.isfinite(nearest_time) or (
-            abs(nearest_time - base_timestamp) >= SECONDS_PER_HOUR
-        ):
+        # onto local midnight. Only the end matters; an all-NaN row inside the
+        # store (NaN time) must not drop the whole store.
+        if not np.any(times >= base_timestamp - SECONDS_PER_HOUR + 1):
             return 0, 0, 0
+        src_start = nearest_index(times, base_timestamp)
     rows = max(0, min(len(times) - src_start, num_hours - dest_start))
     return dest_start, src_start, rows
 
