@@ -30,26 +30,20 @@ from API.constants.model_const import (
     URMA,
 )
 from API.constants.shared_const import ENSEMBLE_MEMBER_COUNTS
-from API.forecast_sources import member_mask_columns
+from API.forecast_sources import USED_SOURCE_COLUMN, member_mask_columns
 from API.utils.geo import is_in_canada
 from API.utils.source_priority import should_gfs_precede_dwd
 
 logger = logging.getLogger(__name__)
 
 
-def _stack_fields(num_hours, *arrays):
+def _stack_fields(num_hours, **arrays):
     """
-    Stack valid arrays column-wise.
+    Stack the valid arrays column-wise in the order given, keyed by source name.
     If no valid arrays are provided, return a column of NaNs of length num_hours.
+    Returns the stack and its columns' sources, as for ``_stack_in_order``.
     """
-    valid = [
-        _normalize_length(num_hours, arr, label=f"stack_fields[{idx}]")
-        for idx, arr in enumerate(arrays)
-        if arr is not None
-    ]
-    if not valid:
-        return np.full((num_hours, 1), np.nan)
-    return np.column_stack(valid)
+    return _stack_in_order(num_hours, arrays, arrays)
 
 
 def _normalize_length(num_hours, values, *, label: str | None = None):
@@ -234,16 +228,25 @@ _PRECIP_PRIORITY_ORDER_AI_ROW = [
 
 
 def _stack_in_order(num_hours, order, source_data):
+    """Stack the sources with data in ``order``, one column each.
+
+    Returns the stack and, for each column, the source's column in the per-hour
+    usage mask (``USED_SOURCE_COLUMN``), so the hourly block can record which
+    source each hour's value came from (``flags.sources``). A stack with no
+    sources is one all-NaN column and no sources.
+    """
     arrays = []
+    sources = []
     for source in order:
         data = source_data.get(source)
         if data is not None:
             arrays.append(_normalize_length(num_hours, data, label=source))
+            sources.append(USED_SOURCE_COLUMN[source])
 
     if not arrays:
-        return np.full((num_hours, 1), np.nan)
+        return np.full((num_hours, 1), np.nan), ()
 
-    return np.column_stack(arrays)
+    return np.column_stack(arrays), tuple(sources)
 
 
 def _component_precip_type(snow, ice, freezing_rain, rain):
@@ -355,7 +358,8 @@ def _stack_with_priority(
         prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
-        Stacked array with sources ordered by priority.
+        Stacked array with sources ordered by priority, and its columns'
+        sources (``_stack_in_order``).
     """
     if is_in_canada(lat, lon) and not prioritize_ai_models:
         order = _CANADA_PRIORITY_ORDER
@@ -432,6 +436,8 @@ def prepare_data_inputs(
     era5_valid = isinstance(era5_merged, np.ndarray)
     dwd_valid = isinstance(dwd_mosmix_merged, np.ndarray)
     urma_valid = isinstance(urma_merged, np.ndarray) and "urma" in source_list
+    # Each stack's column sources, for flags.sources (see _stack_in_order)
+    input_sources = {}
 
     # --- InterThour_inputs ---
     inter_thour_inputs = {}
@@ -544,12 +550,14 @@ def prepare_data_inputs(
             + era5_merged[:, ERA5["convective_snowfall_rate_water_equivalent"]]
         ) * 3600
 
-    prcip_intensity_inputs = _stack_precip_with_priority(
-        num_hours,
-        lat,
-        lon,
-        prcip_intensity_source_data,
-        prioritize_ai_models=prioritize_ai_models,
+    prcip_intensity_inputs, input_sources["prcipIntensity_inputs"] = (
+        _stack_precip_with_priority(
+            num_hours,
+            lat,
+            lon,
+            prcip_intensity_source_data,
+            prioritize_ai_models=prioritize_ai_models,
+        )
     )
     era5_rain_intensity = (
         _normalize_length(num_hours, era5_rain_intensity)
@@ -563,31 +571,33 @@ def prepare_data_inputs(
     )
 
     # --- prcipProbability_inputs ---
-    prcip_probability_inputs = _stack_precip_with_priority(
-        num_hours,
-        lat,
-        lon,
-        source_data={
-            "nbm": nbm_merged[:, NBM["prob"]] * 0.01
-            if nbm_merged is not None
-            else None,
-            "ecmwf": ecmwf_merged[:, ECMWF["prob"]]
-            if "ecmwf_ifs" in source_list and ecmwf_merged is not None
-            else None,
-            "geps": geps_merged[:, GEPS["prob"]]
-            if "geps" in source_list and geps_merged is not None
-            else None,
-            "reps": reps_merged[:, REPS["prob"]]
-            if "reps" in source_list and reps_merged is not None
-            else None,
-            "gefs": gefs_merged[:, GEFS["prob"]]
-            if "gefs" in source_list and gefs_merged is not None
-            else None,
-            "era5": era5_merged[:, ERA5["prob"]] * 0.01
-            if "era5" in source_list and era5_valid
-            else None,
-        },
-        prioritize_ai_models=prioritize_ai_models,
+    prcip_probability_inputs, input_sources["prcipProbability_inputs"] = (
+        _stack_precip_with_priority(
+            num_hours,
+            lat,
+            lon,
+            source_data={
+                "nbm": nbm_merged[:, NBM["prob"]] * 0.01
+                if nbm_merged is not None
+                else None,
+                "ecmwf": ecmwf_merged[:, ECMWF["prob"]]
+                if "ecmwf_ifs" in source_list and ecmwf_merged is not None
+                else None,
+                "geps": geps_merged[:, GEPS["prob"]]
+                if "geps" in source_list and geps_merged is not None
+                else None,
+                "reps": reps_merged[:, REPS["prob"]]
+                if "reps" in source_list and reps_merged is not None
+                else None,
+                "gefs": gefs_merged[:, GEFS["prob"]]
+                if "gefs" in source_list and gefs_merged is not None
+                else None,
+                "era5": era5_merged[:, ERA5["prob"]] * 0.01
+                if "era5" in source_list and era5_valid
+                else None,
+            },
+            prioritize_ai_models=prioritize_ai_models,
+        )
     )
 
     # --- precip member masks (daily probability from members) ---
@@ -613,7 +623,7 @@ def prepare_data_inputs(
     )
 
     # --- prcipType_inputs ---
-    prcip_type_inputs = _stack_precip_with_priority(
+    prcip_type_inputs, input_sources["prcipType_inputs"] = _stack_precip_with_priority(
         num_hours,
         lat,
         lon,
@@ -721,7 +731,7 @@ def prepare_data_inputs(
     )
 
     # --- temperature_inputs ---
-    temperature_inputs = _stack_with_priority(
+    temperature_inputs, input_sources["temperature_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -747,7 +757,7 @@ def prepare_data_inputs(
     )
 
     # --- dew_inputs ---
-    dew_inputs = _stack_with_priority(
+    dew_inputs, input_sources["dew_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -786,7 +796,7 @@ def prepare_data_inputs(
             * 100
         )
 
-    humidity_inputs = _stack_with_priority(
+    humidity_inputs, input_sources["humidity_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -814,7 +824,7 @@ def prepare_data_inputs(
     )
 
     # --- pressure_inputs ---
-    pressure_inputs = _stack_with_priority(
+    pressure_inputs, input_sources["pressure_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -846,7 +856,7 @@ def prepare_data_inputs(
     )
 
     # --- wind inputs ---
-    wind_inputs = _stack_with_priority(
+    wind_inputs, input_sources["wind_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -898,7 +908,7 @@ def prepare_data_inputs(
     )
 
     # --- gust_inputs ---
-    gust_inputs = _stack_with_priority(
+    gust_inputs, input_sources["gust_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -923,7 +933,7 @@ def prepare_data_inputs(
     )
 
     # --- bearing_inputs ---
-    bearing_inputs = _stack_with_priority(
+    bearing_inputs, input_sources["bearing_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -975,7 +985,7 @@ def prepare_data_inputs(
     )
 
     # --- cloud_inputs ---
-    cloud_inputs = _stack_with_priority(
+    cloud_inputs, input_sources["cloud_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -1011,7 +1021,7 @@ def prepare_data_inputs(
     )
 
     # --- uv_inputs ---
-    uv_inputs = _stack_with_priority(
+    uv_inputs, input_sources["uv_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -1034,7 +1044,7 @@ def prepare_data_inputs(
     )
 
     # --- vis_inputs ---
-    vis_inputs = _stack_with_priority(
+    vis_inputs, input_sources["vis_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -1057,7 +1067,7 @@ def prepare_data_inputs(
     )
 
     # --- ozone_inputs ---
-    ozone_inputs = _stack_with_priority(
+    ozone_inputs, input_sources["ozone_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -1072,14 +1082,14 @@ def prepare_data_inputs(
     )
 
     # --- smoke_inputs ---
-    smoke_inputs = _stack_fields(
+    smoke_inputs, input_sources["smoke_inputs"] = _stack_fields(
         num_hours,
-        rrfs_merged[:, RRFS["smoke"]] if rrfs_merged is not None else None,
-        hrrr_merged[:, HRRR["smoke"]] if hrrr_merged is not None else None,
+        rrfs=rrfs_merged[:, RRFS["smoke"]] if rrfs_merged is not None else None,
+        hrrr=hrrr_merged[:, HRRR["smoke"]] if hrrr_merged is not None else None,
     )
 
     # --- accum_inputs ---
-    accum_inputs = _stack_precip_with_priority(
+    accum_inputs, input_sources["accum_inputs"] = _stack_precip_with_priority(
         num_hours,
         lat,
         lon,
@@ -1109,37 +1119,41 @@ def prepare_data_inputs(
     )
 
     # --- nearstorm_inputs ---
-    nearstorm_inputs = {
-        "dist": _stack_fields(
-            num_hours,
-            np.maximum(gfs_merged[:, GFS["storm_dist"]], 0)
-            if gfs_merged is not None
-            else None,
-        ),
-        "dir": _stack_fields(
-            num_hours,
-            gfs_merged[:, GFS["storm_dir"]] if gfs_merged is not None else None,
-        ),
-    }
+    nearstorm_dist, input_sources["nearstorm_dist"] = _stack_fields(
+        num_hours,
+        gfs=np.maximum(gfs_merged[:, GFS["storm_dist"]], 0)
+        if gfs_merged is not None
+        else None,
+    )
+    nearstorm_dir, input_sources["nearstorm_dir"] = _stack_fields(
+        num_hours,
+        gfs=gfs_merged[:, GFS["storm_dir"]] if gfs_merged is not None else None,
+    )
+    nearstorm_inputs = {"dist": nearstorm_dist, "dir": nearstorm_dir}
 
     # --- station_pressure_inputs ---
     station_pressure_inputs = None
     if "stationPressure" in extra_vars:
-        station_pressure_inputs = _stack_fields(
-            num_hours,
-            urma_merged[:, URMA["pressure"]] if urma_valid else None,
-            era5_merged[:, ERA5["surface_pressure"]] if era5_valid else None,
-            gfs_merged[:, GFS["station_pressure"]] if gfs_merged is not None else None,
-            hrdps_merged[:, HRDPS["station_pressure"]]
-            if hrdps_merged is not None
-            else None,
-            gdps_merged[:, GDPS["station_pressure"]]
-            if gdps_merged is not None
-            else None,
+        station_pressure_inputs, input_sources["station_pressure_inputs"] = (
+            _stack_fields(
+                num_hours,
+                urma=urma_merged[:, URMA["pressure"]] if urma_valid else None,
+                era5=era5_merged[:, ERA5["surface_pressure"]] if era5_valid else None,
+                gfs=gfs_merged[:, GFS["station_pressure"]]
+                if gfs_merged is not None
+                else None,
+                hrdps=hrdps_merged[:, HRDPS["station_pressure"]]
+                if hrdps_merged is not None
+                else None,
+                gdps=gdps_merged[:, GDPS["station_pressure"]]
+                if gdps_merged is not None
+                else None,
+            )
         )
 
     # --- fire_inputs ---
     fire_inputs = np.full((num_hours, 1), np.nan)
+    input_sources["fire_inputs"] = ()
 
     # --- feels_like_inputs ---
     gfs_apparent = gfs_merged[:, GFS["apparent"]] if gfs_merged is not None else None
@@ -1155,14 +1169,14 @@ def prepare_data_inputs(
             np.nan,
             _normalize_length(num_hours, gfs_apparent, label="gfs"),
         )
-    feels_like_inputs = _stack_fields(
+    feels_like_inputs, input_sources["feels_like_inputs"] = _stack_fields(
         num_hours,
-        nbm_merged[:, NBM["apparent"]] if nbm_merged is not None else None,
-        gfs_apparent,
+        nbm=nbm_merged[:, NBM["apparent"]] if nbm_merged is not None else None,
+        gfs=gfs_apparent,
     )
 
     # --- solar_inputs ---
-    solar_inputs = _stack_with_priority(
+    solar_inputs, input_sources["solar_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -1186,17 +1200,17 @@ def prepare_data_inputs(
     )
 
     # --- cape_inputs ---
-    cape_inputs = _stack_fields(
+    cape_inputs, input_sources["cape_inputs"] = _stack_fields(
         num_hours,
-        rrfs_merged[:, RRFS["cape"]] if rrfs_merged is not None else None,
-        nbm_merged[:, NBM["cape"]] if nbm_merged is not None else None,
-        hrrr_merged[:, HRRR["cape"]] if hrrr_merged is not None else None,
-        hrdps_merged[:, HRDPS["cape"]] if hrdps_merged is not None else None,
-        gdps_merged[:, GDPS["cape"]] if gdps_merged is not None else None,
-        era5_merged[:, ERA5["convective_available_potential_energy"]]
+        rrfs=rrfs_merged[:, RRFS["cape"]] if rrfs_merged is not None else None,
+        nbm=nbm_merged[:, NBM["cape"]] if nbm_merged is not None else None,
+        hrrr=hrrr_merged[:, HRRR["cape"]] if hrrr_merged is not None else None,
+        hrdps=hrdps_merged[:, HRDPS["cape"]] if hrdps_merged is not None else None,
+        gdps=gdps_merged[:, GDPS["cape"]] if gdps_merged is not None else None,
+        era5=era5_merged[:, ERA5["convective_available_potential_energy"]]
         if era5_valid
         else None,
-        gfs_merged[:, GFS["cape"]] if gfs_merged is not None else None,
+        gfs=gfs_merged[:, GFS["cape"]] if gfs_merged is not None else None,
     )
 
     # --- lifted_index_inputs ---
@@ -1205,7 +1219,7 @@ def prepare_data_inputs(
     # surface-parcel LFTX, while GDPS (MU-VT) and GFS (4LFTX) store a
     # most-unstable / best-layer lifted index. RRFS (include=rrfs) stores the
     # 500-1000 mb layer lifted index.
-    lifted_index_inputs = _stack_with_priority(
+    lifted_index_inputs, input_sources["lifted_index_inputs"] = _stack_with_priority(
         num_hours,
         lat,
         lon,
@@ -1228,52 +1242,60 @@ def prepare_data_inputs(
 
     # --- vertical_velocity_inputs ---
     # 500 hPa omega (Pa/s) from every source
-    vertical_velocity_inputs = _stack_with_priority(
-        num_hours,
-        lat,
-        lon,
-        source_data={
-            "hrdps": hrdps_merged[:, HRDPS["vertical_velocity"]]
-            if hrdps_merged is not None
-            else None,
-            "gdps": gdps_merged[:, GDPS["vertical_velocity"]]
-            if gdps_merged is not None
-            else None,
-            "gfs": gfs_merged[:, GFS["vertical_velocity"]]
-            if gfs_merged is not None
-            else None,
-        },
-        prioritize_ai_models=prioritize_ai_models,
+    vertical_velocity_inputs, input_sources["vertical_velocity_inputs"] = (
+        _stack_with_priority(
+            num_hours,
+            lat,
+            lon,
+            source_data={
+                "hrdps": hrdps_merged[:, HRDPS["vertical_velocity"]]
+                if hrdps_merged is not None
+                else None,
+                "gdps": gdps_merged[:, GDPS["vertical_velocity"]]
+                if gdps_merged is not None
+                else None,
+                "gfs": gfs_merged[:, GFS["vertical_velocity"]]
+                if gfs_merged is not None
+                else None,
+            },
+            prioritize_ai_models=prioritize_ai_models,
+        )
     )
 
     # --- convective_inhibition_inputs ---
-    convective_inhibition_inputs = _stack_with_priority(
-        num_hours,
-        lat,
-        lon,
-        source_data={
-            "rrfs": rrfs_merged[:, RRFS["cin"]] if rrfs_merged is not None else None,
-            "gdps": gdps_merged[:, GDPS["cin"]] if gdps_merged is not None else None,
-            "gfs": gfs_merged[:, GFS["cin"]] if gfs_merged is not None else None,
-        },
-        prioritize_ai_models=prioritize_ai_models,
+    convective_inhibition_inputs, input_sources["convective_inhibition_inputs"] = (
+        _stack_with_priority(
+            num_hours,
+            lat,
+            lon,
+            source_data={
+                "rrfs": rrfs_merged[:, RRFS["cin"]]
+                if rrfs_merged is not None
+                else None,
+                "gdps": gdps_merged[:, GDPS["cin"]]
+                if gdps_merged is not None
+                else None,
+                "gfs": gfs_merged[:, GFS["cin"]] if gfs_merged is not None else None,
+            },
+            prioritize_ai_models=prioritize_ai_models,
+        )
     )
 
     # --- k_index_inputs ---
-    k_index_inputs = _stack_fields(
+    k_index_inputs, input_sources["k_index_inputs"] = _stack_fields(
         num_hours,
-        gdps_merged[:, GDPS["k_index"]] if gdps_merged is not None else None,
+        gdps=gdps_merged[:, GDPS["k_index"]] if gdps_merged is not None else None,
     )
 
     # --- error_inputs ---
-    error_inputs = _stack_fields(
+    error_inputs, input_sources["error_inputs"] = _stack_fields(
         num_hours,
-        ecmwf_merged[:, ECMWF["accum_stddev"]] * 1000
+        ecmwf=ecmwf_merged[:, ECMWF["accum_stddev"]] * 1000
         if ecmwf_merged is not None
         else None,
-        gefs_merged[:, GEFS["error"]] if gefs_merged is not None else None,
-        geps_merged[:, GEPS["error"]] if geps_merged is not None else None,
-        reps_merged[:, REPS["error"]] if reps_merged is not None else None,
+        gefs=gefs_merged[:, GEFS["error"]] if gefs_merged is not None else None,
+        geps=geps_merged[:, GEPS["error"]] if geps_merged is not None else None,
+        reps=reps_merged[:, REPS["error"]] if reps_merged is not None else None,
     )
 
     return {
@@ -1308,6 +1330,7 @@ def prepare_data_inputs(
         "vertical_velocity_inputs": vertical_velocity_inputs,
         "convective_inhibition_inputs": convective_inhibition_inputs,
         "k_index_inputs": k_index_inputs,
+        "input_sources": input_sources,
     }
 
 
@@ -1316,6 +1339,8 @@ def prepare_aq_inputs(
     dataOut_raqdps,
     dataOut_silam,
     hour_array_grib,
+    *,
+    with_hour_sources=False,
 ):
     """Prepare air-quality concentration arrays aligned to the request hour grid.
 
@@ -1332,6 +1357,9 @@ def prepare_aq_inputs(
     ``smoke_frp`` is SILAM PM_FRP_column divided by BLH to convert from the
     stored column-burden units (µg/m²) to a near-surface concentration (µg/m³).
     It is used as a lower-priority smoke source after HRRR.
+
+    With ``with_hour_sources``, ``hour_sources`` maps "raqdps" and "silam" to
+    the hours each supplied a returned concentration (flags.sources).
     """
     nan_row = np.full(num_hours, np.nan)
 
@@ -1504,7 +1532,7 @@ def prepare_aq_inputs(
             else:
                 lead_in[pollutant] = _prefer(raqdps_values, silam_values)
 
-    return {
+    aq_inputs = {
         "lead_in": lead_in,
         "pm25": _prefer(raqdps_pm25, silam_pm25),
         "pm10": _prefer(raqdps_pm10, silam_pm10),
@@ -1514,3 +1542,31 @@ def prepare_aq_inputs(
         "co": _prefer(None, silam_co),  # RAQDPS has no CO; SILAM only
         "smoke_frp": smoke_frp_m3,
     }
+
+    if with_hour_sources:
+        # Per hour, whether RAQDPS or SILAM supplied any returned concentration:
+        # RAQDPS wherever it has a pollutant, SILAM where it fills one RAQDPS
+        # lacks, or gives CO
+        raqdps_hours = np.zeros(num_hours, dtype=bool)
+        silam_hours = (
+            np.isfinite(silam_co)
+            if silam_co is not None
+            else np.zeros(num_hours, dtype=bool)
+        )
+        for raqdps_values, silam_values in (
+            (raqdps_pm25, silam_pm25),
+            (raqdps_pm10, silam_pm10),
+            (raqdps_o3, silam_o3),
+            (raqdps_no2, silam_no2),
+            (raqdps_so2, silam_so2),
+        ):
+            if raqdps_values is None:
+                raqdps_has = np.zeros(num_hours, dtype=bool)
+            else:
+                raqdps_has = np.isfinite(raqdps_values)
+            raqdps_hours |= raqdps_has
+            if silam_values is not None:
+                silam_hours |= np.isfinite(silam_values) & ~raqdps_has
+        aq_inputs["hour_sources"] = {"raqdps": raqdps_hours, "silam": silam_hours}
+
+    return aq_inputs

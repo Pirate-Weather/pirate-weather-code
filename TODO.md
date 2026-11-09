@@ -14,8 +14,8 @@ Work through the open items in this order, small ones first:
 1. Small: reload the DWD station and RAQDPS lat/lon pickles when the sync updates
    them; re-publish the README developer snapshot in the sharded layout; consistent
    clipping (#760).
-2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689); only list
-   the sources used (#554); next-update field (#668).
+2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689);
+   next-update field (#668).
 
 ## v3 goals
 
@@ -57,10 +57,6 @@ were assumed, not checked against how the API uses them.
 [pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): Dark
 Sky allowed time-machine requests for future dates; Pirate Weather returns HTTP 400.
 
-### Only list the sources used
-[pirateweather#554](https://github.com/Pirate-Weather/pirateweather/issues/554):
-`sources` lists every model covering the point, not just the ones used in the response.
-
 ### Next-update field
 [pirateweather#668](https://github.com/Pirate-Weather/pirateweather/issues/668): report
 when the forecast data will next refresh. The run-time pickles and the ingest
@@ -71,6 +67,25 @@ schedules already hold what is needed.
 some fields use `clipLog`, others `np.clip`.
 
 ## Done
+
+### flags.sources lists the sources used (2026-11-09)
+[pirateweather#554](https://github.com/Pirate-Weather/pirateweather/issues/554): version 2
+`flags.sources` and `flags.sourceTimes` listed every model covering the point. They now list
+the sources that supplied at least one returned value; version 1 and `sourceIDX` are
+unchanged. Each selection records its pick where it already happens: the hourly stacks
+carry their column sources (`_stack_in_order`) and `_first_available` marks a per-hour
+mask, the currently strategies and minutely chains report their source, the daily member
+share the ensembles that raised a day's probability, and air quality RAQDPS / SILAM per
+hour. `select_used_sources` (`API/forecast_sources.py`) counts the hours of the returned
+blocks (hourly slice, all hours for daily/day_night) and sets
+`SourceMetadata.used_sources` / `used_source_times`, which the next-update field can
+iterate. Under `include=aimodels` the AI model and the model it is merged into are each
+listed for the hours they supplied. Measured on the OVH stores (5 locations, sections
+re-run on the captured arguments): about +0.16 ms per version 2 request (hourly +0.04,
+currently +0.04, select +0.03, daily/minutely/AQ +0.02 each), and version 1 requests
+about 0.09 ms faster, because the hourly selection now indexes instead of `np.choose`.
+Every field but `flags.sources` / `sourceTimes` is identical across 40 responses
+(8 query variants).
 
 ### Moved to OVHCloud (2026-11)
 The API, the ingests, LibreWXR and the daily ERA5 job run on OVH's RBX Kubernetes
