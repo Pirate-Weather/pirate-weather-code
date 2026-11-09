@@ -187,6 +187,26 @@ Hourly precipitation uses separate source stacks because intensity,
 probability, type, accumulation, and error have different source coverage.
 Daily and day/night outputs aggregate these hourly results.
 
+### Daily and day/night precipitation probability
+
+The daily, 6am-to-6am (icon and summary) and day/night probabilities are not
+the maximum of the hourly probabilities, which understates rain whose timing
+the models disagree on: hourly 10/10/10/0/10/40/10 % can be most ensemble
+members wet at some hour. The ensemble ingests (GEFS, GEPS, REPS, ECMWF IFS,
+and AIGEFS/AIFS in AI mode) store which members exceed the precipitation
+threshold at each hour, and the API reports the share of members with
+precipitation at any hour of the window, in the location's local time. For
+today only the hours still ahead count, as for the hourly probability.
+
+The ensemble is chosen per window in the precipitation-probability order
+above (REPS → GEPS → ECMWF IFS → GEFS in Canada, ECMWF IFS → GEFS elsewhere):
+the first ensemble covering every hour of the window, else the one covering
+the most hours. Ensembles are never combined, as their member counts differ.
+The result is never below the window's highest hourly probability, so where
+the hourly probability comes from NBM the daily value is at least NBM's
+maximum. Time Machine requests and stores published before the member masks
+fall back to the hourly maximum.
+
 ### Canada, conventional mode
 
 | Element | Effective priority |

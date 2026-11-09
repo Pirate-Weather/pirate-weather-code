@@ -31,10 +31,12 @@ from herbie import HerbieLatest
 
 from API.api_utils import relative_humidity_from_dewpoint_c
 from API.constants.shared_const import (
+    ENSEMBLE_MEMBER_COUNTS,
     ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H,
     HISTORY_PERIODS,
     INGEST_VERSION_STR,
     KELVIN_TO_CELSIUS,
+    member_mask_var_names,
 )
 from API.constants.unit_const import MM_PER_M
 from API.ingest_grib_utils import download_and_validate_subset
@@ -52,6 +54,7 @@ from API.ingest_utils import (
     map_history_stores,
     open_history_store,
     open_remote,
+    pack_member_mask,
     pad_to_chunk_size,
     positive_int_env,
     publish_history_store,
@@ -111,9 +114,17 @@ IFS_OPER_CFGRIB_GROUPS = (
 # every lead of the whole grid while it assembles tiles (~20 GB at 0.1 degrees).
 PROCESS_TIME_CHUNK = 1
 
+# Ensemble members in a run (control plus 50 perturbed); the run fails before
+# publishing when the GRIB holds a different number
+ECMWF_IFS_MEMBER_COUNT = ENSEMBLE_MEMBER_COUNTS["ECMWF_IFS"]
+# Per-hour member bitmask words (pack_member_mask), from which the API gets the
+# share of members with precipitation at any hour of a day
+MEMBER_MASK_VARS = member_mask_var_names(ECMWF_IFS_MEMBER_COUNT)
+
 # Variables in the published store. The API reader puts the valid times (the
 # store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
-# API's ECMWF index map.
+# API's ECMWF index map. The mask words come last so the earlier columns keep
+# their positions.
 zarr_vars = (
     "msl",
     "t2m",
@@ -128,12 +139,17 @@ zarr_vars = (
     "APCP_Mean",
     "APCP_StdDev",
     "rh",
+    *MEMBER_MASK_VARS,
 )
 # rh is derived after the hourly interpolation (append_relative_humidity); the
 # rest are read from GRIB and kept in the intermediate and history stores.
-PROCESS_VARS = zarr_vars[:-1]
-# Categorical precipitation type is interpolated with nearest neighbour
-NEAREST_INTERP_VARS = ("ptype",)
+PROCESS_VARS = tuple(var for var in zarr_vars if var != "rh")
+# History stores from before the member masks lack them; the API only needs the
+# masks for hours still ahead, so a history store is not rebuilt for them
+HISTORY_VARS = tuple(var for var in PROCESS_VARS if var not in MEMBER_MASK_VARS)
+# Categorical precipitation type and the member masks (a blend of two member
+# sets is meaningless) are interpolated with nearest neighbour
+NEAREST_INTERP_VARS = ("ptype", *MEMBER_MASK_VARS)
 
 # Peak memory scales with this count: each thread holds a final-store shard, which
 # spans every variable and forecast hour. 4 matches the ingest instance's vCPUs.
@@ -219,9 +235,13 @@ def open_ifs_oper(grib_paths: list[str]) -> xr.Dataset:
 
 
 def write_ifs_ensemble_precip_stats(
-    grib_paths: list[str], lead_hours: list[int], zarr_path: str
+    grib_paths: list[str],
+    lead_hours: list[int],
+    zarr_path: str,
+    member_count: int = ECMWF_IFS_MEMBER_COUNT,
 ) -> xr.Dataset:
-    """Reduce the IFS ensemble total precipitation to hourly-rate statistics.
+    """Reduce the IFS ensemble total precipitation to hourly-rate statistics
+    and per-lead member bitmasks.
 
     At 0.1 degrees one lead is 50 members x 6.5 M cells (1.3 GB as float32), and
     a lazy multi-file cfgrib open peaked at 11 GB for a single lead. So each lead
@@ -265,10 +285,12 @@ def write_ifs_ensemble_precip_stats(
         previous_total = total
         previous_lead = lead
 
-        # Fraction of members above the shared ensemble threshold (mm/h -> m/h)
-        precip_prob = (rate > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H / MM_PER_M).sum(
-            axis=0, dtype=np.float32
-        ) / rate.shape[0]
+        # Fraction of members above the shared ensemble threshold (mm/h -> m/h),
+        # and which members they are, for the daily probability
+        wet_members = rate > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H / MM_PER_M
+        precip_prob = wet_members.sum(axis=0, dtype=np.float32) / member_count
+        mask_words = pack_member_mask(wet_members, member_count)
+        del wet_members
 
         dims = ("step", "latitude", "longitude")
         lead_stats = xr.Dataset(
@@ -276,6 +298,12 @@ def write_ifs_ensemble_precip_stats(
                 "Precipitation_Prob": (dims, precip_prob[np.newaxis]),
                 "APCP_StdDev": (dims, rate.std(axis=0)[np.newaxis]),
                 "APCP_Mean": (dims, rate.mean(axis=0)[np.newaxis]),
+                **{
+                    name: (dims, word[np.newaxis])
+                    for name, word in zip(
+                        member_mask_var_names(member_count), mask_words, strict=True
+                    )
+                },
             },
             coords={
                 "step": [float(lead)],
@@ -302,13 +330,14 @@ def write_ifs_ensemble_precip_stats(
             )
         # Only the totals carry over; these would otherwise sit in memory (1.3 GB
         # each) while the next lead decodes
-        del total, rate, precip_prob, lead_stats
+        del total, rate, precip_prob, mask_words, lead_stats
 
     return xr.open_zarr(zarr_path, consolidated=False)
 
 
 def append_relative_humidity(stacked: da.Array) -> da.Array:
-    """Add 2 m relative humidity (percent, like GFS and HRRR) as the last variable.
+    """Insert 2 m relative humidity (percent, like GFS and HRRR) at its
+    ``zarr_vars`` position, ahead of the member mask words.
 
     Derived from the hourly temperature and dew point (K in the stored fields) so
     each stored hour equals what the API used to derive per request, and reads no
@@ -329,7 +358,11 @@ def append_relative_humidity(stacked: da.Array) -> da.Array:
         stacked[PROCESS_VARS.index("d2m")],
         dtype="float32",
     )
-    return da.concatenate([stacked, relative_humidity[np.newaxis]], axis=0)
+    rh_index = zarr_vars.index("rh")
+    return da.concatenate(
+        [stacked[:rh_index], relative_humidity[np.newaxis], stacked[rh_index:]],
+        axis=0,
+    )
 
 
 def step_to_valid_time(
@@ -536,8 +569,13 @@ def main() -> None:
 
     def open_history_dataset(name_and_path):
         name, local_path = name_and_path
-        open_history_store(history_remote, name, ("time", *PROCESS_VARS), local_path)
-        return xr.open_zarr(local_path, consolidated=False)
+        open_history_store(history_remote, name, ("time", *HISTORY_VARS), local_path)
+        ds = xr.open_zarr(local_path, consolidated=False)
+        # Member masks are NaN for history runs stored before them
+        for var in MEMBER_MASK_VARS:
+            if var not in ds.data_vars:
+                ds[var] = xr.full_like(ds["Precipitation_Prob"], np.nan)
+        return ds
 
     hist = map_history_stores(
         open_history_dataset, list(zip(hist_store_names, hist_local_paths, strict=True))
@@ -557,10 +595,11 @@ def main() -> None:
     if missing_vars:
         raise RuntimeError(f"ECMWF run {base_time} is missing {missing_vars}")
 
-    # Out-of-range values become NaN
+    # Out-of-range values become NaN; the mask words are integers up to 2^24,
+    # above the range's ceiling
     for var in PROCESS_VARS:
         ds_clip = ds[var]
-        if np.issubdtype(ds_clip.dtype, np.number):
+        if var not in MEMBER_MASK_VARS and np.issubdtype(ds_clip.dtype, np.number):
             ds[var] = ds_clip.where(
                 (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
             )

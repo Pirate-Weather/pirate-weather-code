@@ -25,8 +25,10 @@ import zarr
 from herbie.fast import Herbie_latest
 
 from API.constants.shared_const import (
+    ENSEMBLE_MEMBER_COUNTS,
     ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H,
     INGEST_VERSION_STR,
+    member_mask_var_names,
 )
 from API.ingest_grib_utils import download_and_validate_subset, run_checked
 from API.ingest_utils import (
@@ -39,6 +41,7 @@ from API.ingest_utils import (
     interp_time_take_blend,
     mask_invalid_data,
     open_remote,
+    pack_member_mask,
     pad_to_chunk_size,
     positive_int_env,
     publish_ingest_run,
@@ -52,7 +55,7 @@ warnings.filterwarnings("ignore", "This pattern is interpreted")
 logger = logging.getLogger(__name__)
 
 # %% Model constants
-GEFS_MEMBER_COUNT = 30
+GEFS_MEMBER_COUNT = ENSEMBLE_MEMBER_COUNTS["GEFS"]
 GEFS_FORECAST_HOURS = FORECAST_LEAD_RANGES["GEFS"]
 GEFS_SOURCE_PRIORITY = ["aws", "nomads"]
 # Total precipitation plus the four categorical precipitation types
@@ -74,9 +77,14 @@ zarr_vars = (
     "CRAIN_surface",
 )
 
+# Per-hour member bitmask words (pack_member_mask), from which the API gets the
+# share of members with precipitation at any hour of a day
+MEMBER_MASK_VARS = member_mask_var_names(GEFS_MEMBER_COUNT)
+
 # Variables in the published store. The API reader puts the valid times (the
 # store's time attribute) in column 0, so probVars[i] is column i + 1 of the
-# API's GEFS index map.
+# API's GEFS index map. The mask words come last so the earlier columns keep
+# their positions.
 probVars = (
     "Precipitation_Prob",
     "APCP_Mean",
@@ -85,7 +93,9 @@ probVars = (
     "CICEP_Prob",
     "CFRZR_Prob",
     "CRAIN_Prob",
+    *MEMBER_MASK_VARS,
 )
+MEMBER_MASK_INDICES = [probVars.index(v) for v in MEMBER_MASK_VARS]
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -260,14 +270,16 @@ def main() -> None:
         stacked_timesUnix, daskArrays["time"][0, :].compute().astype("float64")
     )
 
+    wet_members = daskArrays["APCP_surface"] > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H
     daskOutput = {
-        "Precipitation_Prob": (
-            daskArrays["APCP_surface"] > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H
-        ).sum(axis=0)
-        / GEFS_MEMBER_COUNT,
+        "Precipitation_Prob": wet_members.sum(axis=0) / GEFS_MEMBER_COUNT,
         "APCP_Mean": daskArrays["APCP_surface"].mean(axis=0),
         "APCP_StdDev": daskArrays["APCP_surface"].std(axis=0),
     }
+    # Which members are wet at each lead, for the daily probability
+    daskOutput.update(
+        zip(MEMBER_MASK_VARS, pack_member_mask(wet_members, GEFS_MEMBER_COUNT))
+    )
     # Fraction of members forecasting each precipitation type
     for precip_type in PRECIP_TYPES:
         daskOutput[precip_type + "_Prob"] = (
@@ -301,7 +313,10 @@ def main() -> None:
             ).astype("float32")
         )
 
-    daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
+    # The mask words are integers up to 2^24, above the range mask's ceiling
+    daskVarArrayListMergeNaN = mask_invalid_data(
+        da.stack(daskVarArrayList, axis=0), ignoreAxis=MEMBER_MASK_INDICES
+    )
 
     # Write the stacked array to disk before interpolating; doing both in one
     # graph overflows memory
@@ -312,10 +327,13 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # %% Interpolate to hourly and write the final store
+    # A blend of two member sets is meaningless, so the mask words take the
+    # nearest lead's set
     daskVarArrayStackDiskInterp = interp_time_take_blend(
         daskVarArrayStackDisk,
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
+        nearest_vars=MEMBER_MASK_INDICES,
         dtype="float32",
         fill_value=np.nan,
     )

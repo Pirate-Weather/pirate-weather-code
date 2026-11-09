@@ -29,6 +29,8 @@ from API.constants.model_const import (
     SILAM,
     URMA,
 )
+from API.constants.shared_const import ENSEMBLE_MEMBER_COUNTS
+from API.forecast_sources import member_mask_columns
 from API.utils.geo import is_in_canada
 from API.utils.source_priority import should_gfs_precede_dwd
 
@@ -280,9 +282,8 @@ def _map_grib_precip_type(ptype_values):
     return mapped_ptype
 
 
-def _stack_precip_with_priority(
-    num_hours, lat, lon, source_data, *, prioritize_ai_models=False
-):
+def _precip_priority_order(lat, lon, *, prioritize_ai_models=False, has_rrfs=False):
+    """The source order for the precipitation elements at this location."""
     if is_in_canada(lat, lon) and not prioritize_ai_models:
         order = _CANADA_PRECIP_PRIORITY_ORDER
     else:
@@ -299,9 +300,46 @@ def _stack_precip_with_priority(
 
     # RRFS is only present for include=rrfs, which asks for it ahead of every
     # other model
-    if source_data.get("rrfs") is not None:
+    if has_rrfs:
         order = ("rrfs", *order)
+    return order
+
+
+def _stack_precip_with_priority(
+    num_hours, lat, lon, source_data, *, prioritize_ai_models=False
+):
+    order = _precip_priority_order(
+        lat,
+        lon,
+        prioritize_ai_models=prioritize_ai_models,
+        has_rrfs=source_data.get("rrfs") is not None,
+    )
     return _stack_in_order(num_hours, order, source_data)
+
+
+def _collect_precip_member_masks(num_hours, order, ensemble_data):
+    """The ensembles' per-hour member bitmask words, in precipitation priority
+    order, for the daily probability (API/daily/builder.py). Each entry is
+    ``(source, (num_hours, words) array, member_count)``; sources are kept apart
+    because their member counts differ. A store published before the masks is
+    narrower than its column map and is skipped."""
+    masks = []
+    for source in order:
+        entry = ensemble_data.get(source)
+        if entry is None:
+            continue
+        merged, index_map, member_count = entry
+        columns = member_mask_columns(index_map)
+        if merged.shape[1] <= max(columns):
+            continue
+        masks.append(
+            (
+                source,
+                _normalize_length(num_hours, merged[:, columns], label=source),
+                member_count,
+            )
+        )
+    return masks
 
 
 def _stack_with_priority(
@@ -551,6 +589,28 @@ def prepare_data_inputs(
             else None,
         },
         prioritize_ai_models=prioritize_ai_models,
+    )
+
+    # --- precip member masks (daily probability from members) ---
+    # Under include=aimodels the AIGEFS / AIFS words were copied into the GEFS /
+    # ECMWF columns (forecast_sources), with equal member counts
+    precip_member_masks = _collect_precip_member_masks(
+        num_hours,
+        _precip_priority_order(lat, lon, prioritize_ai_models=prioritize_ai_models),
+        {
+            "ecmwf": (ecmwf_merged, ECMWF, ENSEMBLE_MEMBER_COUNTS["ECMWF_IFS"])
+            if "ecmwf_ifs" in source_list and ecmwf_merged is not None
+            else None,
+            "geps": (geps_merged, GEPS, ENSEMBLE_MEMBER_COUNTS["GEPS"])
+            if "geps" in source_list and geps_merged is not None
+            else None,
+            "reps": (reps_merged, REPS, ENSEMBLE_MEMBER_COUNTS["REPS"])
+            if "reps" in source_list and reps_merged is not None
+            else None,
+            "gefs": (gefs_merged, GEFS, ENSEMBLE_MEMBER_COUNTS["GEFS"])
+            if "gefs" in source_list and gefs_merged is not None
+            else None,
+        },
     )
 
     # --- prcipType_inputs ---
@@ -1221,6 +1281,7 @@ def prepare_data_inputs(
         "InterThour_inputs": inter_thour_inputs,
         "prcipIntensity_inputs": prcip_intensity_inputs,
         "prcipProbability_inputs": prcip_probability_inputs,
+        "precip_member_masks": precip_member_masks,
         "prcipType_inputs": prcip_type_inputs,
         "temperature_inputs": temperature_inputs,
         "dew_inputs": dew_inputs,

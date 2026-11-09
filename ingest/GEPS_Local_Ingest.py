@@ -25,8 +25,10 @@ import xarray as xr
 from dotenv import find_dotenv, load_dotenv
 
 from API.constants.shared_const import (
+    ENSEMBLE_MEMBER_COUNTS,
     ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H,
     INGEST_VERSION_STR,
+    member_mask_var_names,
 )
 from API.ingest_grib_utils import (
     convert_fields_to_netcdf,
@@ -47,6 +49,7 @@ from API.ingest_utils import (
     make_herbie_save_dir,
     mask_invalid_data,
     open_remote,
+    pack_member_mask,
     pad_to_chunk_size,
     positive_int_env,
     prune_old_files,
@@ -99,9 +102,17 @@ base_var_name_aliases = {
     "ASNOW": ["ASNOW_SFC", "SPRATE_surface"],
 }
 
+# Members in a run (control plus 20 perturbed); the run fails before publishing
+# when the GRIB holds a different number
+GEPS_MEMBER_COUNT = ENSEMBLE_MEMBER_COUNTS["GEPS"]
+# Per-hour member bitmask words (pack_member_mask), from which the API gets the
+# share of members with precipitation at any hour of a day
+MEMBER_MASK_VARS = member_mask_var_names(GEPS_MEMBER_COUNT)
+
 # Variables in the published store. The API reader puts the valid times (the
 # store's time attribute) in column 0, so probVars[i] is column i + 1 of the
-# API's GEPS index map.
+# API's GEPS index map. The mask words come last so the earlier columns keep
+# their positions.
 probVars = (
     "Precipitation_Prob",
     "APCP_Mean",
@@ -110,7 +121,9 @@ probVars = (
     "AICEP_Mean",
     "ARAIN_Mean",
     "ASNOW_Mean",
+    *MEMBER_MASK_VARS,
 )
+MEMBER_MASK_INDICES = [probVars.index(v) for v in MEMBER_MASK_VARS]
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -262,12 +275,20 @@ def write_ensemble_stats(
 
         stats_vars[f"{var_prefix}_Mean"] = stacked.mean(axis=0)
 
-        # Spread and probability only for total precipitation
+        # Spread, probability and member masks only for total precipitation
         if var_prefix == "APCP":
+            if member_count != GEPS_MEMBER_COUNT:
+                raise RuntimeError(
+                    f"GEPS run has {member_count} members, expected "
+                    f"{GEPS_MEMBER_COUNT} (ENSEMBLE_MEMBER_COUNTS)"
+                )
             stats_vars["APCP_StdDev"] = stacked.std(axis=0)
-            stats_vars["Precipitation_Prob"] = (
-                stacked > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H
-            ).sum(axis=0) / member_count
+            wet_members = stacked > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H
+            stats_vars["Precipitation_Prob"] = wet_members.sum(axis=0) / member_count
+            # Which members are wet at each lead, for the daily probability
+            stats_vars.update(
+                zip(MEMBER_MASK_VARS, pack_member_mask(wet_members, member_count))
+            )
 
     stats_ds = xr.Dataset(
         {
@@ -424,7 +445,10 @@ def main() -> None:
             ).astype("float32")
         )
 
-    daskVarArrayListMergeNaN = mask_invalid_data(da.stack(daskVarArrayList, axis=0))
+    # The mask words are integers up to 2^24, above the range mask's ceiling
+    daskVarArrayListMergeNaN = mask_invalid_data(
+        da.stack(daskVarArrayList, axis=0), ignoreAxis=MEMBER_MASK_INDICES
+    )
 
     # Write the stacked array to disk before interpolating; doing both in one
     # graph overflows memory
@@ -435,10 +459,13 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # %% Interpolate to hourly and write the final store
+    # A blend of two member sets is meaningless, so the mask words take the
+    # nearest lead's set
     daskVarArrayStackDiskInterp = interp_time_take_blend(
         daskVarArrayStackDisk,
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
+        nearest_vars=MEMBER_MASK_INDICES,
         dtype="float32",
         fill_value=np.nan,
     )

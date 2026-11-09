@@ -312,6 +312,22 @@ def _merge_aigfs_as_gfs(
     return merged
 
 
+def member_mask_columns(index_map: dict) -> list[int]:
+    """The member bitmask word columns of a model's column map, in word order."""
+    keys = sorted(key for key in index_map if key.startswith("member_mask_"))
+    return [index_map[key] for key in keys]
+
+
+def _copy_member_mask_columns(out, src, target_map: dict, source_map: dict) -> None:
+    """Copy the AI ensemble's member bitmask words into the columns of the model
+    it stands in for (equal member counts, see ENSEMBLE_MEMBER_COUNTS). A store
+    from before the masks is narrower and leaves the columns missing, so the daily
+    probability falls back to the hourly maximum."""
+    source_columns = member_mask_columns(source_map)
+    if src.shape[1] > max(source_columns):
+        out[:, member_mask_columns(target_map)] = src[:, source_columns]
+
+
 def _merge_aigefs_as_gefs(
     data_aigefs: np.ndarray, base_timestamp: float, num_hours: int
 ) -> np.ndarray:
@@ -325,6 +341,7 @@ def _merge_aigefs_as_gefs(
     out[:, GEFS["prob"]] = src[:, AIGEFS["prob"]]
     out[:, GEFS["accum"]] = src[:, AIGEFS["accum"]]
     out[:, GEFS["error"]] = src[:, AIGEFS["error"]]
+    _copy_member_mask_columns(out, src, GEFS, AIGEFS)
     return merged
 
 
@@ -350,6 +367,7 @@ def _merge_aifs_as_ecmwf(
     out[:, ECMWF["accum_stddev"]] = src[:, ECMWF_AIFS["accum_stddev"]]
     out[:, ECMWF["accum"]] = src[:, ECMWF_AIFS["accum_mean"]]
     out[:, ECMWF["intensity"]] = src[:, ECMWF_AIFS["accum_mean"]]
+    _copy_member_mask_columns(out, src, ECMWF, ECMWF_AIFS)
     # The AIFS store has no humidity column, unlike the IFS store it stands in for.
     # Temperatures are already in Celsius here (convert_data_to_celsius runs first).
     out[:, ECMWF["humidity"]] = (
@@ -387,7 +405,9 @@ def _merge_simple_source(
 ) -> np.ndarray:
     merged = np.full((num_hours, target_columns), MISSING_DATA)
     dest_start, src_start, rows = _aligned_rows(data[:, 0], base_timestamp, num_hours)
-    copy_columns = source_columns or target_columns
+    # A store can be wider than the API's column map while an older API serves a
+    # newer store (columns are only ever appended); the extra columns are ignored
+    copy_columns = min(source_columns or target_columns, target_columns)
     merged[dest_start : dest_start + rows, 0:copy_columns] = data[
         src_start : src_start + rows, 0:copy_columns
     ]

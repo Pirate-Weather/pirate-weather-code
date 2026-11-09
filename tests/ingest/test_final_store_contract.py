@@ -11,9 +11,14 @@ import numpy as np
 import obstore
 
 from API import store_sync
+from API.constants.shared_const import ENSEMBLE_MEMBER_COUNTS, member_mask_var_names
+from API.daily.builder import _member_precip_share
 from API.ingest_utils import (
     KEEPBITS,
+    interp_time_take_blend,
+    mask_invalid_data,
     open_remote,
+    pack_member_mask,
     pad_to_chunk_size,
     publish_store,
     remote_object_exists,
@@ -26,8 +31,11 @@ VARIABLES = ("TMP_2maboveground", "RH_2maboveground")
 TIMES = 1.79e9 + 3600 * np.arange(4)
 
 
-def _write_and_publish(tmp_path, values, name="HRRR"):
-    source = da.from_array(values, chunks=(2, 4, 10, 10))
+def _write_and_publish(tmp_path, values, name="HRRR", variables=VARIABLES, times=TIMES):
+    if isinstance(values, da.Array):
+        source = values
+    else:
+        source = da.from_array(values, chunks=(2, 4, 10, 10))
     # Each ingest run writes into a fresh processing directory
     store_path = tmp_path / f"process_{time.time_ns()}" / f"{name}.zarr"
     write_final_zarr(
@@ -36,8 +44,8 @@ def _write_and_publish(tmp_path, values, name="HRRR"):
         final_chunk=3,
         shard=9,
         zarr_store_workers=2,
-        variables=VARIABLES,
-        times=TIMES,
+        variables=variables,
+        times=times,
     )
     remote = open_remote(str(tmp_path / "remote"), "Download")
     return remote, publish_store(str(store_path), remote, f"{name}.zarr")
@@ -98,6 +106,56 @@ def test_published_store_reads_back_with_time_column(tmp_path):
     np.testing.assert_allclose(
         square[:, 1], np.nanmax(values[0, :, :2, :3], axis=(-2, -1)), rtol=1e-2
     )
+
+
+def test_member_mask_words_survive_the_store_round_trip(tmp_path):
+    """The daily probability popcounts member bitmask words that travel as
+    float32 through the whole ingest tail: the invalid-range mask (whose ceiling
+    is below 2^24), the hourly interpolation (a blend of two member sets is
+    meaningless; they must take the nearest lead's), chunk padding, bitrounding
+    and the sharded store. Any of those can flip a bit, which is a member gained
+    or lost with no error, so the words read back must equal the packed input
+    and give the brute-force "wet at any hour" share.
+    """
+    rng = np.random.default_rng(1)
+    members = ENSEMBLE_MEMBER_COUNTS["GEFS"]
+    lead_times = TIMES[0] + 3 * 3600 * np.arange(4)  # 3-hourly leads
+    hourly_times = TIMES[0] + 3600 * np.arange(10)
+    wet = rng.random((members, 4, 23, 31)) < 0.3
+
+    words = pack_member_mask(da.from_array(wet, chunks=-1), members)
+    prob = da.from_array(wet.mean(axis=0, dtype="float32"), chunks=-1)
+    variables = ("Precipitation_Prob", *member_mask_var_names(members))
+    mask_indices = [1, 2]
+    stacked = mask_invalid_data(
+        da.stack([prob, *words], axis=0), ignoreAxis=mask_indices
+    )
+    hourly = interp_time_take_blend(
+        stacked, lead_times, hourly_times, nearest_vars=mask_indices
+    )
+    remote, _ = _write_and_publish(
+        tmp_path, hourly, variables=variables, times=hourly_times
+    )
+    api_dir = tmp_path / "api"
+    assert store_sync.sync_store(remote, "HRRR", str(api_dir))
+    point = asyncio.run(
+        WeatherParallel().zarr_read("HRRR", _load(api_dir).HRRR_Zarr, 7, 5)
+    )
+
+    nearest_lead = np.abs(hourly_times[:, None] - lead_times[None, :]).argmin(axis=1)
+    expected_words = np.column_stack([w.compute()[:, 5, 7] for w in words])
+    np.testing.assert_array_equal(point[:, 2:4], expected_words[nearest_lead])
+    # The probability itself still blends linearly between leads
+    np.testing.assert_allclose(
+        point[:, 1],
+        np.interp(hourly_times, lead_times, wet[:, :, 5, 7].mean(axis=0)),
+        rtol=0.04,
+    )
+
+    share = _member_precip_share(
+        [("gefs", point[:, 2:4], members)], [np.zeros(10, dtype=int)], 1, 0
+    )
+    assert share[0, 0] == wet[:, :, 5, 7].any(axis=1).mean()
 
 
 def test_old_version_is_kept_until_readers_move_on(tmp_path, monkeypatch):

@@ -25,8 +25,11 @@ import xarray as xr
 
 # Import atmospheric calculation constants
 from API.constants.shared_const import (
+    ENSEMBLE_MEMBER_COUNTS,
+    MEMBER_MASK_BITS_PER_WORD,
     MISSING_DATA,
     REFC_THRESHOLD,
+    member_mask_var_names,
 )
 
 # Logging
@@ -157,6 +160,10 @@ EXACT_BITS = 23
 KEEPBITS = {
     "PTYPE_surface": EXACT_BITS,
     "ptype": EXACT_BITS,
+    # Member bitmask words are integers: a dropped bit is a dropped member
+    **dict.fromkeys(
+        member_mask_var_names(max(ENSEMBLE_MEMBER_COUNTS.values())), EXACT_BITS
+    ),
     "PWTHER_surfaceMreserved": EXACT_BITS,
     **dict.fromkeys(
         ("TMP_2maboveground", "DPT_2maboveground", "APTMP_2maboveground", "t2m", "d2m"),
@@ -1821,6 +1828,32 @@ def rotated_latlon_grid_geometry(
     angle = np.arctan2(d_north, d_east)
 
     return centre[..., 1], centre[..., 0], angle
+
+
+def pack_member_mask(wet_members, member_count: int) -> list:
+    """Pack a ``(member, ...)`` boolean array into float32 bitmask words.
+
+    Bit m of word w is set when member ``MEMBER_MASK_BITS_PER_WORD * w + m`` is
+    wet. The words hold integers below 2^24, which float32 represents exactly, so
+    they survive the float32 store (``KEEPBITS`` keeps them exact). Works on numpy
+    and dask arrays; the member count is checked so a run with a different
+    ensemble size fails before anything is published.
+    """
+    if wet_members.shape[0] != member_count:
+        raise RuntimeError(
+            f"{wet_members.shape[0]} ensemble members, expected {member_count}"
+        )
+    words = []
+    for first in range(0, member_count, MEMBER_MASK_BITS_PER_WORD):
+        last = min(first + MEMBER_MASK_BITS_PER_WORD, member_count)
+        # One member at a time: a whole-word temporary would be 24 members' worth
+        # of uint32 (0.6 GB per ECMWF lead at 0.1 degrees)
+        word = None
+        for bit, member in enumerate(range(first, last)):
+            member_bit = wet_members[member].astype(np.uint32) << np.uint32(bit)
+            word = member_bit if word is None else word | member_bit
+        words.append(word.astype(np.float32))
+    return words
 
 
 def interp_time_take_blend(

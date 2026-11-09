@@ -7,9 +7,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from API.api_utils import _safe_int, select_daily_precip_type
+from API.api_utils import _safe_int, select_daily_precip_type, zero_small_values
 from API.constants.api_const import (
     PRECIP_IDX,
+    PRECIP_PROB_NOISE_THRESHOLD,
     PRECIP_TYPE_DISPLAY,
     PRECIP_TYPES,
     ROUNDING_RULES,
@@ -191,6 +192,80 @@ def _aggregate_stats(
         res_argmin,
         res_precip,
     )
+
+
+def _member_precip_share(
+    precip_member_masks, index_arrays, daily_days, first_forecast_row
+):
+    """Share of ensemble members with precipitation at any hour of each window.
+
+    The maximum of the hourly probabilities understates a day's chance of rain
+    when the members disagree on timing (hourly 10/10/10/0/10/40/10 % can be
+    most members wet at some hour; measured +12 points on GEFS over 24 h), so the
+    ingests store per-hour member bitmask words (shared_const) and the words are
+    ORed over the window's hours and popcounted here.
+
+    Per day, the first source in priority order whose words cover every hour of
+    the window is used; failing that, the source covering the most hours (a
+    share over part of the window is still a valid lower bound). Sources are
+    never combined, as their member counts differ. Hours before
+    ``first_forecast_row`` (today's elapsed hours) are left out, as the hourly
+    probability zeroes them.
+
+    ``index_arrays`` holds one day index per window (midnight, 6am, ...); all
+    windows are reduced in one pass, since numpy call overhead, not the few
+    hundred rows, sets the cost. Returns a (window, day) array, NaN where no
+    source covers a day.
+    """
+    windows = len(index_arrays)
+    rows = np.arange(index_arrays[0].size)
+    # Each window's days get their own slots, so one reduction covers them all
+    in_window = []
+    day_of_row = []
+    for window, index_array in enumerate(index_arrays):
+        selected = (
+            (index_array >= 0)
+            & (index_array < daily_days)
+            & (rows >= first_forecast_row)
+        )
+        in_window.append(selected)
+        day_of_row.append(index_array[selected] + window * daily_days)
+    in_window = np.concatenate(in_window)
+    day_of_row = np.concatenate(day_of_row)
+    slots = windows * daily_days
+
+    # The hours ascend, so each slot's rows are one run; reduceat over the runs
+    # (a slot with no rows would otherwise be given its neighbour's first row)
+    hours_per_slot = np.bincount(day_of_row, minlength=slots)
+    has_rows = hours_per_slot > 0
+    run_starts = np.searchsorted(day_of_row, np.flatnonzero(has_rows))
+    best_share = np.full(slots, np.nan)
+    best_hours = np.zeros(slots)
+    for _, words, member_count in precip_member_masks:
+        words = np.tile(words, (windows, 1))[in_window]
+        covered = ~np.isnan(words).any(axis=1)
+        if not covered.any():
+            continue
+        # NaN (outside the model's range, or padding) must not reach the cast
+        bits = np.where(covered[:, np.newaxis], words, 0).astype(np.uint32)
+        slot_bits = np.bitwise_or.reduceat(bits, run_starts, axis=0)
+        covered_hours = np.bincount(day_of_row, weights=covered, minlength=slots)
+        share = np.full(slots, np.nan)
+        share[has_rows] = np.bitwise_count(slot_bits).sum(axis=1) / member_count
+        take = covered_hours > best_hours
+        best_share[take] = share[take]
+        best_hours[take] = covered_hours[take]
+        if np.array_equal(best_hours, hours_per_slot):
+            break  # every slot fully covered; later sources cannot win
+    return best_share.reshape(windows, daily_days)
+
+
+def _raise_prob_to_member_share(max_arr, prob_column, share):
+    """Replace a window's maximum hourly probability by the member share where
+    that is higher. The share goes through the same noise threshold as the
+    hourly probability; a day no ensemble covers keeps the hourly maximum."""
+    share = zero_small_values(share.copy(), threshold=PRECIP_PROB_NOISE_THRESHOLD)
+    max_arr[:, prob_column] = np.fmax(max_arr[:, prob_column], share)
 
 
 def _select_precip_type(window_sum, most_common_type, prepAccumUnit, logger, loc_tag):
@@ -680,6 +755,7 @@ def build_daily_section(
     include_day_night: bool = True,
     hour_columns: HourColumns | None = None,
     current_hour_time: int | None = None,
+    precip_member_masks=None,
 ) -> DailySection:
     """
     Build all daily- and half-day-level objects.
@@ -730,6 +806,9 @@ def build_daily_section(
         hour_columns: The forecast's HourColumns (the same hours as
             ``hourList_si``), built once per request; built here from
             ``hourList_si`` when not given.
+        precip_member_masks: The ensembles' per-hour member bitmask words in
+            priority order (``prepare_data_inputs``), for the daily
+            precipitation probability; None or empty keeps the hourly maximum.
 
     Returns:
         DailySection object containing the daily forecast.
@@ -816,6 +895,24 @@ def build_daily_section(
         hourly_bearing, hourlyDay6amIndex, daily_days
     )
 
+    # Daily probability of precipitation from the ensemble members, for the
+    # midnight day (precipProbability) and the 6am-6am day (icon and summary);
+    # today's elapsed hours (before the current hour) are left out
+    first_forecast_row = (
+        0
+        if current_hour_time is None
+        else int(np.searchsorted(InterPhour[:, DATA_HOURLY["time"]], current_hour_time))
+    )
+    if precip_member_masks:
+        windows = [hourlyDayIndex, hourlyDay6amIndex]
+        if include_day_night:
+            windows += [hourlyHalfDayIndex, hourlyHalfNightIndex]
+        member_share = _member_precip_share(
+            precip_member_masks, windows, daily_days, first_forecast_row
+        )
+        _raise_prob_to_member_share(InterPdayMax, DATA_DAY["prob"], member_share[0])
+        _raise_prob_to_member_share(InterPdayMax6am, DATA_DAY["prob"], member_share[1])
+
     maxPchanceDay = _select_precip_type(
         InterPdaySum, maxPchanceDay, prepAccumUnit, logger, loc_tag
     )
@@ -826,7 +923,7 @@ def build_daily_section(
     # don't return; together they cost about a quarter of the aggregation.
     if include_day_night:
         half_windows = []
-        for half_index in (hourlyHalfDayIndex, hourlyHalfNightIndex):
+        for half, half_index in enumerate((hourlyHalfDayIndex, hourlyHalfNightIndex)):
             half_mean, half_sum, half_max, _, _, _, half_type = _aggregate_stats(
                 InterPhour,
                 half_index,
@@ -839,6 +936,10 @@ def build_daily_section(
             half_mean[:, DATA_HOURLY["bearing"]] = _circular_mean_by_day(
                 hourly_bearing, half_index, daily_days
             )
+            if precip_member_masks:
+                _raise_prob_to_member_share(
+                    half_max, DATA_HOURLY["prob"], member_share[2 + half]
+                )
             half_type = _select_precip_type(
                 half_sum, half_type, prepAccumUnit, logger, loc_tag
             )
