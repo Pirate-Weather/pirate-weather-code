@@ -108,12 +108,18 @@ GEFS = {
     "ice": 5,
     "freezing_rain": 6,
     "rain": 7,
+    # Per-hour member bitmask words (shared_const.ENSEMBLE_MEMBER_COUNTS); new
+    # columns are appended so a store from before them still reads
+    "member_mask_0": 8,
+    "member_mask_1": 9,
 }
 
 AIGEFS = {
     "prob": 1,
     "accum": 2,
     "error": 3,
+    "member_mask_0": 4,
+    "member_mask_1": 5,
 }
 
 ECMWF = {
@@ -130,6 +136,9 @@ ECMWF = {
     "accum_mean": 11,
     "accum_stddev": 12,
     "humidity": 13,
+    "member_mask_0": 14,
+    "member_mask_1": 15,
+    "member_mask_2": 16,
 }
 
 NBM = {
@@ -369,6 +378,9 @@ ECMWF_AIFS = {
     "prob": 8,
     "accum_mean": 9,
     "accum_stddev": 10,
+    "member_mask_0": 11,
+    "member_mask_1": 12,
+    "member_mask_2": 13,
 }
 
 # RAQDPS (Regional Air Quality Deterministic Prediction System) variable indices.
@@ -452,6 +464,7 @@ REPS = {
     "ice": 5,
     "rain": 6,
     "snow": 7,
+    "member_mask_0": 8,
 }
 
 GEPS = {
@@ -462,6 +475,7 @@ GEPS = {
     "ice": 5,
     "rain": 6,
     "snow": 7,
+    "member_mask_0": 8,
 }
 
 # Sources that can satisfy a forecast or Time Machine request, excluding

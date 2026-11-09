@@ -25,8 +25,11 @@ import xarray as xr
 
 # Import atmospheric calculation constants
 from API.constants.shared_const import (
+    ENSEMBLE_MEMBER_COUNTS,
+    MEMBER_MASK_BITS_PER_WORD,
     MISSING_DATA,
     REFC_THRESHOLD,
+    member_mask_var_names,
 )
 
 # Logging
@@ -132,7 +135,7 @@ FINAL_SHARD_SIZES = {
     "URMA": 100,  # 113
     "GDPS": 75,  # 113 (202 at 100)
     "GEFS": 99,  # 75 (also AIGEFS)
-    "ECMWF": 99,  # 146 (also ECMWF_AIFS, 101)
+    "ECMWF": 99,  # 180 with the 3 member-mask words (also ECMWF_AIFS, 131)
     "NBM": 99,  # 151
     "GFS": 48,  # 136 (also AIGFS, which would fit 99 but shares GFS's chunk keys)
     "ALERTS": 100,
@@ -157,6 +160,10 @@ EXACT_BITS = 23
 KEEPBITS = {
     "PTYPE_surface": EXACT_BITS,
     "ptype": EXACT_BITS,
+    # Member bitmask words are integers: a dropped bit is a dropped member
+    **dict.fromkeys(
+        member_mask_var_names(max(ENSEMBLE_MEMBER_COUNTS.values())), EXACT_BITS
+    ),
     "PWTHER_surfaceMreserved": EXACT_BITS,
     **dict.fromkeys(
         ("TMP_2maboveground", "DPT_2maboveground", "APTMP_2maboveground", "t2m", "d2m"),
@@ -1823,6 +1830,34 @@ def rotated_latlon_grid_geometry(
     return centre[..., 1], centre[..., 0], angle
 
 
+def pack_member_mask(wet_members, member_count: int, label: str = "") -> list:
+    """Pack a ``(member, ...)`` boolean array into float32 bitmask words.
+
+    Bit m of word w is set when member ``MEMBER_MASK_BITS_PER_WORD * w + m`` is
+    wet. The words hold integers below 2^24, which float32 represents exactly, so
+    they survive the float32 store (``KEEPBITS`` keeps them exact). Works on numpy
+    and dask arrays; the member count is checked so a run with a different
+    ensemble size fails before anything is published, naming ``label`` (model and
+    run) in the error.
+    """
+    if wet_members.shape[0] != member_count:
+        raise RuntimeError(
+            f"{label or 'Ensemble'} has {wet_members.shape[0]} members, expected "
+            f"{member_count} (shared_const.ENSEMBLE_MEMBER_COUNTS)"
+        )
+    words = []
+    for first in range(0, member_count, MEMBER_MASK_BITS_PER_WORD):
+        last = min(first + MEMBER_MASK_BITS_PER_WORD, member_count)
+        # One member at a time: a whole-word temporary would be 24 members' worth
+        # of uint32 (0.6 GB per ECMWF lead at 0.1 degrees)
+        word = None
+        for bit, member in enumerate(range(first, last)):
+            member_bit = wet_members[member].astype(np.uint32) << np.uint32(bit)
+            word = member_bit if word is None else word | member_bit
+        words.append(word.astype(np.float32))
+    return words
+
+
 def interp_time_take_blend(
     arr: da.Array,
     stacked_timesUnix: np.ndarray,
@@ -1832,6 +1867,7 @@ def interp_time_take_blend(
     fill_value: float = np.nan,
     time_axis: int = 1,
     direction_vars: int | Iterable[int] | None = None,  # var indices in degrees
+    next_lead_vars: int | Iterable[int] | None = None,  # var indices per interval
 ) -> da.Array:
     r"""Interpolate model data along the time dimension via gather-and-blend.
 
@@ -1861,6 +1897,13 @@ def interp_time_take_blend(
             blended along the shorter way round the circle: halfway between 350
             and 10 is 0, where a linear blend gives 180. Directions that do not
             cross north blend as before. Output is in 0 to 360.
+        next_lead_vars: Optional variable indices describing the accumulation
+            interval that ends at each stored time (the member bitmasks). Each
+            hour takes the first stored time after it, the lead whose interval
+            contains that hour, so a window of hours covers exactly its own
+            intervals: with nearest neighbour, the hours just after a lead
+            would carry the interval that ended at it. Hours at or after the
+            last stored time have no following lead and get ``fill_value``.
 
     Returns:
         A dask array shaped \(V, T_new, Y, X\) with interpolated (or overridden)
@@ -1940,7 +1983,24 @@ def interp_time_take_blend(
         # Shape of each nearest slice: (1, T_new, Y, X)
         take_nn = da.take(arr_t, nearest_idx, axis=TAX)
         for i in {int(i) for i in nearest_vars}:
-            overrides[i] = take_nn[i : i + 1].astype(dtype, copy=False)
+            nearest = take_nn[i : i + 1]
+            if (~valid).any():
+                nearest = da.where(valid_r, nearest, fill_value)
+            overrides[i] = nearest.astype(dtype, copy=False)
+
+    # Optional interval override: the first stored time strictly after each hour
+    if next_lead_vars is not None:
+        if isinstance(next_lead_vars, int):
+            next_lead_vars = [next_lead_vars]
+        following = np.searchsorted(x_a, x_b, side="right")
+        has_following = following < len(x_a)
+        following_idx = np.clip(following, 0, len(x_a) - 1).astype(idx0.dtype)
+        following_r = da.asarray(has_following, chunks=(T_new,))[None, :, None, None]
+        take_next = da.take(arr_t, following_idx, axis=TAX)
+        for i in {int(i) for i in next_lead_vars}:
+            overrides[i] = da.where(
+                following_r, take_next[i : i + 1], fill_value
+            ).astype(dtype, copy=False)
 
     # Replace the overridden variables in 'out'
     if overrides:

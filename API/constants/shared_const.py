@@ -26,8 +26,36 @@ LIBREWXR_MAX_NOWCAST_AGE_SECONDS = 3600
 # GEPS, REPS) when its hourly precipitation rate exceeds this (mm/h).
 ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H = 0.1
 
+# Per-hour ensemble member bitmasks (Precipitation_Member_Mask_<word>): bit m of
+# word w is set when member 24 w + m exceeds ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H.
+# The words are float32 integers, exact below 2^24, so 24 members per word. The
+# API ORs the words over a day's hours and popcounts them to get the share of
+# members with precipitation at any hour of the day, which the max of the hourly
+# probabilities understates when members disagree on timing.
+MEMBER_MASK_BITS_PER_WORD = 24
+MEMBER_MASK_VAR_PREFIX = "Precipitation_Member_Mask_"
+# Members per ensemble. The API divides a popcount by these, and the ingests fail
+# before publishing when a run has a different count. The AI ensembles share the
+# GEFS / ECMWF columns under include=aimodels, so their counts must match.
+ENSEMBLE_MEMBER_COUNTS = {
+    "GEFS": 30,
+    "AIGEFS": 30,
+    "GEPS": 21,
+    "REPS": 21,
+    "ECMWF_IFS": 51,
+    "ECMWF_AIFS": 51,
+}
+
+
+def member_mask_var_names(member_count: int) -> tuple[str, ...]:
+    """Store variable names holding the member bitmask words for ``member_count``
+    members: ceil(member_count / 24) words, numbered from 0."""
+    word_count = -(-member_count // MEMBER_MASK_BITS_PER_WORD)
+    return tuple(f"{MEMBER_MASK_VAR_PREFIX}{word}" for word in range(word_count))
+
+
 # Ingest version
-INGEST_VERSION_STR = "v31"
+INGEST_VERSION_STR = "v32"
 
 # Convert Kelvin to Celsius
 KELVIN_TO_CELSIUS = 273.15

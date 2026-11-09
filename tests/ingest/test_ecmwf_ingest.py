@@ -47,7 +47,7 @@ def test_ensemble_precip_rate_uses_each_interval_length(tmp_path, monkeypatch):
 
     # Paths in the wrong order: the lead, not the list position, must decide
     stats = ingest.write_ifs_ensemble_precip_stats(
-        list(reversed(files)), [3, 144, 150], str(tmp_path / "ens.zarr")
+        list(reversed(files)), [3, 144, 150], str(tmp_path / "ens.zarr"), member_count=2
     )
 
     mm_per_h = stats["APCP_Mean"].isel(latitude=0, longitude=0).values * 1000
@@ -70,7 +70,10 @@ def test_relative_humidity_is_percent_from_stored_kelvin():
         chunks=(1, 1, 2, 2),
     )
 
-    rh = ingest.append_relative_humidity(stacked).compute()[-1, 0]
+    # rh is inserted at its zarr_vars position, ahead of the member mask words
+    rh = ingest.append_relative_humidity(stacked).compute()[
+        ingest.zarr_vars.index("rh"), 0
+    ]
 
     assert rh[0, 0] == pytest.approx(100.0)
     # Saturation vapour pressure at 10 C / 20 C
