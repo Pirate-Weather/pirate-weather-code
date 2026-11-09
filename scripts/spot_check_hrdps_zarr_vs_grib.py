@@ -22,9 +22,9 @@ import pandas as pd
 import xarray as xr
 import zarr
 
-DEFAULT_ZARR_PATH = Path("/mnt/nvme/data/Prod/v31/HRDPS.zarr")
+DEFAULT_ZARR_PATH = Path("/mnt/nvme/data/Prod/v32/HRDPS.zarr")
 DEFAULT_GRIB_ROOT = Path("/mnt/nvme/data/Process/HRDPS/Downloads/herbie/hrdps")
-DEFAULT_BASE_TIME_PICKLE = Path("/mnt/nvme/data/Prod/v31/HRDPS.time.pickle")
+DEFAULT_BASE_TIME_PICKLE = Path("/mnt/nvme/data/Prod/v32/HRDPS.time.pickle")
 
 # Axis 0 of the store (HRDPS_Local_Ingest zarr_vars); the valid times are the array's "time"
 # attribute, not a variable.

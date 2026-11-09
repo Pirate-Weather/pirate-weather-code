@@ -35,7 +35,7 @@ AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET"]
 
 S3_BUCKET = os.environ["s3_bucket"]
 
-INGEST_VERSION = "v31"
+INGEST_VERSION = "v32"
 MODEL_NAME = "SILAM"
 
 STORE_ROOT = f"{S3_BUCKET}/ForecastTar_v2/{INGEST_VERSION}"

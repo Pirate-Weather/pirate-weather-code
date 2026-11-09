@@ -26,8 +26,10 @@ from dask.diagnostics import ProgressBar
 from herbie import HerbieLatest
 
 from API.constants.shared_const import (
+    ENSEMBLE_MEMBER_COUNTS,
     ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H,
     INGEST_VERSION_STR,
+    member_mask_var_names,
 )
 from API.constants.unit_const import MM_PER_M
 from API.ingest_grib_utils import download_and_validate_subset
@@ -41,6 +43,7 @@ from API.ingest_utils import (
     configure_zarr_writes,
     interp_time_take_blend,
     open_remote,
+    pack_member_mask,
     pad_to_chunk_size,
     positive_int_env,
     publish_ingest_run,
@@ -82,9 +85,17 @@ PTYPE_NONE = 0
 PTYPE_RAIN = 1
 PTYPE_SNOW = 5
 
+# Ensemble members in a run (control plus 50 perturbed); the run fails before
+# publishing when the GRIB holds a different number
+AIFS_MEMBER_COUNT = ENSEMBLE_MEMBER_COUNTS["ECMWF_AIFS"]
+# Per-hour member bitmask words (pack_member_mask), from which the API gets the
+# share of members with precipitation at any hour of a day
+MEMBER_MASK_VARS = member_mask_var_names(AIFS_MEMBER_COUNT)
+
 # Variables in the published store. The API reader puts the valid times (the
 # store's time attribute) in column 0, so zarr_vars[i] is column i + 1 of the
-# API's ECMWF_AIFS index map.
+# API's ECMWF_AIFS index map. The mask words come last so the earlier columns
+# keep their positions.
 zarr_vars = (
     "msl",
     "t2m",
@@ -96,8 +107,10 @@ zarr_vars = (
     "Precipitation_Prob",
     "APCP_Mean",
     "APCP_StdDev",
+    *MEMBER_MASK_VARS,
 )
-# Categorical precipitation type is interpolated with nearest neighbour
+# Categorical precipitation type is interpolated with nearest neighbour; the
+# member masks take the lead whose accumulation interval contains the hour
 NEAREST_INTERP_VARS = ("ptype",)
 
 # %% Paths and configuration
@@ -247,10 +260,24 @@ def main() -> None:
     ens_mf["tpd"] = ens_mf["tpd"] / (AIFS_LEAD_STEP_HOURS * MM_PER_M)
     ens_mf["sfd"] = ens_mf["sfd"] / (AIFS_LEAD_STEP_HOURS * MM_PER_M)
 
-    # Fraction of members above the shared ensemble threshold (mm/h -> m/h)
-    X3_Precipitation_Prob = (
-        ens_mf["tpd"] > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H / MM_PER_M
-    ).sum(dim="number") / ens_mf.sizes["number"]
+    # Fraction of members above the shared ensemble threshold (mm/h -> m/h),
+    # and which members they are, for the daily probability
+    wet_members = ens_mf["tpd"] > ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H / MM_PER_M
+    X3_Precipitation_Prob = wet_members.sum(dim="number") / AIFS_MEMBER_COUNT
+    member_mask_words = {
+        name: xr.DataArray(
+            word, dims=X3_Precipitation_Prob.dims, coords=X3_Precipitation_Prob.coords
+        )
+        for name, word in zip(
+            MEMBER_MASK_VARS,
+            pack_member_mask(
+                wet_members.transpose("number", ...).data,
+                AIFS_MEMBER_COUNT,
+                label=f"ECMWF AIFS ensemble run {base_time}",
+            ),
+            strict=True,
+        )
+    }
     X3_Precipitation_StdDev = ens_mf["tpd"].std(dim="number")
     X3_Precipitation_Mean = ens_mf["tpd"].mean(dim="number")
     X3_Snowfall_Mean = ens_mf["sfd"].mean(dim="number")
@@ -272,6 +299,7 @@ def main() -> None:
             "APCP_StdDev": X3_Precipitation_StdDev,
             "APCP_Mean": X3_Precipitation_Mean,
             "ptype": X3_pType,
+            **member_mask_words,
         },
         coords={
             "time": ens_mf["step"],
@@ -352,10 +380,11 @@ def main() -> None:
     if missing_vars:
         raise RuntimeError(f"ECMWF AIFS run {base_time} is missing {missing_vars}")
 
-    # Out-of-range values become NaN
+    # Out-of-range values become NaN; the mask words are integers up to 2^24,
+    # above the range's ceiling
     for var in zarr_vars:
         ds_clip = ds[var]
-        if np.issubdtype(ds_clip.dtype, np.number):
+        if var not in MEMBER_MASK_VARS and np.issubdtype(ds_clip.dtype, np.number):
             ds[var] = ds_clip.where(
                 (ds_clip >= VALID_DATA_MIN) & (ds_clip <= VALID_DATA_MAX)
             )
@@ -386,6 +415,7 @@ def main() -> None:
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
         nearest_vars=[zarr_vars.index(v) for v in NEAREST_INTERP_VARS],
+        next_lead_vars=[zarr_vars.index(v) for v in MEMBER_MASK_VARS],
         dtype="float32",
         fill_value=np.nan,
     )

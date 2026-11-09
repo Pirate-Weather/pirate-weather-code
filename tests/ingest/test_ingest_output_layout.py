@@ -5,7 +5,17 @@ import importlib
 import pytest
 
 from API.constants import model_const
-from API.ingest_utils import CHUNK_SIZES, FINAL_SHARD_SIZES
+from API.constants.shared_const import (
+    ENSEMBLE_MEMBER_COUNTS,
+    MEMBER_MASK_BITS_PER_WORD,
+    member_mask_var_names,
+)
+from API.ingest_utils import (
+    CHUNK_SIZES,
+    EXACT_BITS,
+    FINAL_SHARD_SIZES,
+    KEEPBITS,
+)
 from API.raqdps_utils import RAQDPS_OUTPUT_VARS
 
 _HRRR_LAYOUT = {
@@ -52,8 +62,20 @@ _ANALYSIS_LAYOUT = {
     "wind_v": "v10",
 }
 
-# (ingest module, API index map in model_const, API key -> source variable the
-# key is meant to read).
+_CANADIAN_ENSEMBLE_LAYOUT = {
+    "prob": "Precipitation_Prob",
+    "accum": "APCP_Mean",
+    "error": "APCP_StdDev",
+    "freezing_rain": "AFRAIN_Mean",
+    "ice": "AICEP_Mean",
+    "rain": "ARAIN_Mean",
+    "snow": "ASNOW_Mean",
+    "member_mask_0": "Precipitation_Member_Mask_0",
+}
+
+# (ingest module, or (module, name of its store variable tuple) when it is not
+# zarr_vars; API index map in model_const; API key -> source variable the key
+# is meant to read).
 LAYOUTS = [
     pytest.param("HRRR_Local_Ingest", "HRRR", _HRRR_LAYOUT, id="hrrr"),
     pytest.param("HRRR_6H_Local_Ingest", "HRRR", _HRRR_LAYOUT, id="hrrr_6h"),
@@ -127,8 +149,67 @@ LAYOUTS = [
             "accum_mean": "APCP_Mean",
             "accum_stddev": "APCP_StdDev",
             "humidity": "rh",
+            "member_mask_0": "Precipitation_Member_Mask_0",
+            "member_mask_1": "Precipitation_Member_Mask_1",
+            "member_mask_2": "Precipitation_Member_Mask_2",
         },
         id="ecmwf",
+    ),
+    pytest.param(
+        "ECMWF_AIFS_Local_Ingest",
+        "ECMWF_AIFS",
+        {
+            "pressure": "msl",
+            "temp": "t2m",
+            "dew": "d2m",
+            "wind_u": "u10",
+            "wind_v": "v10",
+            "ptype": "ptype",
+            "cloud": "tcc",
+            "prob": "Precipitation_Prob",
+            "accum_mean": "APCP_Mean",
+            "accum_stddev": "APCP_StdDev",
+            "member_mask_0": "Precipitation_Member_Mask_0",
+            "member_mask_1": "Precipitation_Member_Mask_1",
+            "member_mask_2": "Precipitation_Member_Mask_2",
+        },
+        id="ecmwf_aifs",
+    ),
+    # The ensemble ingests publish statistics (probVars), not the per-member
+    # zarr_vars they read
+    pytest.param(
+        ("GEFS_Local_Ingest", "probVars"),
+        "GEFS",
+        {
+            "prob": "Precipitation_Prob",
+            "accum": "APCP_Mean",
+            "error": "APCP_StdDev",
+            "snow": "CSNOW_Prob",
+            "ice": "CICEP_Prob",
+            "freezing_rain": "CFRZR_Prob",
+            "rain": "CRAIN_Prob",
+            "member_mask_0": "Precipitation_Member_Mask_0",
+            "member_mask_1": "Precipitation_Member_Mask_1",
+        },
+        id="gefs",
+    ),
+    pytest.param(
+        ("AIGEFS_Local_Ingest", "probVars"),
+        "AIGEFS",
+        {
+            "prob": "Precipitation_Prob",
+            "accum": "APCP_Mean",
+            "error": "APCP_StdDev",
+            "member_mask_0": "Precipitation_Member_Mask_0",
+            "member_mask_1": "Precipitation_Member_Mask_1",
+        },
+        id="aigefs",
+    ),
+    pytest.param(
+        ("GEPS_Local_Ingest", "probVars"), "GEPS", _CANADIAN_ENSEMBLE_LAYOUT, id="geps"
+    ),
+    pytest.param(
+        ("REPS_Local_Ingest", "probVars"), "REPS", _CANADIAN_ENSEMBLE_LAYOUT, id="reps"
     ),
     pytest.param("RTMA-RU_Local_Ingest", "RTMA_RU", _ANALYSIS_LAYOUT, id="rtma_ru"),
     pytest.param("URMA_Local_Ingest", "URMA", _ANALYSIS_LAYOUT, id="urma"),
@@ -198,8 +279,16 @@ def test_api_index_map_matches_ingest_variable_order(
         # RAQDPS's column order, time first, is raqdps_utils.RAQDPS_OUTPUT_VARS.
         columns = RAQDPS_OUTPUT_VARS
     else:
-        zarr_vars = importlib.import_module(f"ingest.{ingest_module}").zarr_vars
+        if isinstance(ingest_module, tuple):
+            ingest_module, store_vars_name = ingest_module
+        else:
+            store_vars_name = "zarr_vars"
+        zarr_vars = getattr(
+            importlib.import_module(f"ingest.{ingest_module}"), store_vars_name
+        )
         assert "time" not in zarr_vars
+        # write_final_zarr bitrounds by name and raises on one KEEPBITS lacks
+        assert set(zarr_vars) <= set(KEEPBITS), set(zarr_vars) - set(KEEPBITS)
         columns = ("time", *zarr_vars)
     index_map = getattr(model_const, const_name)
 
@@ -209,6 +298,34 @@ def test_api_index_map_matches_ingest_variable_order(
         for key, idx in index_map.items()
     }
     assert actual == expected
+
+
+def test_member_mask_words_cover_every_member_and_stay_exact():
+    """The API popcounts the mask words and divides by ENSEMBLE_MEMBER_COUNTS, so a
+    model with more members than its words hold, a word bitrounded to fewer than
+    its 24 bits, or an AI ensemble whose count differs from the model whose
+    columns it borrows (forecast_sources copies them across) would each give a
+    wrong daily probability with no error.
+    """
+    for model, count in ENSEMBLE_MEMBER_COUNTS.items():
+        words = member_mask_var_names(count)
+        assert len(words) * MEMBER_MASK_BITS_PER_WORD >= count, model
+        assert all(KEEPBITS[word] == EXACT_BITS for word in words), model
+    # A float32 holds one word's integers exactly
+    assert MEMBER_MASK_BITS_PER_WORD <= EXACT_BITS + 1
+    assert ENSEMBLE_MEMBER_COUNTS["AIGEFS"] == ENSEMBLE_MEMBER_COUNTS["GEFS"]
+    assert ENSEMBLE_MEMBER_COUNTS["ECMWF_AIFS"] == ENSEMBLE_MEMBER_COUNTS["ECMWF_IFS"]
+    for model in ("GEFS", "AIGEFS", "GEPS", "REPS", "ECMWF", "ECMWF_AIFS"):
+        index_map = getattr(model_const, model)
+        mask_columns = [v for k, v in index_map.items() if k.startswith("member_mask_")]
+        count_key = {"ECMWF": "ECMWF_IFS"}.get(model, model)
+        assert len(mask_columns) == len(
+            member_mask_var_names(ENSEMBLE_MEMBER_COUNTS[count_key])
+        ), model
+        # Appended after every earlier column, so older stores still read
+        assert min(mask_columns) > max(
+            v for k, v in index_map.items() if not k.startswith("member_mask_")
+        ), model
 
 
 def test_processing_tiles_split_into_whole_final_shards():

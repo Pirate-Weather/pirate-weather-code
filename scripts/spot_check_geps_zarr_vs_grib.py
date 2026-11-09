@@ -22,9 +22,9 @@ import pandas as pd
 import xarray as xr
 import zarr
 
-DEFAULT_ZARR_PATH = Path("/mnt/nvme/data/Prod/v31/GEPS.zarr")
+DEFAULT_ZARR_PATH = Path("/mnt/nvme/data/Prod/v32/GEPS.zarr")
 DEFAULT_GRIB_ROOT = Path("/mnt/nvme/data/Process/GEPS/Downloads/herbie/geps")
-DEFAULT_BASE_TIME_PICKLE = Path("/mnt/nvme/data/Prod/v31/GEPS.time.pickle")
+DEFAULT_BASE_TIME_PICKLE = Path("/mnt/nvme/data/Prod/v32/GEPS.time.pickle")
 
 # Axis 0 of the store (GEPS_Local_Ingest probVars); the valid times are the array's "time"
 # attribute, not a variable.

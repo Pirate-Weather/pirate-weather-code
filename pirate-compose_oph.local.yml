@@ -3,7 +3,7 @@
 #
 # Storage (set in .env, see .env.example):
 #   PW_PROD_ROOT  published stores, read by the API. Put it on the fastest disk.
-#                 Every ingest publishes into the same /data/Prod/v31 folder,
+#                 Every ingest publishes into the same /data/Prod/v32 folder,
 #                 because the API reads all <MODEL>.current.json pointers from
 #                 one directory. publish_store writes the root zarr.json last,
 #                 then the pointer, and keeps the newest two versions.
@@ -75,7 +75,7 @@ services:
   # ingests it runs continuously and is not scheduled by Ofelia: after each
   # nowcast (every ~10 min) LibreWXR's nowcast hook runs
   # ingest/LibreWXR_Local_Ingest.py in this container, which publishes
-  # LibreWXR.zarr into /data/Prod/v31 like any other ingest. Only the pipeline
+  # LibreWXR.zarr into /data/Prod/v32 like any other ingest. Only the pipeline
   # runs here; no LibreWXR tile renderer is started. Optional, in the
   # "librewxr" profile: without it the minutely block uses the models only.
   #   docker compose -f pirate-compose_oph.local.yml --profile librewxr up -d librewxr
@@ -424,7 +424,7 @@ services:
       zarr_store_workers: "8"
     command: ["ingest/RTMA_Local_Ingest.py"]
 
-  # URMA publishes its merged history as URMA_Hist into /data/Prod/v31.
+  # URMA publishes its merged history as URMA_Hist into /data/Prod/v32.
   urma_ingest:
     <<: *ingest
     container_name: pirate-ingest-urma
