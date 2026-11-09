@@ -11,8 +11,7 @@ then move the entry to Done.
 ## Plan (2026-11-09)
 
 Work through the open items in this order, small ones first:
-1. Small: reload the DWD station and RAQDPS lat/lon pickles when the sync updates
-   them; re-publish the README developer snapshot in the sharded layout; consistent
+1. Small: re-publish the README developer snapshot in the sharded layout; consistent
    clipping (#760).
 2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689); only list
    the sources used (#554); next-update field (#668).
@@ -38,8 +37,6 @@ pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
 - Re-publish the static developer snapshot linked from `README.md` in the
   sharded, versioned layout.
 - Expire old history stores on the remote (nothing deletes them).
-- The DWD station and RAQDPS lat/lon pickles are loaded once at API start; the
-  sync updates the files but a running worker does not reload them.
 
 ### Tune the shard and cache sizes from real requests
 `FINAL_SHARD_SIZES` follow a ~150 MB-per-shard write-memory rule and
@@ -85,6 +82,17 @@ to object storage for render nodes are in upstream LibreWXR (#55, #56; v0.9.0). 
 the `pirate-librewxr` pipeline runs `ingest/LibreWXR_Local_Ingest.py` from its nowcast
 hook and publishes snapshots to `s3://pirate-librewxr/librewxr`, which a render node
 pulls.
+
+### Support pickles reloaded while serving (2026-11-09)
+The DWD MOSMIX station map and the RAQDPS lat/lon grid were loaded once at worker start,
+so a running worker never saw the files `store_sync` replaced. Both now live on
+`ZarrStores` (`SUPPORT_PICKLES` in `API/io/store_reader.py`, which `store_sync`'s
+`SUPPORT_FILES` is built from) and are loaded by the store poll from the store root, with
+a tensorstore read conditional on the held generation: a stat per file every 10 s on
+local disk, a 304 GET on S3 in TESTING, nothing on the request path. A file that fails to
+unpickle keeps the held copy with a warning. The sync already replaced the files
+atomically. The RAQDPS grid bundled in `API/data` is still loaded at start
+and used until a published copy is found next to the stores. `tests/api/test_support_pickle_reload.py` covers the reload.
 
 ### Daily PoP from ensemble members (2026-11-09)
 Daily `precipProbability` was the maximum of the hourly probabilities over the local day,
