@@ -33,6 +33,19 @@ the hours they supplied. `flags.sourceIDX` still describes every model read,
 and version 1 responses keep listing every available model. The flags are not
 a per-element record of the model that produced each value.
 
+Version 2 forecast responses also carry `flags.nextUpdate`: when the data
+behind the response should next refresh, as an integer unix timestamp (UTC
+seconds). It is the earliest expected publish of a new run among the sources in
+`flags.sources`, from each source's run time (`flags.sourceTimes`) plus its
+cycle interval and usual publish delay (`PUBLISH_SCHEDULE_HOURS` in
+`API/constants/shared_const.py`, taken from the ingest schedules). A source
+whose next run is overdue rolls forward to its following scheduled publish, so
+the value is never in the past. The rapid-update sources count too, so where
+RTMA-RU, HRRR or RRFS sub-hourly, or LibreWXR are used it is often minutes
+away. It is an estimate: an upstream delay can make a run later. It is omitted
+for time machine requests and when no used source has a schedule (for example
+ETOPO1 and ERA5 only), and in version 1.
+
 Daily and day/night values aggregate the selected hourly values. They do not
 perform a separate model-selection pass.
 

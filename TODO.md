@@ -12,7 +12,7 @@ then move the entry to Done.
 
 Work through the open items in this order, small ones first:
 1. Small: all done (see Done below).
-2. Bigger: next-update field (#668).
+2. Bigger: all done (see Done below).
 
 ## v3 goals
 
@@ -40,16 +40,25 @@ pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
 benchmarks. Replay a day of real request coordinates against the new reader to
 pick the cache size (the shard indexes alone are ~35 MB), and check the write
 peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
-### Next-update field
-[pirateweather#668](https://github.com/Pirate-Weather/pirateweather/issues/668): report
-when the forecast data will next refresh. The run-time pickles and the ingest
-schedules already hold what is needed.
-
 ### Longer future horizon from CFS (#689 follow-up)
 Future-dated requests stop where the 240 h GFS/GEFS stores end (about 9 days). A CFS
 ingest would extend them to ~45 days. Not planned yet.
 
 ## Done
+
+### flags.nextUpdate (2026-11-09)
+[pirateweather#668](https://github.com/Pirate-Weather/pirateweather/issues/668): version 2
+forecast responses report when their data should next refresh, as `flags.nextUpdate`
+(integer unix seconds, UTC; omitted for time machine). It is the earliest expected publish
+among the sources in `flags.sources`: run time + cycle interval + publish delay, from
+`PUBLISH_SCHEDULE_HOURS` (`API/constants/shared_const.py`), with an overdue run rolled
+forward by whole cycles so the value is never past. The delays are the Ofelia/RBX start
+times plus the publish stamps of the 2026-10-31 to 11-04 local stack runs; RRFS has no
+measured run and is an estimate. The rapid sources (RTMA-RU every 15 min, HRRR and RRFS
+sub-hourly, LibreWXR every 10 min) are included, so in their domains it is often minutes
+away. `SourceMetadata.add` now takes the rounded run time and records it as unix seconds
+(`source_run_times`) alongside the sourceTimes string. Cost: about 4 us per request for
+11 used sources.
 
 ### flags.sources lists the sources used (2026-11-09)
 [pirateweather#554](https://github.com/Pirate-Weather/pirateweather/issues/554): version 2

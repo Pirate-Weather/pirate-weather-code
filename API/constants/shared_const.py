@@ -97,3 +97,65 @@ FIRST_FORECAST_LEAD_HOURS = {
     "ECMWF_AIFS": 6,
     "RAQDPS": 0,
 }
+
+# When each forecast source normally publishes its next run, for version 2
+# flags.nextUpdate (#668): {flags.sources name: (cycle interval, hours from a
+# run time to its publish)}, so a run's successor is expected at
+# run time + interval + delay. The run time is what flags.sourceTimes shows: the
+# model cycle, except for the analyses and nowcasts (rtma_ru: the analysis valid
+# time; librewxr: the radar frame the nowcast starts from).
+# Delay = the ingest's start after its cycle (the Ofelia schedule in
+# pirate-compose_oph.local.yml, mirrored by the RBX CronJobs) + its run time,
+# from the publish stamps of the 2026-10-31 to 11-04 local stack runs (store
+# version stamp minus run time) and the durations in TODO.md's Done log. Every
+# ingest takes the newest complete cycle, so a late one is caught at its next
+# scheduled start. This table must move with the schedules.
+PUBLISH_SCHEDULE_HOURS = {
+    # Hourly HRRR (and its 15-minute store) start at :45 and take the cycle
+    # from 1 h 45 min before: published 1.78-1.79 h after the cycle.
+    "hrrr_0-18": (1, 1.8),
+    "hrrrsubh": (1, 1.8),
+    # HRRR 18-48 h starts at 02:30/08:30/14:30/20:30 for the 00/06/12/18Z
+    # cycles: published 2.54 h after.
+    "hrrr_18-48": (6, 2.6),
+    # NBM starts at :45 with the same hour's cycle: published 1.2 h after.
+    "nbm": (1, 1.25),
+    # RTMA-RU starts at :10/:25/:40/:55 with the analysis 25 min before:
+    # published 25 min after the valid time.
+    "rtma_ru": (0.25, 0.42),
+    # LibreWXR publishes from its nowcast hook every 10 minutes: one sample,
+    # 3.7 min after the radar frame time.
+    "librewxr": (10 / 60, 5 / 60),
+    # DWD MOSMIX starts on the hour with the last hour's issue: 1.1-1.17 h.
+    "dwd_mosmix": (1, 1.25),
+    # NCEP global: GFS and AIGFS start 5 h after the cycle (GFS published at
+    # 5.44 h, AIGFS 5.09 h), GEFS 7 h (7.24-7.29 h), AIGEFS at +8 h 20 min
+    # (8.72-8.73 h).
+    "gfs": (6, 5.5),
+    "aigfs": (6, 5.25),
+    "gefs": (6, 7.25),
+    "aigefs": (6, 8.75),
+    # ECMWF IFS starts at 10:30/22:30 for 00/12Z (the 0.1 degree 240 h file is
+    # on AWS near +10 h) and takes 2,100-3,500 s. AIFS starts at +8 h: 8.17 h.
+    "ecmwf_ifs": (12, 11.5),
+    "ecmwf_aifs": (6, 8.25),
+    # MSC: HRDPS and REPS start at +4 h (published 4.26 h and 4.18 h), GDPS
+    # +5 h (5.59 h; 1,450 s since the parallel downloads), GEPS +7 h (7.16 h),
+    # RAQDPS at +4 h 15 min.
+    "hrdps": (6, 4.25),
+    "reps": (6, 4.25),
+    "gdps": (12, 5.5),
+    "geps": (12, 7.25),
+    "raqdps": (12, 4.5),
+    # FMI posts the 00Z SILAM run near 12:55 the next day; the ingest starts at
+    # 14:00 (+38 h), and at 19:00 for the days it is posted near 17:50.
+    "silam": (24, 38.25),
+    # RRFS (include=rrfs) posting on AWS is irregular, and each ingest takes
+    # the newest cycle whose last lead exists (hourly stores checked at :50,
+    # the 6-hourly 18-83 h stores at :20). No measured runs; estimates.
+    "rrfs_0-18": (1, 2.0),
+    "rrfs_na_0-18": (1, 2.0),
+    "rrfssubh": (1, 2.0),
+    "rrfs_18-83": (6, 3.5),
+    "rrfs_na_18-83": (6, 3.5),
+}

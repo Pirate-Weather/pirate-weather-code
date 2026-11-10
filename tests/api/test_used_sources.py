@@ -5,6 +5,8 @@ selection now marks the source of each hour's value, and the final selection
 keeps the sources whose hours (or block selections) reach a returned block.
 """
 
+import datetime
+
 import numpy as np
 import pytest
 
@@ -13,6 +15,7 @@ from API.forecast_sources import (
     USED_SOURCE_COLUMN,
     USED_SOURCE_KEYS,
     SourceMetadata,
+    next_update_time,
     select_used_sources,
 )
 from API.hourly.block import build_hourly_block
@@ -173,3 +176,46 @@ def test_used_sources_follow_the_returned_blocks(blocks, kwargs, expected):
     assert metadata.used_source_times == expected_times
     assert metadata.source_list == SOURCE_LIST
     assert metadata.source_times == SOURCE_TIMES
+
+
+def test_next_update_is_the_earliest_future_refresh_of_the_used_sources():
+    """flags.nextUpdate (#668) tells clients when to poll again, so it must be
+    the soonest new run among the sources in the response, and never a time
+    already past: a late ingest rolls forward to its next scheduled publish
+    instead of telling clients to poll in a loop. Sources with no run time
+    (GEFS appended by the AI merge) or no schedule (ETOPO1, ERA5) are skipped,
+    and the 15-minute RTMA-RU cadence must win where it is used."""
+
+    def utc(hour, minute=0, day=9):
+        return datetime.datetime(2026, 11, day, hour, minute, tzinfo=datetime.UTC)
+
+    now = utc(12, 20).timestamp()
+    metadata = SourceMetadata([], {}, {})
+    metadata.add("ETOPO1")
+    metadata.add("era5")
+    metadata.add("gfs", run_time=utc(6))
+    metadata.add("nbm", run_time=utc(11))
+    # 00Z IFS from yesterday: its 12Z successor is due at 11:30, already past
+    metadata.add("ecmwf_ifs", run_time=utc(0, day=8))
+    metadata.add("gefs")
+    metadata.add("rtma_ru", run_time=utc(12), time_fmt="%Y-%m-%d %H:%MZ")
+    assert metadata.source_times["rtma_ru"] == "2026-11-09 12:00Z"
+
+    # NBM 11Z: the 12Z run is published 1.25 h after it, at 13:15
+    metadata.used_sources = ["ETOPO1", "era5", "gfs", "nbm", "ecmwf_ifs", "gefs"]
+    assert next_update_time(metadata, now) == utc(13, 15).timestamp()
+
+    # IFS alone: overdue since 11:30, so the next cycle's publish at 23:30
+    metadata.used_sources = ["ecmwf_ifs"]
+    assert next_update_time(metadata, now) == utc(23, 30).timestamp()
+
+    # RTMA-RU 12:00: the 12:15 analysis is published 25 min later
+    metadata.used_sources = ["ETOPO1", "gfs", "nbm", "rtma_ru"]
+    assert next_update_time(metadata, now) == utc(12, 15).timestamp() + 0.42 * 3600
+
+    # A dropped source takes its run time with it
+    metadata.drop("rtma_ru")
+    assert next_update_time(metadata, now) == utc(13, 15).timestamp()
+
+    metadata.used_sources = ["ETOPO1", "era5", "gefs"]
+    assert next_update_time(metadata, now) is None
