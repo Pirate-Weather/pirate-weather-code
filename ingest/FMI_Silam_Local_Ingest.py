@@ -460,6 +460,9 @@ def main() -> None:
     xarray_processed.close()
     del xarray_forecast_processed, xarray_processed
     gc.collect()
+    # The 4 GB source file is no longer needed; with the processed zarr, the
+    # history stores and the final store it overran the 8 Gi scratch volume
+    os.remove(local_nc_path)
     logger.info("Saved SILAM forecast zarr to %s_.zarr", forecast_process_path)
 
     # %% History: archive the first 24 h of each earlier run not yet processed.
@@ -514,6 +517,10 @@ def main() -> None:
         )
 
         publish_history_store(hist_tmp_zarr_path, history_remote, hist_store_name)
+        xarray_hist_processed.close()
+        del xarray_hist_processed
+        gc.collect()
+        os.remove(hist_nc_path)
 
         logger.info("Saved historic SILAM slice: %s", timestamp)
 
