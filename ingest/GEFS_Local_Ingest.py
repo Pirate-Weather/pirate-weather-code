@@ -200,7 +200,18 @@ def main() -> None:
             + f" | {wgrib2_path} - -netcdf {member_nc_path}",
             f"GEFS member {member} wgrib2 NetCDF conversion",
         )
-        xarray_wgrib = xr.open_dataset(member_nc_path)
+        # Open in the processing tiles the member store is written in, so the
+        # differencing below runs tile by tile inside to_zarr. Loaded whole, the
+        # five fields and the APCP temporaries held 4-5.6 GB per member, which
+        # with the run's page cache reached the container's 11 GiB limit.
+        xarray_wgrib = xr.open_dataset(
+            member_nc_path,
+            chunks={
+                "time": len(GEFS_FORECAST_HOURS),
+                "latitude": process_chunk,
+                "longitude": process_chunk,
+            },
+        )
 
         if not np.array_equal(xarray_wgrib["time"].values, forecast_valid_times):
             raise RuntimeError(
@@ -222,23 +233,14 @@ def main() -> None:
                 precip_type + "_surface"
             ].where(xarray_wgrib["APCP_surface"] != 0, 0)
 
-        xarray_wgrib_chunked = xarray_wgrib.chunk(
-            chunks={
-                "time": len(GEFS_FORECAST_HOURS),
-                "latitude": process_chunk,
-                "longitude": process_chunk,
-            }
-        )
         member_zarr_path = forecast_process_path + f"_xr_m{member}.zarr"
         with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-            xarray_wgrib_chunked.to_zarr(
+            xarray_wgrib.to_zarr(
                 member_zarr_path,
                 consolidated=False,
                 mode="w",
                 chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
             )
-        # Close the dataset open_dataset returned; closing the chunked copy
-        # leaves the member NetCDF open until the variable is reassigned.
         xarray_wgrib.close()
         member_zarr_paths.append(member_zarr_path)
 

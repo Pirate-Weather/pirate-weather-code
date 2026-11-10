@@ -150,7 +150,16 @@ forecast_path = os.getenv("forecast_path", default="/mnt/nvme/data/Prod/NBM")
 save_type = os.getenv("save_type", default="Download")
 aws_access_key_id = os.environ.get("AWS_KEY", "")
 aws_secret_access_key = os.environ.get("AWS_SECRET", "")
-herbie_max_threads = positive_int_env("herbie_max_threads", 1)
+# Concurrent subset downloads. NBM comes from the AWS bucket, where Herbie makes
+# one HTTPS request per contiguous byte range (about 12 per file for the main
+# subset) and the ingest nodes see 0.3-0.5 s per request, so one thread took
+# 32 min for the 84 main files (53 min for the run, against a 55 min deadline)
+# where HRRR's 20 threads finish in 2 min. NOMADS is only a fallback, and its
+# per-IP pacing (configure_herbie_request_timeouts) serialises requests across
+# threads, so more threads cannot trip its rate limit.
+herbie_max_threads = positive_int_env(
+    "herbie_max_threads", positive_int_env("herbie_download_threads", 20)
+)
 herbie_download_retries = positive_int_env("herbie_download_retries", 3)
 herbie_retry_sleep_seconds = positive_int_env("herbie_retry_sleep_seconds", 20)
 
