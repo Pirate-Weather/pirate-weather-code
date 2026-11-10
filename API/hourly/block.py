@@ -44,6 +44,7 @@ from API.constants.clip_const import (
     CLIP_PM10,
     CLIP_PM25,
     CLIP_PRESSURE,
+    CLIP_PROB,
     CLIP_SMOKE,
     CLIP_SO2_PPB,
     CLIP_SOLAR,
@@ -96,8 +97,11 @@ def _calculate_intensity_prob(
         np.argmin(np.isnan(prcipProbability_inputs), axis=1),
         prcipProbability_inputs.T,
     )
-    InterPhour[:, DATA_HOURLY["prob"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["prob"]], 0, 1
+    InterPhour[:, DATA_HOURLY["prob"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["prob"]],
+        CLIP_PROB["min"],
+        CLIP_PROB["max"],
+        "Precipitation Probability Hour",
     )
     InterPhour[:, DATA_HOURLY["prob"]] = zero_small_values(
         InterPhour[:, DATA_HOURLY["prob"]], threshold=PRECIP_PROB_NOISE_THRESHOLD
@@ -302,21 +306,30 @@ def _process_input_vars(
     InterPhour[:, DATA_HOURLY["fire"]] = np.choose(
         np.argmin(np.isnan(fire_inputs), axis=1), fire_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["fire"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["fire"]], CLIP_FIRE["min"], CLIP_FIRE["max"]
+    InterPhour[:, DATA_HOURLY["fire"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["fire"]],
+        CLIP_FIRE["min"],
+        CLIP_FIRE["max"],
+        "Fire Index Hour",
     )
     InterPhour[:, DATA_HOURLY["solar"]] = np.choose(
         np.argmin(np.isnan(solar_inputs), axis=1), solar_inputs.T
     )
     # Clip solar to var range
-    InterPhour[:, DATA_HOURLY["solar"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["solar"]], CLIP_SOLAR["min"], CLIP_SOLAR["max"]
+    InterPhour[:, DATA_HOURLY["solar"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["solar"]],
+        CLIP_SOLAR["min"],
+        CLIP_SOLAR["max"],
+        "Solar Hour",
     )
     InterPhour[:, DATA_HOURLY["cape"]] = np.choose(
         np.argmin(np.isnan(cape_inputs), axis=1), cape_inputs.T
     )
-    InterPhour[:, DATA_HOURLY["cape"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["cape"]], CLIP_CAPE["min"], CLIP_CAPE["max"]
+    InterPhour[:, DATA_HOURLY["cape"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["cape"]],
+        CLIP_CAPE["min"],
+        CLIP_CAPE["max"],
+        "CAPE Hour",
     )
     InterPhour[:, DATA_HOURLY["feels_like"]] = np.choose(
         np.argmin(np.isnan(feels_like_inputs), axis=1), feels_like_inputs.T
