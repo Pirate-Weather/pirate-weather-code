@@ -34,6 +34,7 @@ from API.io.store_reader import (
     ETOPO_STORE_NAME,
     FORECAST_STORES,
     READERS_DIR_NAME,
+    SUPPORT_PICKLES,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,8 +61,8 @@ READER_STALE_SECONDS = positive_int_env("READER_STALE_SECONDS", 60)
 SUPERSEDED_GRACE_SECONDS = positive_int_env("SUPERSEDED_GRACE_SECONDS", 120)
 
 STORE_NAMES = tuple(name for _, name in FORECAST_STORES + ALERT_STORES)
-# Side files the API loads at startup
-SUPPORT_FILES = ("DWD_MOSMIX_stations.pickle", "RAQDPS.lat_lon.pickle")
+# Side files the API workers load, and reload when sync_file replaces them
+SUPPORT_FILES = tuple(name for _, name in SUPPORT_PICKLES)
 READY_FILE = "models_ready"
 
 
