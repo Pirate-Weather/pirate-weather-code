@@ -85,7 +85,7 @@ PTYPE_NONE = 0
 PTYPE_RAIN = 1
 PTYPE_SNOW = 5
 
-# Ensemble members in a run (control plus 50 perturbed); the run fails before
+# Ensemble members in a run (the 50 perturbed members); the run fails before
 # publishing when the GRIB holds a different number
 AIFS_MEMBER_COUNT = ENSEMBLE_MEMBER_COUNTS["ECMWF_AIFS"]
 # Per-hour member bitmask words (pack_member_mask), from which the API gets the
