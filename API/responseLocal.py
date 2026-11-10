@@ -11,7 +11,6 @@ import datetime
 import functools
 import logging
 import os
-import pickle
 import platform
 import sys
 import threading
@@ -19,7 +18,6 @@ from contextlib import asynccontextmanager
 
 import numpy as np
 import orjson
-import tensorstore as ts
 from astral import LocationInfo, moon
 from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
@@ -82,7 +80,7 @@ from API.forecast_sources import (
     select_used_sources,
 )
 from API.hourly.block import build_hourly_block
-from API.io.store_reader import load_stores, remote_store_root, watch_stores
+from API.io.store_reader import load_stores, watch_stores
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -136,9 +134,6 @@ formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-
-DWD_MOSMIX_Stations = None
-
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -169,35 +164,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(TimingMiddleware)
-
-# Load DWD MOSMIX station mapping
-try:
-    station_map_file = None
-
-    if STAGE in ("DEV", "PROD"):
-        station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
-    elif STAGE in ("TESTING", "TM_TESTING") and save_type in ("S3", "S3Zarr"):
-        # The map is optional: without it the DWD MOSMIX source is left out.
-        try:
-            kvstore = ts.KvStore.open(remote_store_root().kvstore).result()
-            station_map = kvstore.read("DWD_MOSMIX_stations.pickle").result()
-            if station_map.state == "value":
-                DWD_MOSMIX_Stations = pickle.loads(bytes(station_map.value))
-                logger.info("Loaded DWD MOSMIX station map from S3")
-        except (ValueError, OSError, pickle.UnpicklingError, EOFError) as e:
-            logger.warning("Could not load DWD MOSMIX station map from S3: %s", e)
-    elif STAGE in ("TESTING", "TM_TESTING"):
-        station_map_file = os.path.join(s3_bucket, "DWD_MOSMIX_stations.pickle")
-
-    if station_map_file and os.path.exists(station_map_file):
-        with open(station_map_file, "rb") as f:
-            DWD_MOSMIX_Stations = pickle.load(f)
-            logger.info(f"Loaded DWD MOSMIX station map from: {station_map_file}")
-    elif station_map_file and DWD_MOSMIX_Stations is None:
-        # File path was configured for this stage but file is missing
-        logger.debug(f"DWD MOSMIX station map not found at: {station_map_file}")
-except (OSError, pickle.UnpicklingError) as e:
-    logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
 lats_etopo = np.arange(
     COORDINATE_CONST["latitude_min"],
@@ -483,6 +449,12 @@ async def PW_Forecast(
     nowTime = initial.now_time
     utcTime = initial.utc_time
     timeMachine = initial.time_machine
+    futureDay = initial.future_day
+    # Time Machine and future requests (#689) return one local day: hourly from
+    # local midnight, a single daily point, time-machine style summaries. A future
+    # day is still a forecast, so the grid reads, sources, hourly and current
+    # fields stay those of a forecast (timeMachine).
+    singleDay = timeMachine or futureDay
     loc_tag = initial.loc_tag
     timing_tracker = initial.timing_tracker
     tz_offset = initial.tz_offset
@@ -567,6 +539,7 @@ async def PW_Forecast(
     # 2. Initialize Zarr sources
     # The stores held now; a version swapped in mid-request is used from the next one
     stores = request.app.state.stores
+    dwd_mosmix_stations = stores.DWD_MOSMIX_Stations
     zarr_sources = ZarrSources(
         subh=stores.SubH_Zarr,
         hrrr_6h=stores.HRRR_6H_Zarr,
@@ -729,13 +702,15 @@ async def PW_Forecast(
     # Timing Check
     timer.log("Base Times")
 
+    # Hour row of the requested time.
+    # From timestamps: subtracting two times in one ZoneInfo would compare their
+    # wall clocks, an hour out on a DST change day.
+    requestedHourOffset = (baseHour.timestamp() - baseDay.timestamp()) / 3600
     # Number of hours to start at
-    if timeMachine:
+    if singleDay:
         baseTimeOffset = 0
     else:
-        # From timestamps: subtracting two times in one ZoneInfo would compare their
-        # wall clocks, an hour out on a DST change day.
-        baseTimeOffset = (baseHour.timestamp() - baseDay.timestamp()) / 3600
+        baseTimeOffset = requestedHourOffset
 
     # 7. Merge hourly models onto a consistent time grid, starting from midnight on the requested day
     # Note that baseTime is the requested time, in TZ aware datetime format
@@ -947,7 +922,7 @@ async def PW_Forecast(
         base_time=baseTime,
         local_tz=localTZ,
         hour_array_grib=hour_array_grib,
-        time_machine=timeMachine,
+        time_machine=singleDay,
         daily_days=daily_days,
         existing_day_array_grib=day_array_grib,
     )
@@ -1071,7 +1046,7 @@ async def PW_Forecast(
     # The hourly response objects and their text are only needed for the hours
     # returned. Time Machine and the legacy summaries (no summary text) take the
     # most common text over every hour, so those build them all.
-    if timeMachine or not summaryText:
+    if singleDay or not summaryText:
         hourly_display_hours = None
     elif exHourly == 1:
         hourly_display_hours = range(0)
@@ -1102,6 +1077,9 @@ async def PW_Forecast(
             InterSday=InterSday,
             hourlyDayIndex=hourlyDayIndex,
             baseTimeOffset=baseTimeOffset,
+            # A future day's currentDay* totals run from local midnight to the
+            # requested hour, as today's run to the current hour.
+            currentHourOffset=requestedHourOffset,
             timeMachine=timeMachine,
             tmExtra=tmExtra,
             prepIntensityUnit=prepIntensityUnit,
@@ -1234,10 +1212,10 @@ async def PW_Forecast(
             loc_tag=loc_tag,
             aq_inputs=aq_inputs,
             inc_airqualitydetails=incAirQualityDetails,
-            include_day_night=inc_day_night == 1 and not timeMachine,
+            include_day_night=inc_day_night == 1 and not singleDay,
             hour_columns=hour_columns,
             current_hour_time=None
-            if timeMachine
+            if singleDay
             else int(hour_array_grib[int(baseTimeOffset)]),
             precip_member_masks=inputs["precip_member_masks"],
             used_sources=daily_used,
@@ -1386,13 +1364,13 @@ async def PW_Forecast(
             unit_system=unitSystem,
             hour_text_list=hourTextList,
             hour_icon_list=hourIconList,
-            time_machine=timeMachine,
+            time_machine=singleDay,
             base_time_offset_int=base_time_offset_int,
             logger=logger,
             loc_tag=loc_tag,
             hour_columns=hour_columns,
         )
-        if timeMachine:
+        if singleDay:
             output_hourList = hourList[0:ouputHours]
         else:
             output_hourList = hourList[
@@ -1408,7 +1386,7 @@ async def PW_Forecast(
             inc_airqualitydetails=incAirQualityDetails,
         )
 
-    if inc_day_night == 1 and not timeMachine:
+    if inc_day_night == 1 and not singleDay:
         returnOBJ["day_night"] = {}
         filtered_day_night_list = remove_conditional_fields(
             day_night_list,
@@ -1430,7 +1408,7 @@ async def PW_Forecast(
             icon=icon,
             day_text_list=dayTextList,
             day_icon_list=dayIconList,
-            time_machine=timeMachine,
+            time_machine=singleDay,
             logger=logger,
             loc_tag=loc_tag,
         )
@@ -1489,13 +1467,13 @@ async def PW_Forecast(
         # Calculate distance to nearest station if stations are available
         nearest_station_distance = -999  # Default value when no stations available
         if (
-            DWD_MOSMIX_Stations is not None
+            dwd_mosmix_stations is not None
             and grid_result.x_dwd is not None
             and grid_result.y_dwd is not None
             and "dwd_mosmix" in sourceList
         ):
             grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
-            stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
+            stations_at_grid = dwd_mosmix_stations.get(grid_key, [])
             if stations_at_grid:
                 # Calculate distance to each station and find the minimum
                 # Performance: Use a generator expression with min() for efficiency
@@ -1540,13 +1518,13 @@ async def PW_Forecast(
 
             # Add DWD MOSMIX stations for this grid cell (if available)
             if (
-                DWD_MOSMIX_Stations is not None
+                dwd_mosmix_stations is not None
                 and grid_result.x_dwd is not None
                 and grid_result.y_dwd is not None
                 and "dwd_mosmix" in sourceList
             ):
                 grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
-                stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
+                stations_at_grid = dwd_mosmix_stations.get(grid_key, [])
                 if stations_at_grid:
                     returnOBJ["flags"]["sourceIDX"]["dwd_mosmix"] = {
                         "stations": stations_at_grid

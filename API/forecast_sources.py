@@ -25,6 +25,8 @@ from API.constants.shared_const import MISSING_DATA, PUBLISH_SCHEDULE_HOURS
 from API.request.grid_indexing import GridIndexingResult
 from API.utils.geo import rounder
 
+SECONDS_PER_HOUR = 3600
+
 URMA_TIME_TOLERANCE_SECONDS = 300
 
 # The sources the per-element selections report as having supplied a value, as
@@ -143,6 +145,12 @@ def _aligned_rows(
         src_start = 0
     else:
         dest_start = 0
+        # A day that starts after the store ends (a future request, #689) has
+        # no rows here: the nearest row would be the store's last hour, copied
+        # onto local midnight. Only the end matters; an all-NaN row inside the
+        # store (NaN time) must not drop the whole store.
+        if not np.any(times >= base_timestamp - SECONDS_PER_HOUR + 1):
+            return 0, 0, 0
         src_start = nearest_index(times, base_timestamp)
     rows = max(0, min(len(times) - src_start, num_hours - dest_start))
     return dest_start, src_start, rows

@@ -5,7 +5,7 @@ import logging
 
 import numpy as np
 
-from API.constants.model_const import ECMWF, ECMWF_AIFS, GFS, HRRR, NBM
+from API.constants.model_const import ECMWF, ECMWF_AIFS, GFS, HRRR, NBM, REPS
 from API.data_inputs import prepare_data_inputs
 from API.forecast_sources import (
     SourceMetadata,
@@ -109,3 +109,41 @@ def test_aifs_standing_in_for_ifs_still_has_humidity():
     merged = _merge_aifs_as_ecmwf(data_aifs, 0.0, 2)
 
     np.testing.assert_allclose(merged[:, ECMWF["humidity"]], 100.0)
+
+
+def test_day_after_a_store_ends_gets_no_rows_from_it():
+    """A future request (#689) can ask for a day after a short store (REPS, 72 h)
+    ends. The row nearest local midnight was then the store's last hour, copied
+    onto midnight as if valid there (and the one-row array crashed the minutely
+    interpolation). The day must get no rows from that store, so the longer
+    models fill it.
+    """
+    reps_end = BASE - 2 * 86400
+    data_reps = _store(
+        max(REPS.values()) + 1, reps_end - 71 * 3600, 72, REPS["prob"], 0.5
+    )
+
+    result = merge_hourly_models(
+        metadata=SourceMetadata(["reps"], {}, {}),
+        num_hours=NUM_HOURS,
+        base_day_utc_grib=BASE,
+        data_hrrrh=None,
+        data_h2=None,
+        data_nbm=None,
+        data_gfs=None,
+        data_ecmwf=None,
+        data_gefs=None,
+        data_hrdps=None,
+        data_gdps=None,
+        data_geps=None,
+        data_reps=data_reps,
+        data_dwd_mosmix=None,
+        data_aigfs=None,
+        data_aigefs=None,
+        data_aifs=None,
+        logger=logging.getLogger(__name__),
+        loc_tag="test",
+    )
+
+    assert result.reps.shape[0] == NUM_HOURS
+    assert np.all(np.isnan(result.reps))

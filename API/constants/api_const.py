@@ -152,6 +152,15 @@ TIME_MACHINE_CONST = {
     "max_days": 8,
 }
 
+# Future-dated requests (#689) return the forecast for the requested local day.
+# The longest stores, GFS and GEFS, reach 240 h past their run, and the newest run
+# can be up to ~22 h old when it is read (cycle every 6 h, the 240 h lead posts
+# ~5 h after the cycle, plus a delayed or skipped cycle). The whole requested day
+# must end inside that store, so the next local midnight after the requested time
+# must be within 240 - 22 = 218 h of now: the rest of today and roughly the next
+# eight days, about 9 days ahead.
+FUTURE_FORECAST_MAX_HOURS = 218
+
 # Filename constants
 FILENAME_TIMESTAMP_SLICE_LENGTH = 12
 

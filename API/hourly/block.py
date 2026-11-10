@@ -44,6 +44,7 @@ from API.constants.clip_const import (
     CLIP_PM10,
     CLIP_PM25,
     CLIP_PRESSURE,
+    CLIP_PROB,
     CLIP_SMOKE,
     CLIP_SO2_PPB,
     CLIP_SOLAR,
@@ -120,8 +121,11 @@ def _calculate_intensity_prob(
         input_sources.get("prcipProbability_inputs"),
         used_hours,
     )
-    InterPhour[:, DATA_HOURLY["prob"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["prob"]], 0, 1
+    InterPhour[:, DATA_HOURLY["prob"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["prob"]],
+        CLIP_PROB["min"],
+        CLIP_PROB["max"],
+        "Precipitation Probability Hour",
     )
     InterPhour[:, DATA_HOURLY["prob"]] = zero_small_values(
         InterPhour[:, DATA_HOURLY["prob"]], threshold=PRECIP_PROB_NOISE_THRESHOLD
@@ -328,21 +332,30 @@ def _process_input_vars(
     InterPhour[:, DATA_HOURLY["fire"]] = _first_available(
         fire_inputs, input_sources.get("fire_inputs"), used_hours
     )
-    InterPhour[:, DATA_HOURLY["fire"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["fire"]], CLIP_FIRE["min"], CLIP_FIRE["max"]
+    InterPhour[:, DATA_HOURLY["fire"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["fire"]],
+        CLIP_FIRE["min"],
+        CLIP_FIRE["max"],
+        "Fire Index Hour",
     )
     InterPhour[:, DATA_HOURLY["solar"]] = _first_available(
         solar_inputs, input_sources.get("solar_inputs"), used_hours
     )
     # Clip solar to var range
-    InterPhour[:, DATA_HOURLY["solar"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["solar"]], CLIP_SOLAR["min"], CLIP_SOLAR["max"]
+    InterPhour[:, DATA_HOURLY["solar"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["solar"]],
+        CLIP_SOLAR["min"],
+        CLIP_SOLAR["max"],
+        "Solar Hour",
     )
     InterPhour[:, DATA_HOURLY["cape"]] = _first_available(
         cape_inputs, input_sources.get("cape_inputs"), used_hours
     )
-    InterPhour[:, DATA_HOURLY["cape"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["cape"]], CLIP_CAPE["min"], CLIP_CAPE["max"]
+    InterPhour[:, DATA_HOURLY["cape"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["cape"]],
+        CLIP_CAPE["min"],
+        CLIP_CAPE["max"],
+        "CAPE Hour",
     )
     InterPhour[:, DATA_HOURLY["feels_like"]] = _first_available(
         feels_like_inputs, input_sources.get("feels_like_inputs"), used_hours
@@ -419,6 +432,7 @@ def _calculate_derived_metrics(
     baseTimeOffset,
     timeMachine,
     urma_hour_mask=None,
+    currentHourOffset=None,
 ):
     """
     Calculate derived metrics like apparent temperature and accumulation.
@@ -426,8 +440,12 @@ def _calculate_derived_metrics(
     Args:
         InterPhour: Hourly interpolated data.
         hourlyDayIndex: Hourly day index.
-        baseTimeOffset: Base time offset.
+        baseTimeOffset: First hour row returned; precipitation before it is zeroed.
         timeMachine: Whether this is a time machine request.
+        urma_hour_mask: Hours where URMA supplied the temperature, humidity or wind.
+        currentHourOffset: Hour row of the requested time, where the day-zero
+            (currentDay*) totals stop; defaults to baseTimeOffset. A future day
+            starts its rows at midnight but totals up to the requested hour.
 
     Returns:
         Tuple containing day zero rain, snow, and ice accumulation.
@@ -516,20 +534,23 @@ def _calculate_derived_metrics(
         missing_intensity_mask, DATA_HOURLY["accum"]
     ]
 
+    if currentHourOffset is None:
+        currentHourOffset = baseTimeOffset
+
     dayZeroPrepRain = InterPhour[:, DATA_HOURLY["rain"]].copy()
     dayZeroPrepRain[hourlyDayIndex != 0] = 0
     if not timeMachine:
-        dayZeroPrepRain[int(baseTimeOffset) :] = 0
+        dayZeroPrepRain[int(currentHourOffset) :] = 0
 
     dayZeroPrepSnow = InterPhour[:, DATA_HOURLY["snow"]].copy()
     dayZeroPrepSnow[hourlyDayIndex != 0] = 0
     if not timeMachine:
-        dayZeroPrepSnow[int(baseTimeOffset) :] = 0
+        dayZeroPrepSnow[int(currentHourOffset) :] = 0
 
     dayZeroPrepSleet = InterPhour[:, DATA_HOURLY["ice"]].copy()
     dayZeroPrepSleet[hourlyDayIndex != 0] = 0
     if not timeMachine:
-        dayZeroPrepSleet[int(baseTimeOffset) :] = 0
+        dayZeroPrepSleet[int(currentHourOffset) :] = 0
 
     dayZeroRain = dayZeroPrepRain.sum()
     dayZeroSnow = dayZeroPrepSnow.sum()
@@ -793,6 +814,7 @@ def build_hourly_block(
     minute_presence: dict | None = None,
     urma_hour_mask: np.ndarray | None = None,
     display_hours: range | None = None,
+    currentHourOffset: float | None = None,
     input_sources: dict | None = None,
     used_hours: np.ndarray | None = None,
 ):
@@ -854,6 +876,8 @@ def build_hourly_block(
         version: API version.
         display_hours: Hours (indices) to build response objects for; None
             builds all. See ``build_hourly_objects``.
+        currentHourOffset: Hour row of the requested time when it differs from
+            baseTimeOffset (a future day); see ``_calculate_derived_metrics``.
         input_sources: Each input stack's column sources, from
             ``prepare_data_inputs``.
         used_hours: (hours, USED_SOURCE_KEYS) bool mask; each hour's selected
@@ -961,6 +985,7 @@ def build_hourly_block(
         baseTimeOffset,
         timeMachine,
         urma_hour_mask,
+        currentHourOffset,
     )
 
     # Mark hours as mixed when all component types are present for that hour.
@@ -981,7 +1006,9 @@ def build_hourly_block(
     # minute-derived detection for that hour (more accurate for short bursts).
     if minute_presence is not None:
         try:
-            idx = int(baseTimeOffset)
+            idx = int(
+                baseTimeOffset if currentHourOffset is None else currentHourOffset
+            )
             if (
                 0 <= idx < InterPhour.shape[0]
                 and minute_presence.get("has_rain", False)

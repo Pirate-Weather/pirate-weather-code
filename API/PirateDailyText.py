@@ -404,10 +404,13 @@ def calculate_period_summary_text(
         if vis_periods and period_indices == vis_periods:
             vis_condition_combined = True
             condition_text = ["and", condition_text, "fog"]
-    elif condition_type == "wind":
-        if overall_cloud_idx and period_indices == overall_cloud_idx:
-            wind_condition_combined = True
-            condition_text = ["and", overall_cloud_text, condition_text]
+    elif (
+        condition_type == "wind"
+        and overall_cloud_idx
+        and period_indices == overall_cloud_idx
+    ):
+        wind_condition_combined = True
+        condition_text = ["and", overall_cloud_text, condition_text]
 
     if time_phrase is None:
         time_phrase = _get_time_phrase(period_indices, all_periods, partial_day)
