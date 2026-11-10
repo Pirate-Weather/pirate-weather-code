@@ -68,6 +68,17 @@ some fields use `clipLog`, others `np.clip`.
 
 ## Done
 
+### Block icon ties no longer depend on the hash seed (2026-11-10)
+The hourly and daily block text and icon without summary text (always for Time
+Machine) were picked with `max(set(lst), key=lst.count)`, so a tie went to whichever
+value the process's string hash seed put first and pods disagreed on the same request:
+a Sydney Time Machine day's `hourly.icon` was "rain" under `PYTHONHASHSEED` 1, 3, 5
+and "wind" under 2, 4, 6 (9 hours each). `API/legacy/summary.py` now uses
+`most_common` (a `Counter`), so a tie goes to the earliest hour/day. Text and icon are
+still picked separately, as before. Over 6 cities x (forecast + Time Machine) x 3 seeds
+against the v32 stores, only that Sydney block differed between seeds (old) and none
+does now; forecast requests use summary text and were unchanged.
+
 ### CFS ingest for months-out future requests (2026-11-10)
 `ingest/CFS_Local_Ingest.py` publishes `CFS.zarr` for future-day requests past the
 240 h GFS/GEFS stores. Source: the CFSv2 time-series files on AWS through Herbie

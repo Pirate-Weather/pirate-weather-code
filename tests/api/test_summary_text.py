@@ -5,7 +5,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from API.legacy.summary import build_minutely_summary
+from API.legacy.summary import (
+    build_daily_summary,
+    build_hourly_summary,
+    build_minutely_summary,
+)
 from API.PirateDailyText import calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateWeeklyText import calculate_weekly_text
@@ -118,6 +122,47 @@ def test_minutely_summary_falls_back_when_text_fails():
         logger=MagicMock(),
         loc_tag="test",
     ) == ("Rain", "rain")
+
+
+@pytest.mark.parametrize("first, second", [("rain", "wind"), ("wind", "rain")])
+def test_block_summary_ties_go_to_the_earliest_entry(first, second):
+    """Without summary text (and always for Time Machine) the hourly and daily
+    block text and icon are the most common entries. Picking them from a set
+    let a tie be won by whichever value the process's string hash seed put
+    first, so API pods returned different block icons for the same request.
+    A tie must go to the earliest hour/day; both orders are checked so a
+    seed-dependent pick fails one of them.
+    """
+    entries = [first, second, second, first]
+
+    assert build_hourly_summary(
+        summary_text=False,
+        translation=MagicMock(),
+        hour_list_si=[],
+        is_all_night=False,
+        tz_name="UTC",
+        icon="darksky",
+        unit_system="si",
+        hour_text_list=entries,
+        hour_icon_list=entries,
+        time_machine=True,
+        base_time_offset_int=0,
+        logger=MagicMock(),
+        loc_tag="test",
+    ) == (first, first)
+    assert build_daily_summary(
+        summary_text=False,
+        translation=MagicMock(),
+        day_list_si=[],
+        tz_name="UTC",
+        unit_system="si",
+        icon="darksky",
+        day_text_list=entries,
+        day_icon_list=entries,
+        time_machine=False,
+        logger=MagicMock(),
+        loc_tag="test",
+    ) == (first, first)
 
 
 def test_weekly_summary_includes_days_with_a_rain_icon():

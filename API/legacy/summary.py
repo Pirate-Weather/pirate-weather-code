@@ -7,6 +7,7 @@ from collections import Counter
 
 from API.PirateDailyText import HourColumns, calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
+from API.PirateTextHelper import most_common
 from API.PirateWeeklyText import calculate_weekly_text
 
 
@@ -58,10 +59,14 @@ def build_hourly_summary(
 ) -> tuple[str, str]:
     """Compute hourly summary/icon text. ``hour_columns`` (the forecast's
     HourColumns, the same hours as ``hour_list_si``) saves building them."""
+    # The block text and icon are the most common hourly ones. most_common
+    # counts with a Counter, so a tie goes to the value of the earliest hour
+    # carrying a tied value; picking from a set made the winner depend on the
+    # process's string hash seed, so pods disagreed on the same request.
     if time_machine:
         return (
-            max(set(hour_text_list), key=hour_text_list.count),
-            max(set(hour_icon_list), key=hour_icon_list.count),
+            most_common(hour_text_list),
+            most_common(hour_icon_list),
         )
 
     try:
@@ -83,14 +88,14 @@ def build_hourly_summary(
             )
             return translation.translate(["sentence", hourText]), hourIcon
         return (
-            max(set(hour_text_list), key=hour_text_list.count),
-            max(set(hour_icon_list), key=hour_icon_list.count),
+            most_common(hour_text_list),
+            most_common(hour_icon_list),
         )
     except Exception:
         logger.exception("TEXT GEN ERROR %s", loc_tag)
         return (
-            max(set(hour_text_list), key=hour_text_list.count),
-            max(set(hour_icon_list), key=hour_icon_list.count),
+            most_common(hour_text_list),
+            most_common(hour_icon_list),
         )
 
 
@@ -109,10 +114,11 @@ def build_daily_summary(
     loc_tag: str,
 ) -> tuple[str, str]:
     """Compute daily summary/icon text."""
+    # As for the hourly block, a tie goes to the earliest day's value.
     if time_machine:
         return (
-            max(set(day_text_list), key=day_text_list.count),
-            max(set(day_icon_list), key=day_icon_list.count),
+            most_common(day_text_list),
+            most_common(day_icon_list),
         )
 
     try:
@@ -122,12 +128,12 @@ def build_daily_summary(
             )
             return translation.translate(["sentence", weekText]), weekIcon
         return (
-            max(set(day_text_list), key=day_text_list.count),
-            max(set(day_icon_list), key=day_icon_list.count),
+            most_common(day_text_list),
+            most_common(day_icon_list),
         )
     except Exception:
         logger.exception("DAILY SUMMARY TEXT GEN ERROR %s", loc_tag)
         return (
-            max(set(day_text_list), key=day_text_list.count),
-            max(set(day_icon_list), key=day_icon_list.count),
+            most_common(day_text_list),
+            most_common(day_icon_list),
         )
