@@ -11,7 +11,6 @@ import datetime
 import functools
 import logging
 import os
-import pickle
 import platform
 import sys
 import threading
@@ -19,7 +18,6 @@ from contextlib import asynccontextmanager
 
 import numpy as np
 import orjson
-import tensorstore as ts
 from astral import LocationInfo, moon
 from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
@@ -77,12 +75,16 @@ from API.current.metrics import (
 from API.daily.builder import build_daily_section
 from API.data_inputs import prepare_aq_inputs, prepare_data_inputs
 from API.forecast_sources import (
+    USED_SOURCE_COLUMN,
+    USED_SOURCE_KEYS,
     add_etopo_source,
     build_source_metadata,
     merge_hourly_models,
+    next_update_time,
+    select_used_sources,
 )
 from API.hourly.block import build_hourly_block
-from API.io.store_reader import load_stores, remote_store_root, watch_stores
+from API.io.store_reader import load_stores, watch_stores
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -136,9 +138,6 @@ formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-
-DWD_MOSMIX_Stations = None
-
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -169,35 +168,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(TimingMiddleware)
-
-# Load DWD MOSMIX station mapping
-try:
-    station_map_file = None
-
-    if STAGE in ("DEV", "PROD"):
-        station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
-    elif STAGE in ("TESTING", "TM_TESTING") and save_type in ("S3", "S3Zarr"):
-        # The map is optional: without it the DWD MOSMIX source is left out.
-        try:
-            kvstore = ts.KvStore.open(remote_store_root().kvstore).result()
-            station_map = kvstore.read("DWD_MOSMIX_stations.pickle").result()
-            if station_map.state == "value":
-                DWD_MOSMIX_Stations = pickle.loads(bytes(station_map.value))
-                logger.info("Loaded DWD MOSMIX station map from S3")
-        except (ValueError, OSError, pickle.UnpicklingError, EOFError) as e:
-            logger.warning("Could not load DWD MOSMIX station map from S3: %s", e)
-    elif STAGE in ("TESTING", "TM_TESTING"):
-        station_map_file = os.path.join(s3_bucket, "DWD_MOSMIX_stations.pickle")
-
-    if station_map_file and os.path.exists(station_map_file):
-        with open(station_map_file, "rb") as f:
-            DWD_MOSMIX_Stations = pickle.load(f)
-            logger.info(f"Loaded DWD MOSMIX station map from: {station_map_file}")
-    elif station_map_file and DWD_MOSMIX_Stations is None:
-        # File path was configured for this stage but file is missing
-        logger.debug(f"DWD MOSMIX station map not found at: {station_map_file}")
-except (OSError, pickle.UnpicklingError) as e:
-    logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
 lats_etopo = np.arange(
     COORDINATE_CONST["latitude_min"],
@@ -284,25 +254,36 @@ def convert_data_to_celsius(
 
 
 def _prefer_ai_with_fallback(ai_data, base_data):
-    """Prefer AI values but fall back to base model values for missing points."""
-    if ai_data is None:
-        return base_data
+    """Prefer AI values but fall back to base model values for missing points.
+
+    Returns the blended array and, per hour, whether the AI model and the base
+    model supplied any of its values (for flags.sources).
+    """
     out = np.asarray(ai_data).copy()
     missing_value_mask = out == MISSING_DATA
+    missing_ai = np.isnan(out) | missing_value_mask
+    ai_hours = ~missing_ai[:, 1:].all(axis=1)
+    base_hours = np.zeros(len(out), dtype=bool)
 
     if base_data is not None:
         base = np.asarray(base_data)
         base_missing_value_mask = base == MISSING_DATA
-        missing_ai = np.isnan(out) | missing_value_mask
         valid_base = np.isfinite(base) & ~base_missing_value_mask
         fallback_mask = missing_ai & valid_base
         out[fallback_mask] = base[fallback_mask]
+        base_hours = fallback_mask[:, 1:].any(axis=1)
 
     # Preserve time column as-is and normalize remaining missing sentinels.
     out_data = out[:, 1:]
     np.putmask(out_data, out_data == MISSING_DATA, np.nan)
-    return out
+    return out, ai_hours, base_hours
 
+
+# Hourly input stacks behind the fields time machine leaves out without
+# tmextra (_FIELDS_TM_BASIC); their sources aren't listed in flags.sources
+_TM_BASIC_HIDDEN_INPUTS = frozenset(
+    {"nearstorm_dist", "nearstorm_dir", "uv_inputs", "error_inputs", "cape_inputs"}
+)
 
 # Distinct (location, day) pairs remembered per worker; a table is ~2 KB
 SOLAR_TABLE_CACHE_SIZE = 4096
@@ -569,6 +550,7 @@ async def PW_Forecast(
     timer.log("### HRRR Start ###")
 
     # 2. Initialize Zarr sources
+    dwd_mosmix_stations = stores.DWD_MOSMIX_Stations
     zarr_sources = ZarrSources(
         subh=stores.SubH_Zarr,
         hrrr_6h=stores.HRRR_6H_Zarr,
@@ -805,33 +787,55 @@ async def PW_Forecast(
     REPS_Merged = merge_result.reps
     DWD_MOSMIX_Merged = merge_result.dwd_mosmix
     is_na = is_in_north_america(lat, lon_IN)
+    # include=aimodels merges each AI model into the array of the model it
+    # stands in for, under that model's name; the hours each supplied decide
+    # which of the two flags.sources lists ({key: (ai name, ai hours, base hours)})
+    ai_blends = {}
     if incAIModels:
         if is_na:
             if merge_result.aigfs is not None:
-                GFS_Merged = _prefer_ai_with_fallback(merge_result.aigfs, GFS_Merged)
+                GFS_Merged, *blend_hours = _prefer_ai_with_fallback(
+                    merge_result.aigfs, GFS_Merged
+                )
+                ai_blends["gfs"] = ("aigfs", *blend_hours)
                 if "gfs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("gfs")
             elif merge_result.aifs is not None:
                 # AIGFS excluded/unavailable in NA: fall back to AIFS
-                ECMWF_Merged = _prefer_ai_with_fallback(merge_result.aifs, ECMWF_Merged)
+                ECMWF_Merged, *blend_hours = _prefer_ai_with_fallback(
+                    merge_result.aifs, ECMWF_Merged
+                )
+                ai_blends["ecmwf_ifs"] = ("ecmwf_aifs", *blend_hours)
                 if "ecmwf_ifs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("ecmwf_ifs")
             if merge_result.aigefs is not None:
-                GEFS_Merged = _prefer_ai_with_fallback(merge_result.aigefs, GEFS_Merged)
+                GEFS_Merged, *blend_hours = _prefer_ai_with_fallback(
+                    merge_result.aigefs, GEFS_Merged
+                )
+                ai_blends["gefs"] = ("aigefs", *blend_hours)
                 if "gefs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("gefs")
         else:
             if merge_result.aifs is not None:
-                ECMWF_Merged = _prefer_ai_with_fallback(merge_result.aifs, ECMWF_Merged)
+                ECMWF_Merged, *blend_hours = _prefer_ai_with_fallback(
+                    merge_result.aifs, ECMWF_Merged
+                )
+                ai_blends["ecmwf_ifs"] = ("ecmwf_aifs", *blend_hours)
                 if "ecmwf_ifs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("ecmwf_ifs")
             elif merge_result.aigfs is not None:
                 # AIFS excluded/unavailable outside NA: fall back to AIGFS
-                GFS_Merged = _prefer_ai_with_fallback(merge_result.aigfs, GFS_Merged)
+                GFS_Merged, *blend_hours = _prefer_ai_with_fallback(
+                    merge_result.aigfs, GFS_Merged
+                )
+                ai_blends["gfs"] = ("aigfs", *blend_hours)
                 if "gfs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("gfs")
             if merge_result.aigefs is not None:
-                GEFS_Merged = _prefer_ai_with_fallback(merge_result.aigefs, GEFS_Merged)
+                GEFS_Merged, *blend_hours = _prefer_ai_with_fallback(
+                    merge_result.aigefs, GEFS_Merged
+                )
+                ai_blends["gefs"] = ("aigefs", *blend_hours)
                 if "gefs" not in merge_result.metadata.source_list:
                     merge_result.metadata.source_list.append("gefs")
     sourceList = merge_result.metadata.source_list
@@ -849,6 +853,18 @@ async def PW_Forecast(
                 "At least one forecast model must not be excluded."
             ),
         )
+
+    # Version 2 flags list only the sources that supplied a returned value
+    # (#554). Each selection marks the source it took: the hourly block per hour
+    # in used_hours, the minutely, currently and daily member-share selections in
+    # their sets. sourceList stays every source read, which the blocks branch on.
+    if version >= 2 and exFlags != 1:
+        used_hours = np.zeros((numHours, len(USED_SOURCE_KEYS)), dtype=bool)
+        minutely_used = set()
+        current_used = set()
+        daily_used = set()
+    else:
+        used_hours = minutely_used = current_used = daily_used = None
 
     # 8. Generate the minutely forecast section (precipitation intensity, etc.)
     # This uses high-resolution data (like HRRR sub-hourly) to provide minute-by-minute precipitation forecasts
@@ -891,6 +907,7 @@ async def PW_Forecast(
             lat=lat,
             lon=lon_IN,
             prioritize_ai_models=bool(incAIModels),
+            used_sources=minutely_used,
         )
     minuteRainIntensity = InterPminute[:, DATA_MINUTELY["rain_intensity"]]
     minuteSnowIntensity = InterPminute[:, DATA_MINUTELY["snow_intensity"]]
@@ -1014,13 +1031,35 @@ async def PW_Forecast(
         dataOut_raqdps=dataOut_raqdps,
         dataOut_silam=dataOut_silam,
         hour_array_grib=hour_array_grib,
+        with_hour_sources=used_hours is not None,
     )
 
     # Extend smoke_inputs with SILAM PM_FRP_column as a lower-priority fallback
     # (RRFS then HRRR smoke win when available; SILAM fire smoke fills NaN gaps).
     silam_smoke_frp = aq_inputs.get("smoke_frp")
+    input_sources = inputs["input_sources"]
     if silam_smoke_frp is not None and not np.all(np.isnan(silam_smoke_frp)):
-        smoke_inputs = np.column_stack([smoke_inputs, silam_smoke_frp.reshape(-1, 1)])
+        if input_sources["smoke_inputs"]:
+            smoke_inputs = np.column_stack(
+                [smoke_inputs, silam_smoke_frp.reshape(-1, 1)]
+            )
+        else:
+            # Without RRFS or HRRR smoke the stack is one all-NaN placeholder
+            # column, which SILAM replaces (the same values, a column per source)
+            smoke_inputs = silam_smoke_frp.reshape(-1, 1)
+        input_sources["smoke_inputs"] += (USED_SOURCE_COLUMN["silam"],)
+    if used_hours is not None:
+        # Time machine without tmextra doesn't return these hourly fields, so
+        # the sources they come from don't count for flags.sources
+        if timeMachine and not tmExtra:
+            input_sources = {
+                name: sources
+                for name, sources in input_sources.items()
+                if name not in _TM_BASIC_HIDDEN_INPUTS
+            }
+        # Hourly air quality (version 2): RAQDPS, with SILAM filling its gaps
+        for aq_source, aq_hours in aq_inputs["hour_sources"].items():
+            used_hours[: len(aq_hours), USED_SOURCE_COLUMN[aq_source]] |= aq_hours
 
     # The hourly response objects and their text are only needed for the hours
     # returned. Time Machine and the legacy summaries (no summary text) take the
@@ -1118,6 +1157,8 @@ async def PW_Forecast(
             else None,
             version=version,
             display_hours=hourly_display_hours,
+            input_sources=input_sources,
+            used_hours=used_hours,
         )
 
     pTypeMap = np.array(
@@ -1195,6 +1236,7 @@ async def PW_Forecast(
             if singleDay
             else int(hour_array_grib[int(baseTimeOffset)]),
             precip_member_masks=inputs["precip_member_masks"],
+            used_sources=daily_used,
         )
     dayList = daily_section.day_list
     dayList_si = daily_section.day_list_si
@@ -1234,6 +1276,22 @@ async def PW_Forecast(
                 hourList[requested_hour_row],
                 requested_hour_row,
             )
+            if current_used is not None:
+                # The minutely selections no longer reach the response (a
+                # future day has no minutely block, and its first minute is now
+                # the hourly row), so flags.sources (#554) takes the sources of
+                # that row's precipitation instead.
+                minutely_used.clear()
+                for name in (
+                    "prcipIntensity_inputs",
+                    "prcipProbability_inputs",
+                    "error_inputs",
+                ):
+                    row = inputs[name][requested_hour_row]
+                    columns = input_sources.get(name)
+                    finite = np.flatnonzero(np.isfinite(row))
+                    if columns and finite.size:
+                        current_used.add(USED_SOURCE_KEYS[columns[finite[0]]])
         current_section = build_current_section(
             sourceList=sourceList,
             hour_array_grib=hour_array_grib,
@@ -1288,6 +1346,7 @@ async def PW_Forecast(
             prioritize_ai_models=bool(incAIModels),
             aq_inputs=aq_inputs,
             inc_airqualitydetails=incAirQualityDetails,
+            used_sources=current_used,
         )
     ### RETURN ###
     # 16. Construct and return the final JSON response
@@ -1420,19 +1479,48 @@ async def PW_Forecast(
 
     if exFlags != 1:
         returnOBJ["flags"] = {}
-        returnOBJ["flags"]["sources"] = sourceList
-        returnOBJ["flags"]["sourceTimes"] = sourceTimes
+        if used_hours is not None:
+            select_used_sources(
+                merge_result.metadata,
+                used_hours,
+                ai_blends=ai_blends,
+                minutely_used=minutely_used,
+                current_used=current_used,
+                daily_used=daily_used,
+                ex_currently=exCurrently == 1,
+                ex_minutely=exMinutely == 1,
+                ex_hourly=exHourly == 1,
+                ex_daily=exDaily == 1,
+                day_night=inc_day_night == 1 and not timeMachine,
+                time_machine=timeMachine,
+                base_time_offset=int(baseTimeOffset),
+                output_hours=ouputHours,
+                rrfs_grid=grid_result.rrfs_grid,
+            )
+            returnOBJ["flags"]["sources"] = merge_result.metadata.used_sources
+            returnOBJ["flags"]["sourceTimes"] = merge_result.metadata.used_source_times
+            if not timeMachine:
+                # When the data behind this response should next refresh (#668)
+                next_update = next_update_time(
+                    merge_result.metadata,
+                    nowTime.replace(tzinfo=datetime.UTC).timestamp(),
+                )
+                if next_update is not None:
+                    returnOBJ["flags"]["nextUpdate"] = next_update
+        else:
+            returnOBJ["flags"]["sources"] = sourceList
+            returnOBJ["flags"]["sourceTimes"] = sourceTimes
 
         # Calculate distance to nearest station if stations are available
         nearest_station_distance = -999  # Default value when no stations available
         if (
-            DWD_MOSMIX_Stations is not None
+            dwd_mosmix_stations is not None
             and grid_result.x_dwd is not None
             and grid_result.y_dwd is not None
             and "dwd_mosmix" in sourceList
         ):
             grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
-            stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
+            stations_at_grid = dwd_mosmix_stations.get(grid_key, [])
             if stations_at_grid:
                 # Calculate distance to each station and find the minimum
                 # Performance: Use a generator expression with min() for efficiency
@@ -1477,13 +1565,13 @@ async def PW_Forecast(
 
             # Add DWD MOSMIX stations for this grid cell (if available)
             if (
-                DWD_MOSMIX_Stations is not None
+                dwd_mosmix_stations is not None
                 and grid_result.x_dwd is not None
                 and grid_result.y_dwd is not None
                 and "dwd_mosmix" in sourceList
             ):
                 grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
-                stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
+                stations_at_grid = dwd_mosmix_stations.get(grid_key, [])
                 if stations_at_grid:
                     returnOBJ["flags"]["sourceIDX"]["dwd_mosmix"] = {
                         "stations": stations_at_grid

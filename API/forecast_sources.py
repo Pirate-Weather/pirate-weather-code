@@ -1,6 +1,7 @@
 import datetime
 import logging
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -21,7 +22,7 @@ from API.constants.model_const import (
     RRFS,
     URMA,
 )
-from API.constants.shared_const import MISSING_DATA
+from API.constants.shared_const import MISSING_DATA, PUBLISH_SCHEDULE_HOURS
 from API.request.grid_indexing import GridIndexingResult
 from API.utils.geo import rounder
 
@@ -29,29 +30,74 @@ SECONDS_PER_HOUR = 3600
 
 URMA_TIME_TOLERANCE_SECONDS = 300
 
+# The sources the per-element selections report as having supplied a value, as
+# the columns of the per-hour usage mask. The keys are the selection code's own
+# names: "hrrr" and "rrfs" stand for both of their hourly stores, "hrrrsubh" and
+# "rrfssubh" for the sub-hourly ones (select_used_sources maps them to flag names).
+USED_SOURCE_KEYS = (
+    "rrfs",
+    "rrfssubh",
+    "urma",
+    "rtma_ru",
+    "hrrrsubh",
+    "librewxr",
+    "nbm",
+    "hrrr",
+    "hrdps",
+    "reps",
+    "gdps",
+    "geps",
+    "ecmwf_ifs",
+    "era5",
+    "gfs",
+    "gefs",
+    "dwd_mosmix",
+    "raqdps",
+    "silam",
+    "cfs",
+)
+USED_SOURCE_COLUMN = {key: column for column, key in enumerate(USED_SOURCE_KEYS)}
+# The hourly stacks and the daily member masks call ECMWF IFS "ecmwf"
+USED_SOURCE_COLUMN["ecmwf"] = USED_SOURCE_COLUMN["ecmwf_ifs"]
+
+# sourceTimes keys that differ from the flags.sources name they belong to
+_SOURCE_TIME_KEYS = {"hrrr_subh": "hrrrsubh", "rrfs_subh": "rrfssubh"}
+
 
 @dataclass
 class SourceMetadata:
     source_list: list[str]
     source_times: dict[str, str]
     source_idx: dict[str, dict]
+    # The sources that supplied at least one returned value and their run
+    # times (version 2 flags.sources / sourceTimes), in source_list order; set by
+    # select_used_sources. source_list stays the sources that were available.
+    used_sources: list[str] | None = None
+    used_source_times: dict[str, str] | None = None
+
+    # Run time of each source as unix seconds (the time sourceTimes shows), keyed
+    # by flags.sources name; next_update_time projects the next refresh from it.
+    source_run_times: dict[str, int] = field(default_factory=dict)
 
     def add(
         self,
         source: str,
         *,
-        time_value: str | None = None,
+        run_time: datetime.datetime | None = None,
+        time_fmt: str = "%Y-%m-%d %HZ",
         time_key: str | None = None,
     ) -> None:
         if source not in self.source_list:
             self.source_list.append(source)
-        if time_value is not None:
-            self.source_times[time_key or source] = time_value
+        if run_time is not None:
+            self.source_times[time_key or source] = run_time.strftime(time_fmt)
+            self.source_run_times[source] = int(run_time.timestamp())
 
     def drop(self, source: str, *, time_key: str | None = None) -> None:
         if source in self.source_list:
             self.source_list.remove(source)
         self.source_times.pop(time_key or source, None)
+        self.source_run_times.pop(source, None)
 
     def has_sources(self, *sources: str) -> bool:
         return all(src in self.source_list for src in sources)
@@ -113,34 +159,20 @@ def _aligned_rows(
     return dest_start, src_start, rows
 
 
-def _format_run_time(
+def _rounded_run_time(
     run_time: float | np.generic | None,
     *,
     offset_hours: int = 0,
     round_to: int | None = None,
-    fmt: str = "%Y-%m-%d %HZ",
-) -> str | None:
+) -> datetime.datetime | None:
+    """A store's run time (unix seconds) as a UTC datetime, rounded as sourceTimes shows it."""
     if run_time is None:
         return None
 
-    runtime = datetime.datetime.fromtimestamp(int(run_time), datetime.UTC).replace(
-        tzinfo=None
-    )
+    runtime = datetime.datetime.fromtimestamp(int(run_time), datetime.UTC)
     if offset_hours:
         runtime -= datetime.timedelta(hours=offset_hours)
-    rounded = rounder(runtime, to=round_to) if round_to else rounder(runtime)
-    return rounded.strftime(fmt)
-
-
-def _format_rtma_time(data_out_rtma: np.ndarray) -> str | None:
-    if not isinstance(data_out_rtma, np.ndarray):
-        return None
-
-    rtma_timestamp = datetime.datetime.fromtimestamp(
-        int(data_out_rtma[0, 0]), datetime.UTC
-    ).replace(tzinfo=None)
-    rounded_rtma_time = rounder(rtma_timestamp, to=15)
-    return rounded_rtma_time.strftime("%Y-%m-%d %H:%MZ")
+    return rounder(runtime, to=round_to) if round_to else rounder(runtime)
 
 
 def build_source_metadata(
@@ -169,37 +201,39 @@ def build_source_metadata(
     if isinstance(grid_result.dataOut_rrfs_subh, np.ndarray):
         metadata.add(
             "rrfssubh",
-            time_value=_format_run_time(grid_result.rrfsSubhRunTime),
+            run_time=_rounded_run_time(grid_result.rrfsSubhRunTime),
             time_key="rrfs_subh",
         )
     if isinstance(grid_result.dataOut_rrfs, np.ndarray):
         metadata.add(
-            f"{rrfs_grid}_0-18", time_value=_format_run_time(grid_result.rrfsRunTime)
+            f"{rrfs_grid}_0-18", run_time=_rounded_run_time(grid_result.rrfsRunTime)
         )
     if isinstance(grid_result.dataOut_rrfs_6h, np.ndarray):
         metadata.add(
             f"{rrfs_grid}_18-83",
-            time_value=_format_run_time(grid_result.rrfs6hRunTime),
+            run_time=_rounded_run_time(grid_result.rrfs6hRunTime),
         )
 
     if isinstance(grid_result.dataOut, np.ndarray):
         metadata.add(
             "hrrrsubh",
-            time_value=_format_run_time(grid_result.subhRunTime),
+            run_time=_rounded_run_time(grid_result.subhRunTime),
             time_key="hrrr_subh",
         )
 
     if isinstance(grid_result.dataOut_librewxr, np.ndarray):
         metadata.add(
             "librewxr",
-            time_value=_format_run_time(
-                grid_result.librewxrRunTime, round_to=10, fmt="%Y-%m-%d %H:%MZ"
-            ),
+            run_time=_rounded_run_time(grid_result.librewxrRunTime, round_to=10),
+            time_fmt="%Y-%m-%d %H:%MZ",
         )
 
     if isinstance(grid_result.dataOut_rtma_ru, np.ndarray) and not time_machine:
+        # RTMA-RU is an analysis: its run time is the valid time (15-minute cycles)
         metadata.add(
-            "rtma_ru", time_value=_format_rtma_time(grid_result.dataOut_rtma_ru)
+            "rtma_ru",
+            run_time=_rounded_run_time(grid_result.dataOut_rtma_ru[0, 0], round_to=15),
+            time_fmt="%Y-%m-%d %H:%MZ",
         )
         metadata.source_idx["rtma_ru"] = {
             "x": int(grid_result.x_rtma),
@@ -212,35 +246,34 @@ def build_source_metadata(
         if not time_machine:
             metadata.add(
                 "hrrr_0-18",
-                time_value=_format_run_time(grid_result.hrrrhRunTime),
+                run_time=_rounded_run_time(grid_result.hrrrhRunTime),
             )
         else:
             metadata.add("hrrr")
 
     if isinstance(grid_result.dataOut_nbm, np.ndarray):
         if not time_machine:
-            metadata.add("nbm", time_value=_format_run_time(grid_result.nbmRunTime))
+            metadata.add("nbm", run_time=_rounded_run_time(grid_result.nbmRunTime))
         else:
             metadata.add("nbm")
 
     if isinstance(grid_result.dataOut_dwd_mosmix, np.ndarray) and not time_machine:
         metadata.add(
-            "dwd_mosmix", time_value=_format_run_time(grid_result.dwdMosmixRunTime)
+            "dwd_mosmix", run_time=_rounded_run_time(grid_result.dwdMosmixRunTime)
         )
 
     if isinstance(grid_result.dataOut_ecmwf, np.ndarray) and not time_machine:
-        metadata.add("ecmwf_ifs", time_value=_format_run_time(grid_result.ecmwfRunTime))
+        metadata.add("ecmwf_ifs", run_time=_rounded_run_time(grid_result.ecmwfRunTime))
 
     if isinstance(grid_result.dataOut_h2, np.ndarray):
         metadata.add(
             "hrrr_18-48",
-            time_value=_format_run_time(
-                grid_result.h2RunTime, offset_hours=18, round_to=None
-            ),
+            # The 18-48 h store starts at lead 18
+            run_time=_rounded_run_time(grid_result.h2RunTime, offset_hours=18),
         )
 
     if isinstance(grid_result.dataOut_gfs, np.ndarray):
-        metadata.add("gfs", time_value=_format_run_time(grid_result.gfsRunTime))
+        metadata.add("gfs", run_time=_rounded_run_time(grid_result.gfsRunTime))
         metadata.source_idx["gfs"] = {
             "x": int(grid_result.x_p),
             "y": int(grid_result.y_p),
@@ -249,35 +282,35 @@ def build_source_metadata(
         }
 
     if isinstance(grid_result.dataOut_gefs, np.ndarray):
-        metadata.add("gefs", time_value=_format_run_time(grid_result.gefsRunTime))
+        metadata.add("gefs", run_time=_rounded_run_time(grid_result.gefsRunTime))
 
     # CFS is only read for a future day past the GFS store (grid_indexing)
     if isinstance(grid_result.dataOut_cfs, np.ndarray):
-        metadata.add("cfs", time_value=_format_run_time(grid_result.cfsRunTime))
+        metadata.add("cfs", run_time=_rounded_run_time(grid_result.cfsRunTime))
 
     if isinstance(grid_result.dataOut_hrdps, np.ndarray):
-        metadata.add("hrdps", time_value=_format_run_time(grid_result.hrdpsRunTime))
+        metadata.add("hrdps", run_time=_rounded_run_time(grid_result.hrdpsRunTime))
 
     if isinstance(grid_result.dataOut_gdps, np.ndarray):
-        metadata.add("gdps", time_value=_format_run_time(grid_result.gdpsRunTime))
+        metadata.add("gdps", run_time=_rounded_run_time(grid_result.gdpsRunTime))
 
     if isinstance(grid_result.dataOut_geps, np.ndarray):
-        metadata.add("geps", time_value=_format_run_time(grid_result.gepsRunTime))
+        metadata.add("geps", run_time=_rounded_run_time(grid_result.gepsRunTime))
 
     if isinstance(grid_result.dataOut_reps, np.ndarray):
-        metadata.add("reps", time_value=_format_run_time(grid_result.repsRunTime))
+        metadata.add("reps", run_time=_rounded_run_time(grid_result.repsRunTime))
 
     if isinstance(grid_result.dataOut_aigfs, np.ndarray):
-        metadata.add("aigfs", time_value=_format_run_time(grid_result.aigfsRunTime))
+        metadata.add("aigfs", run_time=_rounded_run_time(grid_result.aigfsRunTime))
 
     if isinstance(grid_result.dataOut_aigefs, np.ndarray):
-        metadata.add("aigefs", time_value=_format_run_time(grid_result.aigefsRunTime))
+        metadata.add("aigefs", run_time=_rounded_run_time(grid_result.aigefsRunTime))
 
     if isinstance(grid_result.dataOut_aifs, np.ndarray):
-        metadata.add("ecmwf_aifs", time_value=_format_run_time(grid_result.aifsRunTime))
+        metadata.add("ecmwf_aifs", run_time=_rounded_run_time(grid_result.aifsRunTime))
 
     if isinstance(grid_result.dataOut_raqdps, np.ndarray):
-        metadata.add("raqdps", time_value=_format_run_time(grid_result.raqdpsRunTime))
+        metadata.add("raqdps", run_time=_rounded_run_time(grid_result.raqdpsRunTime))
         if grid_result.x_raqdps is not None and grid_result.y_raqdps is not None:
             metadata.source_idx["raqdps"] = {
                 "x": int(grid_result.x_raqdps),
@@ -291,7 +324,7 @@ def build_source_metadata(
             }
 
     if isinstance(grid_result.dataOut_silam, np.ndarray):
-        metadata.add("silam", time_value=_format_run_time(grid_result.silamRunTime))
+        metadata.add("silam", run_time=_rounded_run_time(grid_result.silamRunTime))
         if grid_result.x_silam is not None and grid_result.y_silam is not None:
             metadata.source_idx["silam"] = {
                 "x": int(grid_result.x_silam),
@@ -391,6 +424,164 @@ def _merge_aifs_as_ecmwf(
         * 100.0
     )
     return merged
+
+
+def _used_flag_names(key, source_list, *, time_machine, rrfs_grid):
+    """The flags.sources names a selection key stands for."""
+    if key == "hrrr":
+        # Both HRRR stores are merged into one hourly array (forecast only)
+        return ("hrrr",) if time_machine else ("hrrr_0-18", "hrrr_18-48")
+    if key == "rrfssubh" and "rrfssubh" not in source_list:
+        # The minutely RRFS fields were interpolated from the hourly store
+        key = "rrfs"
+    if key == "rrfs":
+        return (f"{rrfs_grid}_0-18", f"{rrfs_grid}_18-83")
+    return (key,)
+
+
+def select_used_sources(
+    metadata: SourceMetadata,
+    used_hours: np.ndarray,
+    *,
+    minutely_used: set[str],
+    current_used: set[str],
+    daily_used: set[str],
+    ai_blends: dict | None,
+    ex_currently: bool,
+    ex_minutely: bool,
+    ex_hourly: bool,
+    ex_daily: bool,
+    day_night: bool,
+    time_machine: bool,
+    base_time_offset: int,
+    output_hours: int,
+    rrfs_grid: str | None,
+) -> list[str]:
+    """Pick the sources that supplied at least one returned value (#554).
+
+    ``metadata.source_list`` is every source read for the request; version 2
+    flags show only those whose values reached a returned block:
+    - hourly: the source of each value in the returned hours (``used_hours``);
+    - daily / day_night: every hour, as each feeds a day's aggregate, plus the
+      ensembles whose member share became a day's probability (``daily_used``);
+    - minutely, and currently (whose precipitation is the first minute's):
+      the minutely selections (``minutely_used``);
+    - currently: its own per-field selections (``current_used``);
+    - ETOPO1, for the elevation every response carries.
+
+    Args:
+        metadata: The request's source metadata. Its ``used_sources`` and
+            ``used_source_times`` are set from its ``source_list`` (keeping
+            that order) and ``source_times``.
+        used_hours: (hours, USED_SOURCE_KEYS) bool mask of the source each
+            hourly value came from (the hourly block, plus air quality).
+        minutely_used, current_used, daily_used: The selection keys the
+            minutely, currently and daily member-share selections took.
+        ai_blends: ``{key: (ai_name, ai_hours, base_hours)}`` under
+            include=aimodels, where an AI model was merged into the array of
+            the conventional model ``key``: the hours where each of the two
+            supplied values, so each is listed only if it supplied a counted
+            hour. Minutely and currently selections count as the current hour
+            and the next.
+        ex_currently, ex_minutely, ex_hourly, ex_daily: The blocks excluded.
+        day_night: Whether the day_night block is returned.
+        time_machine: Whether this is a time machine request.
+        base_time_offset: The current hour's row (forecast requests).
+        output_hours: The hourly rows returned (48, or 168 with extend=hourly).
+        rrfs_grid: The RRFS grid read ("rrfs" or "rrfs_na"), if any.
+
+    Returns:
+        The used sources (also set on ``metadata``).
+    """
+    hourly_start = 0 if time_machine else base_time_offset
+    current_rows = slice(hourly_start, hourly_start + 2)
+    counted = np.zeros_like(used_hours)
+    if not ex_daily or day_night:
+        counted[:] = used_hours
+        for key in daily_used:
+            counted[:, USED_SOURCE_COLUMN[key]] = True
+    elif not ex_hourly:
+        hourly_rows = slice(hourly_start, hourly_start + output_hours)
+        counted[hourly_rows] = used_hours[hourly_rows]
+    selections = []
+    if not ex_currently or not ex_minutely:
+        selections.append(minutely_used)
+    if not ex_currently:
+        selections.append(current_used)
+    for keys in selections:
+        for key in keys:
+            counted[current_rows, USED_SOURCE_COLUMN[key]] = True
+
+    ai_blends = ai_blends or {}
+    used_names = set()
+    for column in np.flatnonzero(counted.any(axis=0)):
+        key = USED_SOURCE_KEYS[column]
+        blend = ai_blends.get(key)
+        if blend is not None:
+            ai_name, ai_hours, base_hours = blend
+            hours = counted[:, column]
+            if (hours & ai_hours).any():
+                used_names.add(ai_name)
+            if not (hours & base_hours).any():
+                continue
+        used_names.update(
+            _used_flag_names(
+                key,
+                metadata.source_list,
+                time_machine=time_machine,
+                rrfs_grid=rrfs_grid,
+            )
+        )
+
+    # Every response carries the elevation
+    used_names.add("ETOPO1")
+
+    metadata.used_sources = [
+        source for source in metadata.source_list if source in used_names
+    ]
+    metadata.used_source_times = {
+        time_key: run_time
+        for time_key, run_time in metadata.source_times.items()
+        if _SOURCE_TIME_KEYS.get(time_key, time_key) in used_names
+    }
+    return metadata.used_sources
+
+
+def next_update_time(metadata: SourceMetadata, now_timestamp: float) -> int | None:
+    """When the forecast should next refresh: version 2 ``flags.nextUpdate`` (#668).
+
+    The earliest expected publish of a new run among the sources used in the
+    response (``metadata.used_sources``), from each one's run time and its
+    ``PUBLISH_SCHEDULE_HOURS`` entry. A run that is overdue (a late ingest, or a
+    cycle that never came) rolls forward by whole cycles to the next scheduled
+    publish, so the value is never in the past. Sources without a schedule
+    (ETOPO1, ERA5) or without a run time are skipped.
+
+    Args:
+        metadata: The request's source metadata, after ``select_used_sources``.
+        now_timestamp: The request's current time, unix seconds (UTC).
+
+    Returns:
+        The expected publish time in unix seconds, or None if no used source
+        has a schedule.
+    """
+    next_update = None
+    for source in metadata.used_sources or ():
+        schedule = PUBLISH_SCHEDULE_HOURS.get(source)
+        run_time = metadata.source_run_times.get(source)
+        if schedule is None or run_time is None:
+            continue
+        interval_hours, delay_hours = schedule
+        interval_seconds = interval_hours * 3600
+        expected = run_time + (interval_hours + delay_hours) * 3600
+        if expected <= now_timestamp:
+            missed_cycles = (
+                math.floor((now_timestamp - expected) / interval_seconds) + 1
+            )
+            expected += missed_cycles * interval_seconds
+        if next_update is None or expected < next_update:
+            next_update = expected
+    return None if next_update is None else int(next_update)
 
 
 def add_etopo_source(
@@ -566,7 +757,7 @@ def merge_hourly_models(
             data_urma, base_day_utc_grib, num_hours, urma_min_timestamp
         )
         if urma_merged is not None:
-            metadata.add("urma", time_value=_format_run_time(latest_urma_time))
+            metadata.add("urma", run_time=_rounded_run_time(latest_urma_time))
 
     try:
         if (

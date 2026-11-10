@@ -262,6 +262,8 @@ KEEPBITS = {
             "cnc_NO2",
             "cnc_SO2",
             "cnc_CO",
+            # SILAM fire PM column (ug/m2), never output; only feeds the fallback
+            # smoke estimate, where 11 bits keep the derived smoke within 0.07 %.
             "PM_FRP_column",
             "PM2.5",
             "PM10",
@@ -286,9 +288,14 @@ KEEPBITS = {
     "REFD_1000maboveground": 8,  # 0.1 dBZ step, to 75
     "REFC_entireatmosphere": 8,
     "REFC_composite": 8,  # LibreWXR radar composite, same step as HRRR
-    "BLH": 10,  # 1 m step, to 4000 m
-    "Storm_Distance": 11,  # 1 km step, to 5000 km
-    "VVEL_500mb": 8,  # 0.01 Pa/s step, to 10
+    # SILAM boundary layer height (m), intermediate only: the smoke divisor, which
+    # only varies for 667 < BLH < 2000 m. Error <= 1 m to 4000 m.
+    "BLH": 10,
+    # GFS, stored in metres and uncapped (storm_proc max_distance_m=None). Error
+    # ~1 km at 5000 km, 4 km at 20,000 km; it is the distance to the nearest
+    # 0.25 degree wet cell, so finer steps would be nominal.
+    "Storm_Distance": 11,
+    "VVEL_500mb": 8,  # Pa/s, 0.01 step to 16 Pa/s, 0.03 at the +/-30 clip
 }
 
 FORECAST_LEAD_RANGES = {

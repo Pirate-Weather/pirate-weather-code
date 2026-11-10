@@ -19,8 +19,32 @@ Source selection follows this process:
 3. Build an ordered, element-specific list of compatible sources.
 4. Select the first non-missing value at each timestamp.
 
-The `flags.sources` field reports the models that were available to a request.
-It is not a per-element record of the model that produced every output value.
+In version 2 responses, `flags.sources` and `flags.sourceTimes` list the
+models that supplied at least one returned value: each selection records the
+model it took (per hour for the hourly elements), and a model counts when its
+values reach a returned block. The hourly block counts its returned hours
+(48, or 168 with `extend=hourly`); the daily and day/night blocks count every
+hour, since each feeds a day's aggregate, plus the ensembles whose member share
+became a day's precipitation probability; `currently` counts its own
+selections and the minutely ones (its precipitation is the first minute's).
+ETOPO1 is always listed, for the elevation. Under `include=aimodels` the AI
+model and the conventional model it is merged into are each listed only for
+the hours they supplied. `flags.sourceIDX` still describes every model read,
+and version 1 responses keep listing every available model. The flags are not
+a per-element record of the model that produced each value.
+
+Version 2 forecast responses also carry `flags.nextUpdate`: when the data
+behind the response should next refresh, as an integer unix timestamp (UTC
+seconds). It is the earliest expected publish of a new run among the sources in
+`flags.sources`, from each source's run time (`flags.sourceTimes`) plus its
+cycle interval and usual publish delay (`PUBLISH_SCHEDULE_HOURS` in
+`API/constants/shared_const.py`, taken from the ingest schedules). A source
+whose next run is overdue rolls forward to its following scheduled publish, so
+the value is never in the past. The rapid-update sources count too, so where
+RTMA-RU, HRRR or RRFS sub-hourly, or LibreWXR are used it is often minutes
+away. It is an estimate: an upstream delay can make a run later. It is omitted
+for time machine requests and when no used source has a schedule (for example
+ETOPO1 and ERA5 only), and in version 1.
 
 Daily and day/night values aggregate the selected hourly values. They do not
 perform a separate model-selection pass.
@@ -85,7 +109,8 @@ read. When it is present:
 - RRFS provides no precipitation probability or error, so those keep their
   usual sources.
 - `flags.sources` lists `rrfs_0-18` / `rrfs_18-83` (CONUS) or `rrfs_na_0-18` /
-  `rrfs_na_18-83` (North America), and `rrfssubh`.
+  `rrfs_na_18-83` (North America), and `rrfssubh`. The two hourly stores are
+  merged, so both are listed whenever hourly RRFS supplied a value.
 
 Time Machine requests never read RRFS, which keeps no history.
 
@@ -262,8 +287,10 @@ future day whose last hour is after the GFS store's last hour, and then only
 that day's hours, so forecast requests and the days GFS covers read nothing
 more. It is last in every hourly, daily and `currently` priority order, for
 every element it has, so a day that straddles the end of GFS takes GFS (and
-any other model still running) first and CFS for the remaining hours. It is
-listed in `flags.sources`, `flags.sourceTimes` and (version 2) `sourceIDX`.
+any other model still running) first and CFS for the remaining hours. Like
+every source, it is in version 2 `flags.sources` and `flags.sourceTimes` only
+when it supplied a returned value, and in `sourceIDX` whenever it was read. Its
+`flags.nextUpdate` schedule is the daily 00Z run published near 12:33 UTC.
 
 On a future day `currently`'s precipitation (`precipIntensity`,
 `precipProbability`, `precipIntensityError`, `precipType`, and the rain, snow
@@ -272,8 +299,10 @@ of the hour holding the requested time, not the first minute. The minutely
 block picks one source per element for its whole 61-minute window, while the
 hourly rows fall back source by source per hour, so on the day the
 shorter-range models (ECMWF, GFS, GEFS) end the two disagreed; and a future
-day returns no minutely block that could explain the difference. The other
-`currently` fields are still interpolated to the requested time.
+day returns no minutely block that could explain the difference. Version 2
+`flags.sources` then counts the sources of that hourly row's precipitation in
+place of the minutely selections. The other `currently` fields are still
+interpolated to the requested time.
 
 - **Elements:** temperature, dew point, humidity, sea-level and station
   pressure, wind speed and bearing, cloud cover, solar radiation, precipitation

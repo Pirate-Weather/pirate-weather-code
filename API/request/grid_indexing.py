@@ -1217,11 +1217,15 @@ async def calculate_grid_indexing(
             readAIGFS = True
         if ex_aigefs != 1 and zarr_sources.aigefs is not None:
             readAIGEFS = True
-    elif ai_models_requested and not is_na:
-        if ex_aifs != 1 and zarr_sources.ecmwf_aifs is not None:
-            y_p_aifs = np.argmin(np.abs(AIFS_LATS - lat))
-            x_p_aifs = np.argmin(np.abs(AIFS_LONS - az_lon))
-            readAIFS = True
+    elif (
+        ai_models_requested
+        and not is_na
+        and ex_aifs != 1
+        and zarr_sources.ecmwf_aifs is not None
+    ):
+        y_p_aifs = np.argmin(np.abs(AIFS_LATS - lat))
+        x_p_aifs = np.argmin(np.abs(AIFS_LONS - az_lon))
+        readAIFS = True
 
     timer.log("### AI Models Detail END ###")
 

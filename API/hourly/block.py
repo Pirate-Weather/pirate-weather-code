@@ -44,6 +44,7 @@ from API.constants.clip_const import (
     CLIP_PM10,
     CLIP_PM25,
     CLIP_PRESSURE,
+    CLIP_PROB,
     CLIP_SMOKE,
     CLIP_SO2_PPB,
     CLIP_SOLAR,
@@ -62,12 +63,33 @@ from API.utils.fire import calculate_fosberg_fire_index
 logger = logging.getLogger(__name__)
 
 
+def _first_available(stack, sources, used_hours):
+    """Per hour, the first non-NaN column of a source stack (its priority order).
+
+    ``sources`` gives each column's source as a column of ``used_hours``, the
+    C-contiguous (hours, USED_SOURCE_KEYS) mask of the sources that supplied an
+    hour's value (flags.sources); either None skips that bookkeeping.
+    """
+    first = np.argmin(np.isnan(stack), axis=1)
+    rows = np.arange(stack.shape[0])
+    # The same values as np.choose(first, stack.T), and faster
+    values = stack[rows, first]
+    if used_hours is not None and sources:
+        # Flat indices into the (contiguous) mask, one write for the hours
+        # that have a value
+        flat_index = rows * used_hours.shape[1] + np.asarray(sources)[first]
+        used_hours.reshape(-1)[flat_index[~np.isnan(values)]] = True
+    return values
+
+
 def _calculate_intensity_prob(
     hour_array_grib,
     InterPhour,
     prcipType_inputs,
     prcipIntensity_inputs,
     prcipProbability_inputs,
+    input_sources,
+    used_hours,
 ):
     """
     Calculate precipitation intensity and probability.
@@ -78,9 +100,11 @@ def _calculate_intensity_prob(
         prcipType_inputs: Precipitation type inputs.
         prcipIntensity_inputs: Precipitation intensity inputs.
         prcipProbability_inputs: Precipitation probability inputs.
+        input_sources: Each stack's column sources (``prepare_data_inputs``).
+        used_hours: Per-hour source usage mask to mark, or None.
     """
-    InterPhour[:, DATA_HOURLY["intensity"]] = np.choose(
-        np.argmin(np.isnan(prcipIntensity_inputs), axis=1), prcipIntensity_inputs.T
+    InterPhour[:, DATA_HOURLY["intensity"]] = _first_available(
+        prcipIntensity_inputs, input_sources.get("prcipIntensity_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["intensity"]] = np.maximum(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
@@ -92,12 +116,16 @@ def _calculate_intensity_prob(
         np.argmin(np.isnan(prcipIntensity_inputs), axis=1), prcipType_inputs.T
     )
 
-    InterPhour[:, DATA_HOURLY["prob"]] = np.choose(
-        np.argmin(np.isnan(prcipProbability_inputs), axis=1),
-        prcipProbability_inputs.T,
+    InterPhour[:, DATA_HOURLY["prob"]] = _first_available(
+        prcipProbability_inputs,
+        input_sources.get("prcipProbability_inputs"),
+        used_hours,
     )
-    InterPhour[:, DATA_HOURLY["prob"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["prob"]], 0, 1
+    InterPhour[:, DATA_HOURLY["prob"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["prob"]],
+        CLIP_PROB["min"],
+        CLIP_PROB["max"],
+        "Precipitation Probability Hour",
     )
     InterPhour[:, DATA_HOURLY["prob"]] = zero_small_values(
         InterPhour[:, DATA_HOURLY["prob"]], threshold=PRECIP_PROB_NOISE_THRESHOLD
@@ -132,6 +160,8 @@ def _process_input_vars(
     vertical_velocity_inputs,
     convective_inhibition_inputs,
     k_index_inputs,
+    input_sources,
+    used_hours,
 ):
     """
     Process input variables and populate InterPhour.
@@ -159,13 +189,15 @@ def _process_input_vars(
         feels_like_inputs: Feels like temperature inputs.
         station_pressure_inputs: Station pressure inputs.
         humidUnit: Humidity unit.
+        input_sources: Each stack's column sources (``prepare_data_inputs``).
+        used_hours: Per-hour source usage mask to mark, or None.
     """
-    InterPhour[:, DATA_HOURLY["error"]] = np.choose(
-        np.argmin(np.isnan(error_inputs), axis=1), error_inputs.T
+    InterPhour[:, DATA_HOURLY["error"]] = _first_available(
+        error_inputs, input_sources.get("error_inputs"), used_hours
     )
 
-    InterPhour[:, DATA_HOURLY["temp"]] = np.choose(
-        np.argmin(np.isnan(temperature_inputs), axis=1), temperature_inputs.T
+    InterPhour[:, DATA_HOURLY["temp"]] = _first_available(
+        temperature_inputs, input_sources.get("temperature_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["temp"]] = clipLog(
         InterPhour[:, DATA_HOURLY["temp"]],
@@ -174,8 +206,8 @@ def _process_input_vars(
         "Temperature Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["dew"]] = np.choose(
-        np.argmin(np.isnan(dew_inputs), axis=1), dew_inputs.T
+    InterPhour[:, DATA_HOURLY["dew"]] = _first_available(
+        dew_inputs, input_sources.get("dew_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["dew"]] = clipLog(
         InterPhour[:, DATA_HOURLY["dew"]],
@@ -184,8 +216,8 @@ def _process_input_vars(
         "Dew Point Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["humidity"]] = np.choose(
-        np.argmin(np.isnan(humidity_inputs), axis=1), humidity_inputs.T
+    InterPhour[:, DATA_HOURLY["humidity"]] = _first_available(
+        humidity_inputs, input_sources.get("humidity_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["humidity"]] = (
         InterPhour[:, DATA_HOURLY["humidity"]] * humidUnit
@@ -197,8 +229,8 @@ def _process_input_vars(
         "Humidity Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["pressure"]] = np.choose(
-        np.argmin(np.isnan(pressure_inputs), axis=1), pressure_inputs.T
+    InterPhour[:, DATA_HOURLY["pressure"]] = _first_available(
+        pressure_inputs, input_sources.get("pressure_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["pressure"]] = clipLog(
         InterPhour[:, DATA_HOURLY["pressure"]],
@@ -207,8 +239,8 @@ def _process_input_vars(
         "Pressure Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["wind"]] = np.choose(
-        np.argmin(np.isnan(wind_inputs), axis=1), wind_inputs.T
+    InterPhour[:, DATA_HOURLY["wind"]] = _first_available(
+        wind_inputs, input_sources.get("wind_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["wind"]] = clipLog(
         InterPhour[:, DATA_HOURLY["wind"]],
@@ -217,8 +249,8 @@ def _process_input_vars(
         "Wind Speed Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["gust"]] = np.choose(
-        np.argmin(np.isnan(gust_inputs), axis=1), gust_inputs.T
+    InterPhour[:, DATA_HOURLY["gust"]] = _first_available(
+        gust_inputs, input_sources.get("gust_inputs"), used_hours
     )
     # If gust is still NaN, fall back to wind speed
     gust_nan_mask = np.isnan(InterPhour[:, DATA_HOURLY["gust"]])
@@ -232,15 +264,15 @@ def _process_input_vars(
         "Wind Gust Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["bearing"]] = np.choose(
-        np.argmin(np.isnan(bearing_inputs), axis=1), bearing_inputs.T
+    InterPhour[:, DATA_HOURLY["bearing"]] = _first_available(
+        bearing_inputs, input_sources.get("bearing_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["bearing"]] = np.mod(
         InterPhour[:, DATA_HOURLY["bearing"]], 360
     )
 
-    InterPhour[:, DATA_HOURLY["cloud"]] = np.choose(
-        np.argmin(np.isnan(cloud_inputs), axis=1), cloud_inputs.T
+    InterPhour[:, DATA_HOURLY["cloud"]] = _first_available(
+        cloud_inputs, input_sources.get("cloud_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["cloud"]] = clipLog(
         InterPhour[:, DATA_HOURLY["cloud"]],
@@ -249,8 +281,8 @@ def _process_input_vars(
         "Cloud Cover Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["uv"]] = np.choose(
-        np.argmin(np.isnan(uv_inputs), axis=1), uv_inputs.T
+    InterPhour[:, DATA_HOURLY["uv"]] = _first_available(
+        uv_inputs, input_sources.get("uv_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["uv"]] = clipLog(
         InterPhour[:, DATA_HOURLY["uv"]],
@@ -260,13 +292,13 @@ def _process_input_vars(
     )
 
     InterPhour[:, DATA_HOURLY["vis"]] = np.clip(
-        np.choose(np.argmin(np.isnan(vis_inputs), axis=1), vis_inputs.T),
+        _first_available(vis_inputs, input_sources.get("vis_inputs"), used_hours),
         CLIP_VIS["min"],
         CLIP_VIS["max"],
     )
 
-    InterPhour[:, DATA_HOURLY["ozone"]] = np.choose(
-        np.argmin(np.isnan(ozone_inputs), axis=1), ozone_inputs.T
+    InterPhour[:, DATA_HOURLY["ozone"]] = _first_available(
+        ozone_inputs, input_sources.get("ozone_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["ozone"]] = clipLog(
         InterPhour[:, DATA_HOURLY["ozone"]],
@@ -275,8 +307,8 @@ def _process_input_vars(
         "Ozone Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["smoke"]] = np.choose(
-        np.argmin(np.isnan(smoke_inputs), axis=1), smoke_inputs.T
+    InterPhour[:, DATA_HOURLY["smoke"]] = _first_available(
+        smoke_inputs, input_sources.get("smoke_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["smoke"]] = clipLog(
         InterPhour[:, DATA_HOURLY["smoke"]],
@@ -285,41 +317,48 @@ def _process_input_vars(
         "Air quality Hour",
     )
 
-    InterPhour[:, DATA_HOURLY["accum"]] = np.choose(
-        np.argmin(np.isnan(accum_inputs), axis=1), accum_inputs.T
+    InterPhour[:, DATA_HOURLY["accum"]] = _first_available(
+        accum_inputs, input_sources.get("accum_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["accum"]] = zero_small_values(
         InterPhour[:, DATA_HOURLY["accum"]], threshold=PRECIP_ACCUM_NOISE_THRESHOLD
     )
-    InterPhour[:, DATA_HOURLY["storm_dist"]] = np.choose(
-        np.argmin(np.isnan(nearstorm_inputs["dist"]), axis=1),
-        nearstorm_inputs["dist"].T,
+    InterPhour[:, DATA_HOURLY["storm_dist"]] = _first_available(
+        nearstorm_inputs["dist"], input_sources.get("nearstorm_dist"), used_hours
     )
-    InterPhour[:, DATA_HOURLY["storm_dir"]] = np.choose(
-        np.argmin(np.isnan(nearstorm_inputs["dir"]), axis=1),
-        nearstorm_inputs["dir"].T,
+    InterPhour[:, DATA_HOURLY["storm_dir"]] = _first_available(
+        nearstorm_inputs["dir"], input_sources.get("nearstorm_dir"), used_hours
     )
-    InterPhour[:, DATA_HOURLY["fire"]] = np.choose(
-        np.argmin(np.isnan(fire_inputs), axis=1), fire_inputs.T
+    InterPhour[:, DATA_HOURLY["fire"]] = _first_available(
+        fire_inputs, input_sources.get("fire_inputs"), used_hours
     )
-    InterPhour[:, DATA_HOURLY["fire"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["fire"]], CLIP_FIRE["min"], CLIP_FIRE["max"]
+    InterPhour[:, DATA_HOURLY["fire"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["fire"]],
+        CLIP_FIRE["min"],
+        CLIP_FIRE["max"],
+        "Fire Index Hour",
     )
-    InterPhour[:, DATA_HOURLY["solar"]] = np.choose(
-        np.argmin(np.isnan(solar_inputs), axis=1), solar_inputs.T
+    InterPhour[:, DATA_HOURLY["solar"]] = _first_available(
+        solar_inputs, input_sources.get("solar_inputs"), used_hours
     )
     # Clip solar to var range
-    InterPhour[:, DATA_HOURLY["solar"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["solar"]], CLIP_SOLAR["min"], CLIP_SOLAR["max"]
+    InterPhour[:, DATA_HOURLY["solar"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["solar"]],
+        CLIP_SOLAR["min"],
+        CLIP_SOLAR["max"],
+        "Solar Hour",
     )
-    InterPhour[:, DATA_HOURLY["cape"]] = np.choose(
-        np.argmin(np.isnan(cape_inputs), axis=1), cape_inputs.T
+    InterPhour[:, DATA_HOURLY["cape"]] = _first_available(
+        cape_inputs, input_sources.get("cape_inputs"), used_hours
     )
-    InterPhour[:, DATA_HOURLY["cape"]] = np.clip(
-        InterPhour[:, DATA_HOURLY["cape"]], CLIP_CAPE["min"], CLIP_CAPE["max"]
+    InterPhour[:, DATA_HOURLY["cape"]] = clipLog(
+        InterPhour[:, DATA_HOURLY["cape"]],
+        CLIP_CAPE["min"],
+        CLIP_CAPE["max"],
+        "CAPE Hour",
     )
-    InterPhour[:, DATA_HOURLY["feels_like"]] = np.choose(
-        np.argmin(np.isnan(feels_like_inputs), axis=1), feels_like_inputs.T
+    InterPhour[:, DATA_HOURLY["feels_like"]] = _first_available(
+        feels_like_inputs, input_sources.get("feels_like_inputs"), used_hours
     )
     InterPhour[:, DATA_HOURLY["feels_like"]] = np.clip(
         InterPhour[:, DATA_HOURLY["feels_like"]],
@@ -328,15 +367,15 @@ def _process_input_vars(
     )
 
     if station_pressure_inputs is not None:
-        InterPhour[:, DATA_HOURLY["station_pressure"]] = np.choose(
-            np.argmin(np.isnan(station_pressure_inputs), axis=1),
-            station_pressure_inputs.T,
+        InterPhour[:, DATA_HOURLY["station_pressure"]] = _first_available(
+            station_pressure_inputs,
+            input_sources.get("station_pressure_inputs"),
+            used_hours,
         )
 
     if lifted_index_inputs is not None:
-        InterPhour[:, DATA_HOURLY["lifted_index"]] = np.choose(
-            np.argmin(np.isnan(lifted_index_inputs), axis=1),
-            lifted_index_inputs.T,
+        InterPhour[:, DATA_HOURLY["lifted_index"]] = _first_available(
+            lifted_index_inputs, input_sources.get("lifted_index_inputs"), used_hours
         )
 
         InterPhour[:, DATA_HOURLY["lifted_index"]] = clipLog(
@@ -347,9 +386,10 @@ def _process_input_vars(
         )
 
     if vertical_velocity_inputs is not None:
-        InterPhour[:, DATA_HOURLY["vertical_velocity"]] = np.choose(
-            np.argmin(np.isnan(vertical_velocity_inputs), axis=1),
-            vertical_velocity_inputs.T,
+        InterPhour[:, DATA_HOURLY["vertical_velocity"]] = _first_available(
+            vertical_velocity_inputs,
+            input_sources.get("vertical_velocity_inputs"),
+            used_hours,
         )
 
         InterPhour[:, DATA_HOURLY["vertical_velocity"]] = clipLog(
@@ -360,9 +400,10 @@ def _process_input_vars(
         )
 
     if convective_inhibition_inputs is not None:
-        InterPhour[:, DATA_HOURLY["convective_inhibition"]] = np.choose(
-            np.argmin(np.isnan(convective_inhibition_inputs), axis=1),
-            convective_inhibition_inputs.T,
+        InterPhour[:, DATA_HOURLY["convective_inhibition"]] = _first_available(
+            convective_inhibition_inputs,
+            input_sources.get("convective_inhibition_inputs"),
+            used_hours,
         )
 
         # Use np.clip instead of clipLog to prevent -999 for values above 0
@@ -373,9 +414,8 @@ def _process_input_vars(
         )
 
     if k_index_inputs is not None:
-        InterPhour[:, DATA_HOURLY["k_index"]] = np.choose(
-            np.argmin(np.isnan(k_index_inputs), axis=1),
-            k_index_inputs.T,
+        InterPhour[:, DATA_HOURLY["k_index"]] = _first_available(
+            k_index_inputs, input_sources.get("k_index_inputs"), used_hours
         )
 
         InterPhour[:, DATA_HOURLY["k_index"]] = clipLog(
@@ -775,6 +815,8 @@ def build_hourly_block(
     urma_hour_mask: np.ndarray | None = None,
     display_hours: range | None = None,
     currentHourOffset: float | None = None,
+    input_sources: dict | None = None,
+    used_hours: np.ndarray | None = None,
 ):
     """
     Build hourly output objects and summary text/icon lists.
@@ -836,10 +878,18 @@ def build_hourly_block(
             builds all. See ``build_hourly_objects``.
         currentHourOffset: Hour row of the requested time when it differs from
             baseTimeOffset (a future day); see ``_calculate_derived_metrics``.
+        input_sources: Each input stack's column sources, from
+            ``prepare_data_inputs``.
+        used_hours: (hours, USED_SOURCE_KEYS) bool mask; each hour's selected
+            source is marked in it for flags.sources. None (version 1, or no
+            flags) skips that.
 
     Returns:
         Tuple containing hourly lists and arrays.
     """
+
+    if input_sources is None:
+        input_sources = {}
 
     _calculate_intensity_prob(
         hour_array_grib,
@@ -847,6 +897,8 @@ def build_hourly_block(
         prcipType_inputs,
         prcipIntensity_inputs,
         prcipProbability_inputs,
+        input_sources,
+        used_hours,
     )
 
     _process_input_vars(
@@ -876,6 +928,8 @@ def build_hourly_block(
         vertical_velocity_inputs,
         convective_inhibition_inputs,
         k_index_inputs,
+        input_sources,
+        used_hours,
     )
 
     # Populate AQ columns from aq_inputs. Only version 2 responses return these

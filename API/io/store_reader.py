@@ -24,7 +24,8 @@ import os
 import pickle
 import socket
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import google_crc32c
@@ -37,10 +38,6 @@ from numcodecs.zstd import Zstd
 from API.constants.api_const import MAX_ZARR_READ_RETRIES
 from API.constants.shared_const import INGEST_VERSION_STR
 from API.io.ZarrHelpers import init_ERA5
-
-DATA_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"
-)
 
 # How often each worker checks for newly synced store versions.
 STORE_POLL_SECONDS = float(os.getenv("STORE_POLL_SECONDS", "10"))
@@ -104,6 +101,22 @@ ALERT_STORES = (
 TIMEMACHINE_STORES = (("GFS_Zarr", "GFS"), ("URMA_Zarr", "URMA_Hist"))
 # Static elevation grid, synced once and never versioned.
 ETOPO_STORE_NAME = "ETOPO_DA_C"
+# (ZarrStores attribute, file name) of the pickles the ingests publish next to
+# their stores and API/store_sync.py copies. They are read from the store root
+# like the stores, and reloaded by the store poll when the file changes.
+SUPPORT_PICKLES = (
+    # Grid cell (y, x) -> the MOSMIX stations in it, for the response flags.
+    ("DWD_MOSMIX_Stations", "DWD_MOSMIX_stations.pickle"),
+    # RAQDPS's rotated grid, for its nearest-cell lookup.
+    ("RAQDPS_LatLon", "RAQDPS.lat_lon.pickle"),
+)
+# The RAQDPS grid is fixed, so a copy ships with the API; it is used until (or
+# unless) a published copy is found next to the stores.
+BUNDLED_RAQDPS_LAT_LON = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data",
+    "RAQDPS.lat_lon.pickle",
+)
 
 
 def _default_logger() -> logging.Logger:
@@ -290,6 +303,9 @@ class ZarrStores:
     RRFS_NA_6H_Zarr: ModelStore | None = None
     CFS_Zarr: ModelStore | None = None
     RAQDPS_LatLon: Any | None = None
+    DWD_MOSMIX_Stations: dict | None = None
+    # Tensorstore generation of each loaded support pickle, by file name
+    support_generations: dict[str, bytes] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -423,6 +439,48 @@ def open_alert_store(
     return AlertStore(zarr.open_array(store, mode="r", zarr_format=3), version, reader)
 
 
+async def refresh_support_pickles(
+    stores: ZarrStores, root: StoreRoot, *, logger: logging.Logger
+) -> None:
+    """Load each support pickle that is new or changed since it was loaded.
+
+    The read is conditional on the held generation (a stat on local disk, an
+    If-None-Match GET on S3), so an unchanged file costs no read. A file that
+    can't be read or unpickled keeps the value already held; its generation is
+    still recorded so a bad file is reported once, not on every poll. The sync
+    replaces the files atomically, so a worker never sees half of one.
+    """
+    try:
+        kvstore = await ts.KvStore.open(root.kvstore)
+    except ValueError as exc:
+        logger.warning("Could not open the store root for support files: %s", exc)
+        return
+    for attr, name in SUPPORT_PICKLES:
+        held = stores.support_generations.get(name)
+        try:
+            if held is None:
+                result = await kvstore.read(name)
+            else:
+                result = await kvstore.read(name, if_not_equal=held)
+        except (ValueError, OSError) as exc:
+            logger.warning("Could not read %s, keeping the held copy: %s", name, exc)
+            continue
+        if result.state == "missing":
+            if held is None and getattr(stores, attr) is None:
+                logger.info("%s not published", name)
+            continue
+        if result.state != "value":  # unchanged since the held generation
+            continue
+        stores.support_generations[name] = result.stamp.generation
+        try:
+            value = pickle.loads(bytes(result.value))
+        except (pickle.UnpicklingError, EOFError, ValueError) as exc:
+            logger.warning("Could not load %s, keeping the held copy: %s", name, exc)
+            continue
+        setattr(stores, attr, value)
+        logger.info("Loaded %s", name)
+
+
 def _store_names(stage: str) -> tuple[tuple, tuple]:
     if stage in ("TIMEMACHINE", "TM_TESTING"):
         return TIMEMACHINE_STORES, ()
@@ -438,8 +496,8 @@ async def refresh_stores(
     *,
     logger: logging.Logger | None = None,
 ) -> None:
-    """Open any store version that is newer than the one held, then write this
-    worker's heartbeat.
+    """Open any store version that is newer than the one held, reload changed
+    support pickles, then write this worker's heartbeat.
 
     A failed open keeps the version already held, so a bad publish degrades to
     serving the previous run rather than failing requests.
@@ -477,9 +535,16 @@ async def refresh_stores(
         setattr(stores, attr, opened)
         logger.info("Opened %s", version)
 
+    # The support pickles belong to forecast stores (DWD MOSMIX, RAQDPS).
+    support = (
+        [refresh_support_pickles(stores, root, logger=logger)]
+        if stage in ("DEV", "PROD", "TESTING")
+        else []
+    )
     await asyncio.gather(
         *(refresh(attr, name, False) for attr, name in forecast_stores),
         *(refresh(attr, name, True) for attr, name in alert_stores),
+        *support,
     )
     if root.local_dir is not None:
         write_heartbeat(stores, root.local_dir)
@@ -560,26 +625,17 @@ async def load_stores(
     elif stage in ("DEV", "TIMEMACHINE", "TESTING", "TM_TESTING"):
         logger.info("Skipping ERA5 initialization because SKIP_ERA5 is enabled")
 
-    await refresh_stores(stores, root, stage, logger=logger)
+    if stage in ("DEV", "PROD", "TESTING") and os.path.exists(BUNDLED_RAQDPS_LAT_LON):
+        try:
+            bundled = await asyncio.to_thread(Path(BUNDLED_RAQDPS_LAT_LON).read_bytes)
+            stores.RAQDPS_LatLon = pickle.loads(bundled)
+        except (OSError, EOFError, pickle.UnpicklingError) as exc:
+            logger.warning("Could not load the bundled RAQDPS grid: %s", exc)
 
-    if stage in ("DEV", "PROD", "TESTING"):
-        _load_aq_lat_lon_pickles(stores, logger=logger)
+    await refresh_stores(stores, root, stage, logger=logger)
 
     logger.info("Zarr stores loaded")
     return stores, root
-
-
-def _load_aq_lat_lon_pickles(stores: ZarrStores, *, logger: logging.Logger) -> None:
-    """Load AQ model lat/lon pickle files when available."""
-    for attr, fname in (("RAQDPS_LatLon", "RAQDPS.lat_lon.pickle"),):
-        path = os.path.join(DATA_DIR, fname)
-        if os.path.exists(path):
-            try:
-                with open(path, "rb") as fh:
-                    setattr(stores, attr, pickle.load(fh))
-                logger.info("Loaded %s from: %s", attr, path)
-            except (OSError, EOFError, pickle.UnpicklingError) as exc:
-                logger.warning("Could not load %s: %s", attr, exc)
 
 
 def with_time_column(values: np.ndarray, times: np.ndarray) -> np.ndarray:
