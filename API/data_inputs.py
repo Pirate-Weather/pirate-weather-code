@@ -11,8 +11,10 @@ from API.api_utils import (
     map_wmo4677_to_ptype,
     relative_humidity_from_dewpoint_c,
 )
+from API.constants.api_const import PRECIP_IDX
 from API.constants.aqi_const import AQ_LEAD_IN_HOURS
 from API.constants.model_const import (
+    CFS,
     DWD_MOSMIX,
     ECMWF,
     ERA5,
@@ -101,6 +103,8 @@ def _bearing(u, v):
 # Variables without ECMWF data reuse the same order and skip missing entries.
 # Canadian models are treated as the highest forecast priority inside Canada,
 # but fall below the global GFS/GEFS band in the US and outside Canada.
+# CFS (future days past the GFS store only) comes last everywhere, so it only
+# fills the hours no other model has.
 _CANADA_PRIORITY_ORDER = [
     "hrdps",
     "reps",
@@ -113,6 +117,7 @@ _CANADA_PRIORITY_ORDER = [
     "gfs",
     "gefs",
     "dwd_mosmix",
+    "cfs",
 ]
 _PRIORITY_ORDER_NA = [
     "nbm",
@@ -126,6 +131,7 @@ _PRIORITY_ORDER_NA = [
     "dwd_mosmix",
     "hrdps",
     "reps",
+    "cfs",
 ]
 _PRIORITY_ORDER_ROW = [
     "nbm",
@@ -139,6 +145,7 @@ _PRIORITY_ORDER_ROW = [
     "geps",
     "hrdps",
     "reps",
+    "cfs",
 ]
 _PRIORITY_ORDER_AI_NA = [
     "gefs",
@@ -152,6 +159,7 @@ _PRIORITY_ORDER_AI_NA = [
     "era5",
     "hrdps",
     "reps",
+    "cfs",
 ]
 _PRIORITY_ORDER_AI_ROW = [
     "ecmwf",
@@ -165,6 +173,7 @@ _PRIORITY_ORDER_AI_ROW = [
     "era5",
     "hrdps",
     "reps",
+    "cfs",
 ]
 _CANADA_PRECIP_PRIORITY_ORDER = [
     "reps",
@@ -178,6 +187,7 @@ _CANADA_PRECIP_PRIORITY_ORDER = [
     "gefs",
     "gfs",
     "dwd_mosmix",
+    "cfs",
 ]
 _PRECIP_PRIORITY_ORDER_NA = [
     "nbm",
@@ -191,6 +201,7 @@ _PRECIP_PRIORITY_ORDER_NA = [
     "dwd_mosmix",
     "reps",
     "hrdps",
+    "cfs",
 ]
 _PRECIP_PRIORITY_ORDER_ROW = [
     "nbm",
@@ -204,6 +215,7 @@ _PRECIP_PRIORITY_ORDER_ROW = [
     "gdps",
     "reps",
     "hrdps",
+    "cfs",
 ]
 _PRECIP_PRIORITY_ORDER_AI_NA = [
     "gefs",
@@ -217,6 +229,7 @@ _PRECIP_PRIORITY_ORDER_AI_NA = [
     "era5",
     "reps",
     "hrdps",
+    "cfs",
 ]
 _PRECIP_PRIORITY_ORDER_AI_ROW = [
     "ecmwf",
@@ -230,6 +243,7 @@ _PRECIP_PRIORITY_ORDER_AI_ROW = [
     "era5",
     "reps",
     "hrdps",
+    "cfs",
 ]
 
 
@@ -404,6 +418,7 @@ def prepare_data_inputs(
     geps_merged=None,
     urma_merged=None,
     rrfs_merged=None,
+    cfs_merged=None,
 ):
     """
     Prepare data inputs for the hourly block.
@@ -414,6 +429,8 @@ def prepare_data_inputs(
         hrrr_merged: HRRR merged data array.
         rrfs_merged: RRFS merged data array (include=rrfs only), which leads
             every element it provides.
+        cfs_merged: CFS merged data array (future days past the GFS store
+            only), last in every element it provides.
         dwd_mosmix_merged: DWD MOSMIX merged data array.
         ecmwf_merged: ECMWF merged data array.
         gefs_merged: GEFS merged data array.
@@ -523,6 +540,8 @@ def prepare_data_inputs(
         )
         if "geps" in source_list and geps_merged is not None
         else None,
+        # The CFS ingest stores mm/h already (PRATE x 3600)
+        "cfs": cfs_merged[:, CFS["intensity"]] if cfs_merged is not None else None,
     }
 
     era5_rain_intensity = None
@@ -586,6 +605,9 @@ def prepare_data_inputs(
             "era5": era5_merged[:, ERA5["prob"]] * 0.01
             if "era5" in source_list and era5_valid
             else None,
+            # 0-1 from the 4 members; NaN after the store's ensemble_end (member
+            # 01 alone), so those hours have no probability
+            "cfs": cfs_merged[:, CFS["prob"]] if cfs_merged is not None else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -608,6 +630,9 @@ def prepare_data_inputs(
             else None,
             "gefs": (gefs_merged, GEFS, ENSEMBLE_MEMBER_COUNTS["GEFS"])
             if "gefs" in source_list and gefs_merged is not None
+            else None,
+            "cfs": (cfs_merged, CFS, ENSEMBLE_MEMBER_COUNTS["CFS"])
+            if cfs_merged is not None
             else None,
         },
     )
@@ -716,6 +741,15 @@ def prepare_data_inputs(
             )
             if "era5" in source_list and era5_valid
             else None,
+            # CFS has no categorical type. "none" on its hours lets the hourly
+            # block's temperature fallback (TEMP_THRESHOLD_RAIN_C/SNOW_C) type
+            # any precipitation as rain, snow or sleet. Present exactly when its
+            # intensity is, so the type stack lines up with the intensity stack.
+            "cfs": np.where(
+                np.isnan(cfs_merged[:, CFS["intensity"]]), np.nan, PRECIP_IDX["none"]
+            )
+            if cfs_merged is not None
+            else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -742,6 +776,7 @@ def prepare_data_inputs(
             else None,
             "gfs": gfs_merged[:, GFS["temp"]] if gfs_merged is not None else None,
             "era5": era5_merged[:, ERA5["2m_temperature"]] if era5_valid else None,
+            "cfs": cfs_merged[:, CFS["temp"]] if cfs_merged is not None else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -770,6 +805,7 @@ def prepare_data_inputs(
             "era5": era5_merged[:, ERA5["2m_dewpoint_temperature"]]
             if era5_valid
             else None,
+            "cfs": cfs_merged[:, CFS["dew"]] if cfs_merged is not None else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -809,6 +845,7 @@ def prepare_data_inputs(
             else None,
             "gfs": gfs_merged[:, GFS["humidity"]] if gfs_merged is not None else None,
             "era5": era5_humidity,
+            "cfs": cfs_merged[:, CFS["humidity"]] if cfs_merged is not None else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -841,6 +878,7 @@ def prepare_data_inputs(
             "era5": era5_merged[:, ERA5["mean_sea_level_pressure"]]
             if era5_valid
             else None,
+            "cfs": cfs_merged[:, CFS["pressure"]] if cfs_merged is not None else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -892,6 +930,11 @@ def prepare_data_inputs(
                 era5_merged[:, ERA5["10m_v_component_of_wind"]],
             )
             if era5_valid
+            else None,
+            "cfs": _wind_speed(
+                cfs_merged[:, CFS["wind_u"]], cfs_merged[:, CFS["wind_v"]]
+            )
+            if cfs_merged is not None
             else None,
         },
         prioritize_ai_models=prioritize_ai_models,
@@ -970,6 +1013,9 @@ def prepare_data_inputs(
             )
             if era5_valid
             else None,
+            "cfs": _bearing(cfs_merged[:, CFS["wind_u"]], cfs_merged[:, CFS["wind_v"]])
+            if cfs_merged is not None
+            else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -1006,6 +1052,9 @@ def prepare_data_inputs(
             if gfs_merged is not None
             else None,
             "era5": era5_merged[:, ERA5["total_cloud_cover"]] if era5_valid else None,
+            "cfs": cfs_merged[:, CFS["cloud"]] * 0.01
+            if cfs_merged is not None
+            else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -1104,6 +1153,8 @@ def prepare_data_inputs(
             "era5": era5_merged[:, ERA5["total_precipitation"]] * 1000
             if era5_valid
             else None,
+            # An hourly mean rate in mm/h is that hour's accumulation in mm
+            "cfs": cfs_merged[:, CFS["intensity"]] if cfs_merged is not None else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -1136,6 +1187,7 @@ def prepare_data_inputs(
             gdps_merged[:, GDPS["station_pressure"]]
             if gdps_merged is not None
             else None,
+            cfs_merged[:, CFS["station_pressure"]] if cfs_merged is not None else None,
         )
 
     # --- fire_inputs ---
@@ -1181,6 +1233,7 @@ def prepare_data_inputs(
             "era5": era5_merged[:, ERA5["surface_solar_radiation_downwards"]] / 3600
             if era5_valid
             else None,
+            "cfs": cfs_merged[:, CFS["solar"]] if cfs_merged is not None else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -1274,6 +1327,7 @@ def prepare_data_inputs(
         gefs_merged[:, GEFS["error"]] if gefs_merged is not None else None,
         geps_merged[:, GEPS["error"]] if geps_merged is not None else None,
         reps_merged[:, REPS["error"]] if reps_merged is not None else None,
+        cfs_merged[:, CFS["error"]] if cfs_merged is not None else None,
     )
 
     return {

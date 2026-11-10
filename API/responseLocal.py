@@ -46,6 +46,7 @@ from API.constants.forecast_const import (
 )
 from API.constants.model_const import (
     AIGFS,
+    CFS,
     DWD_MOSMIX,
     ECMWF,
     ECMWF_AIFS,
@@ -227,6 +228,7 @@ def convert_data_to_celsius(
     dataOut_rrfs=None,
     dataOut_rrfs_6h=None,
     dataOut_rrfs_subh=None,
+    dataOut_cfs=None,
 ):
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
@@ -263,6 +265,7 @@ def convert_data_to_celsius(
         (dataOut_rrfs, RRFS, ["temp", "dew"]),
         (dataOut_rrfs_6h, RRFS, ["temp", "dew"]),
         (dataOut_rrfs_subh, RRFS_SUBH, ["temp", "dew"]),
+        (dataOut_cfs, CFS, ["temp", "dew"]),
     ]
 
     for data_array, indices_dict, keys in model_mappings:
@@ -439,6 +442,11 @@ async def PW_Forecast(
         if raw is not None
     }
 
+    # The stores held now; a version swapped in mid-request is used from the next
+    # one. CFS's store is taken here because it also sets the future-day horizon.
+    stores = request.app.state.stores
+    cfs_store = stores.CFS_Zarr
+
     # 1. Parse request parameters and initialize variables
     # This function handles all the input validation and setup
     initial = await prepare_initial_request(
@@ -459,6 +467,7 @@ async def PW_Forecast(
         force_now=force_now,
         logger=logger,
         start_time=T_Start,
+        cfs_store=cfs_store,
     )
 
     lat = initial.lat
@@ -510,6 +519,7 @@ async def PW_Forecast(
     exGDPS = initial.ex_gdps
     exGEPS = initial.ex_geps
     exREPS = initial.ex_reps
+    exCFS = initial.ex_cfs
     incAirQualityDetails = initial.inc_airqualitydetails
     inc_day_night = initial.inc_day_night
     summaryText = initial.summary_text
@@ -556,8 +566,6 @@ async def PW_Forecast(
     timer.log("### HRRR Start ###")
 
     # 2. Initialize Zarr sources
-    # The stores held now; a version swapped in mid-request is used from the next one
-    stores = request.app.state.stores
     zarr_sources = ZarrSources(
         subh=stores.SubH_Zarr,
         hrrr_6h=stores.HRRR_6H_Zarr,
@@ -587,6 +595,7 @@ async def PW_Forecast(
         rrfs_subh=stores.RRFS_SubH_Zarr,
         rrfs_na=stores.RRFS_NA_Zarr,
         rrfs_na_6h=stores.RRFS_NA_6H_Zarr,
+        cfs=cfs_store,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores
@@ -619,6 +628,8 @@ async def PW_Forecast(
         ex_librewxr=exLIBREWXR,
         inc_aimodels=incAIModels,
         inc_rrfs=incRRFS,
+        future_day=futureDay,
+        ex_cfs=exCFS,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
         num_hours=numHours,
@@ -652,6 +663,7 @@ async def PW_Forecast(
     dataOut_rrfs = grid_result.dataOut_rrfs
     dataOut_rrfs_6h = grid_result.dataOut_rrfs_6h
     dataOut_rrfs_subh = grid_result.dataOut_rrfs_subh
+    dataOut_cfs = grid_result.dataOut_cfs
 
     ERA5_MERGED = grid_result.era5_merged
 
@@ -676,6 +688,7 @@ async def PW_Forecast(
         dataOut_rrfs=dataOut_rrfs,
         dataOut_rrfs_6h=dataOut_rrfs_6h,
         dataOut_rrfs_subh=dataOut_rrfs_subh,
+        dataOut_cfs=dataOut_cfs,
     )
 
     # 5. Build metadata about the data sources used for this forecast
@@ -765,6 +778,7 @@ async def PW_Forecast(
         if isinstance(dataOut_rrfs_6h, np.ndarray)
         else None,
         rrfs_grid=grid_result.rrfs_grid,
+        data_cfs=dataOut_cfs if isinstance(dataOut_cfs, np.ndarray) else None,
     )
 
     HRRR_Merged = merge_result.hrrr
@@ -957,6 +971,7 @@ async def PW_Forecast(
         reps_merged=REPS_Merged,
         gdps_merged=GDPS_Merged,
         geps_merged=GEPS_Merged,
+        cfs_merged=merge_result.cfs,
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]
@@ -1251,6 +1266,7 @@ async def PW_Forecast(
             ERA5_MERGED=ERA5_MERGED,
             HRDPS_Merged=HRDPS_Merged,
             GDPS_Merged=GDPS_Merged,
+            CFS_Merged=merge_result.cfs,
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,

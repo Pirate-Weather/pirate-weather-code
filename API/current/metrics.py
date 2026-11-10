@@ -46,6 +46,7 @@ from API.constants.forecast_const import (
     DATA_MINUTELY,
 )
 from API.constants.model_const import (
+    CFS,
     DWD_MOSMIX,
     ECMWF,
     ERA5,
@@ -155,6 +156,7 @@ _CURRENTLY_ORDER_CANADA = [
     "gfs",
     "gefs",
     "dwd_mosmix",
+    "cfs",
 ]
 _CURRENTLY_ORDER_NA = [
     "rtma_ru",
@@ -170,6 +172,7 @@ _CURRENTLY_ORDER_NA = [
     "dwd_mosmix",
     "hrdps",
     "reps",
+    "cfs",
 ]
 _CURRENTLY_ORDER_ROW = [
     "rtma_ru",
@@ -185,6 +188,7 @@ _CURRENTLY_ORDER_ROW = [
     "geps",
     "hrdps",
     "reps",
+    "cfs",
 ]
 _CURRENTLY_ORDER_AI_NA = [
     "gefs",
@@ -200,6 +204,7 @@ _CURRENTLY_ORDER_AI_NA = [
     "era5",
     "hrdps",
     "reps",
+    "cfs",
 ]
 _CURRENTLY_ORDER_AI_ROW = [
     "ecmwf_ifs",
@@ -215,6 +220,7 @@ _CURRENTLY_ORDER_AI_ROW = [
     "era5",
     "hrdps",
     "reps",
+    "cfs",
 ]
 
 
@@ -439,6 +445,10 @@ def _get_temp(
                 model_data["ERA5_MERGED"], ERA5["2m_temperature"], state
             ),
         ),
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: _interp_scalar(model_data["CFS_Merged"], CFS["temp"], state),
+        ),
     }
 
     strategies = _build_source_strategies(
@@ -520,6 +530,10 @@ def _get_dew(
             lambda: _interp_scalar(
                 model_data["ERA5_MERGED"], ERA5["2m_dewpoint_temperature"], state
             ),
+        ),
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: _interp_scalar(model_data["CFS_Merged"], CFS["dew"], state),
         ),
     }
 
@@ -627,6 +641,13 @@ def _get_humidity(
                 model_data["ERA5_MERGED"], state, humidUnit
             ),
         ),
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: (
+                _interp_scalar(model_data["CFS_Merged"], CFS["humidity"], state)
+                * humidUnit
+            ),
+        ),
     }
 
     strategies = _build_source_strategies(
@@ -699,6 +720,10 @@ def _get_pressure(
             lambda: _interp_scalar(
                 model_data["ERA5_MERGED"], ERA5["mean_sea_level_pressure"], state
             ),
+        ),
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: _interp_scalar(model_data["CFS_Merged"], CFS["pressure"], state),
         ),
     }
 
@@ -803,6 +828,12 @@ def _get_wind(
                 ERA5["10m_u_component_of_wind"],
                 ERA5["10m_v_component_of_wind"],
                 state,
+            ),
+        ),
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: _interp_uv_magnitude(
+                model_data["CFS_Merged"], CFS["wind_u"], CFS["wind_v"], state
             ),
         ),
     }
@@ -1087,6 +1118,13 @@ def _get_bearing(
                 model_data["ERA5_MERGED"][state.idx2, ERA5["10m_v_component_of_wind"]],
             ),
         ),
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: _bearing_from_components(
+                model_data["CFS_Merged"][state.idx2, CFS["wind_u"]],
+                model_data["CFS_Merged"][state.idx2, CFS["wind_v"]],
+            ),
+        ),
     }
 
     strategies = _build_source_strategies(
@@ -1186,6 +1224,12 @@ def _get_cloud(
                 model_data["ERA5_MERGED"],
                 ERA5["total_cloud_cover"],
                 state,
+            ),
+        ),
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: (
+                _interp_scalar(model_data["CFS_Merged"], CFS["cloud"], state) * 0.01
             ),
         ),
     }
@@ -1293,6 +1337,10 @@ def _get_station_pressure(sourceList, model_data, state: InterpolationState):
         if not np.isfinite(val) and "gfs" in sourceList:
             val = _interp_scalar(
                 model_data["GFS_Merged"], GFS["station_pressure"], state
+            )
+        if not np.isfinite(val) and model_data.get("CFS_Merged") is not None:
+            val = _interp_scalar(
+                model_data["CFS_Merged"], CFS["station_pressure"], state
             )
 
     return clipLog(
@@ -1565,6 +1613,10 @@ def _get_solar(
                 )
                 / 3600
             ),
+        ),
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: _interp_scalar(model_data["CFS_Merged"], CFS["solar"], state),
         ),
     }
 
@@ -1994,6 +2046,7 @@ def build_current_section(
     URMA_Merged=None,
     rrfsSubHInterpolation=None,
     RRFS_Merged=None,
+    CFS_Merged=None,
 ) -> CurrentSection:
     """
     Calculate the currently block and return it alongside the raw array.
@@ -2036,6 +2089,8 @@ def build_current_section(
         hrrrSubHInterpolation: HRRR sub-hourly interpolated data.
         rrfsSubHInterpolation: RRFS minutely interpolation (include=rrfs only).
         RRFS_Merged: RRFS merged data (include=rrfs only).
+        CFS_Merged: CFS merged data (future days past the GFS store only),
+            the last source for each field it has.
         HRRR_Merged: HRRR merged data.
         NBM_Merged: NBM merged data.
         ECMWF_Merged: ECMWF merged data.
@@ -2098,6 +2153,7 @@ def build_current_section(
         "ERA5_MERGED": ERA5_MERGED,
         "HRDPS_Merged": HRDPS_Merged,
         "GDPS_Merged": GDPS_Merged,
+        "CFS_Merged": CFS_Merged,
         "has_hrrr_merged": (
             HRRR_Merged is not None
             and ("hrrr_0-18" in sourceList)

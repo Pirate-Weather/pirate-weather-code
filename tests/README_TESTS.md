@@ -75,7 +75,7 @@ against real stores.
 
 | File | Protects |
 |---|---|
-| `test_request_parsing.py` | Relative and invalid request times; `City,Country[,time]` locations; AI-model mode dropping CMC models; `exclude=` flags (URMA independent of GFS, #746); Time Machine `days`/`hours` sizing and range validation. |
+| `test_request_parsing.py` | Relative and invalid request times; `City,Country[,time]` locations; AI-model mode dropping CMC models; `exclude=` flags (URMA independent of GFS, #746); Time Machine `days`/`hours` sizing and range validation; future-day shape and horizon (218 h, or the CFS store's last hour unless CFS is excluded, missing or stale). |
 | `test_offline_geocode.py` | Country-name normalisation; unknown places returning 404 instead of a NaN location. |
 | `test_filtering_queryparams.py` | The MCP `blocks` and `*_indices` parameters, which return 400 on bad input; version/`include` gating of the air-quality fields (an API-compatibility contract). |
 | `test_mcp_public_url.py` | MCP server: public-origin rewriting behind the proxy, `tmextra` forwarding, `get_forecast` response shaping, City,Country forwarding, and no tool exposing a `version` argument (#641). |
@@ -84,7 +84,7 @@ against real stores.
 
 | File | Protects |
 |---|---|
-| `test_grid_indexing.py` | Point lookup on non-trivial grids: CMC rotated-pole corner and out-of-domain rejection; RAQDPS spherical nearest cell near the antimeridian and poles; ERA5 slice timestamps, precip-type rounding and the 3x3 precip-probability neighbourhood with longitude wrap. |
+| `test_grid_indexing.py` | Point lookup on non-trivial grids: CMC rotated-pole corner and out-of-domain rejection; RAQDPS spherical nearest cell near the antimeridian and poles; ERA5 slice timestamps, precip-type rounding and the 3x3 precip-probability neighbourhood with longitude wrap; future days keep the current GFS run; a far-future day is read from CFS (Gaussian row, column wrap, rows on the day's hours, last in each stack) and CFS is not read otherwise. |
 | `test_era5_cache.py` | The ERA5 read-through disk cache reuses chunks and stays within its size limit (#696); `SKIP_ERA5` disables ERA5 entirely. |
 
 **Source selection and merging**

@@ -3,8 +3,10 @@ Time Machine ranges, as produced by prepare_initial_request.
 """
 
 import datetime
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 from fastapi import HTTPException
 from timezonefinder import TimezoneFinder
@@ -25,7 +27,13 @@ BEIRUT = "33.8938,35.5018"
 
 
 async def _prepare(
-    location, *, query_params=None, exclude=None, include=None, force_now=FORCE_NOW
+    location,
+    *,
+    query_params=None,
+    exclude=None,
+    include=None,
+    force_now=FORCE_NOW,
+    cfs_store=None,
 ):
     """Run prepare_initial_request offline with a fixed "now"."""
     request = MagicMock()
@@ -49,6 +57,7 @@ async def _prepare(
         force_now=str(force_now),
         logger=MagicMock(),
         start_time=NOW,
+        cfs_store=cfs_store,
     )
 
 
@@ -425,3 +434,43 @@ async def test_future_request_returns_the_requested_local_day(
     assert result.output_days == 1
     assert result.output_hours == expected["hours"]
     assert len(result.hour_array) >= expected["hours"]
+
+
+def _cfs_store(run_age_hours):
+    """A CFS store's in-memory times: hourly from run + 6 h for 120 days."""
+    run_time = FORCE_NOW - run_age_hours * 3600
+    return SimpleNamespace(times=run_time + 3600 * (6 + np.arange(120 * 24.0)))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("days_ahead", "cfs_store", "exclude", "limit_hours"),
+    [
+        pytest.param(60, _cfs_store(6), None, None, id="inside-cfs"),
+        # The last stored hour (run + 6 h + 2879 h, the run 6 h ago) is 2879 h ahead
+        pytest.param(125, _cfs_store(6), None, 2879, id="past-cfs-end"),
+        pytest.param(60, _cfs_store(6), "cfs", 218, id="cfs-excluded"),
+        pytest.param(60, _cfs_store(4 * 24), None, 218, id="cfs-stale"),
+        pytest.param(60, None, None, 218, id="cfs-missing"),
+    ],
+)
+async def test_future_horizon_follows_the_cfs_store(
+    days_ahead, cfs_store, exclude, limit_hours
+):
+    """Past the 218 h GFS/GEFS horizon, a future day is served from CFS up to
+    its store's last hour. A day past that store, or any day past 218 h when
+    CFS is excluded, not loaded or stopped updating, must be refused with the
+    limit that applied rather than served without data.
+    """
+    location = f"{NEW_YORK},{FORCE_NOW + days_ahead * 86400}"
+
+    if limit_hours is not None:
+        with pytest.raises(HTTPException, match=f"within {limit_hours} hours") as exc:
+            await _prepare(location, exclude=exclude, cfs_store=cfs_store)
+        assert exc.value.status_code == 400
+        return
+
+    result = await _prepare(location, exclude=exclude, cfs_store=cfs_store)
+    assert result.future_day is True
+    assert result.ex_cfs == 0
+    assert result.output_hours == 24

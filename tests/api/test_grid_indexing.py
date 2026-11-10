@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import tensorstore as ts
 import xarray as xr
 
 from API.constants.model_const import ERA5
@@ -434,3 +435,157 @@ def test_future_request_keeps_the_current_gfs_run():
     )
 
     assert result.dataOut_gfs is gfs_rows
+
+
+def test_far_future_day_is_served_from_cfs_and_only_then_read():
+    """Past the GFS store's last hour a future day (#689) comes from CFS: the
+    day's window is read at the nearest Gaussian cell (longitudes near 360 wrap
+    to column 0), its rows land on the day's hours, and ``cfs`` is listed as a
+    source and fills each element last. CFS is time-chunked and months long, so
+    a forecast request or a future day GFS still covers must not read it at
+    all; that would add a read to every request.
+    """
+    from API.constants.model_const import CFS, GFS
+    from API.constants.shared_const import HISTORY_PERIODS
+    from API.forecast_sources import build_source_metadata, merge_hourly_models
+    from API.io.store_reader import ModelStore, WeatherParallel
+    from tests.helpers.model_arrays import hourly_inputs
+
+    now = datetime.datetime(2026, 11, 10, 12)
+    run_time = now.replace(hour=0, tzinfo=datetime.UTC).timestamp()
+    gfs_rows = np.full((HISTORY_PERIODS["GFS"] + 240, max(GFS.values()) + 1), np.nan)
+    gfs_rows[HISTORY_PERIODS["GFS"] - 1, 0] = run_time
+    gfs_store = SimpleNamespace(
+        shape=(20, 528, 721, 1440), times=run_time + 3600 * np.arange(241.0)
+    )
+
+    # Hourly from run + 6 h for 70 days; only the cell read below holds data.
+    # Stores hold no time column: API column c is store variable c - 1.
+    cfs_times = run_time + 3600 * (6 + np.arange(70 * 24.0))
+    cell_y = 31  # Gaussian row nearest 60 S
+    values = np.full((max(CFS.values()), len(cfs_times), cell_y + 1, 1), np.nan)
+    hour_of_store = np.arange(len(cfs_times))
+    values[CFS["temp"] - 1, :, cell_y, 0] = 250 + hour_of_store % 24
+    values[CFS["intensity"] - 1, :, cell_y, 0] = 0.5
+    values[CFS["prob"] - 1, :, cell_y, 0] = 0.25
+    cfs_store = ModelStore(
+        array=ts.array(values.astype(np.float32)), times=cfs_times, version="test"
+    )
+
+    class _Weather(WeatherParallel):
+        def __init__(self):
+            super().__init__()
+            self.window_reads = []
+
+        async def zarr_read(self, model, _store, x, y):
+            return gfs_rows if model == "GFS" else False
+
+        async def zarr_read_window(self, model, store, x, y, start, end):
+            self.window_reads.append((model, x, y))
+            return await super().zarr_read_window(model, store, x, y, start, end)
+
+    def run(day, future_day):
+        weather = _Weather()
+        result = asyncio.run(
+            calculate_grid_indexing(
+                lat=-60.0,
+                lon=359.9,
+                az_lon=-0.1,
+                utc_time=day + datetime.timedelta(hours=12),
+                now_time=now,
+                time_machine=False,
+                ex_hrrr=1,
+                ex_nbm=1,
+                ex_gfs=0,
+                ex_urma=1,
+                ex_ecmwf=1,
+                ex_gefs=1,
+                ex_rtma_ru=1,
+                ex_dwd_mosmix=1,
+                ex_aigfs=1,
+                ex_aigefs=1,
+                ex_aifs=1,
+                future_day=future_day,
+                read_wmo_alerts=False,
+                base_day_utc=day,
+                num_hours=25,
+                zarr_sources=ZarrSources(
+                    subh=None,
+                    hrrr_6h=None,
+                    hrrr=None,
+                    nbm=None,
+                    gfs=gfs_store,
+                    ecmwf=None,
+                    gefs=None,
+                    cfs=cfs_store,
+                ),
+                weather=weather,
+                logger=logging.getLogger(__name__),
+            )
+        )
+        return result, weather.window_reads
+
+    # Today, and a day 5 days out that GFS covers: no CFS read
+    for day, future_day in (
+        (datetime.datetime(2026, 11, 10), False),
+        (datetime.datetime(2026, 11, 15), True),
+    ):
+        result, window_reads = run(day, future_day)
+        assert window_reads == []
+        assert result.dataOut_cfs is False
+
+    day = datetime.datetime(2027, 1, 9)
+    result, window_reads = run(day, True)
+    assert window_reads == [("CFS", 0, cell_y)]
+
+    base = day.replace(tzinfo=datetime.UTC).timestamp()
+    metadata = build_source_metadata(
+        grid_result=result, era5_merged=False, use_etopo=False, time_machine=False
+    )
+    assert "cfs" in metadata.source_list
+    assert metadata.source_times["cfs"] == "2026-11-10 00Z"
+    merged = merge_hourly_models(
+        metadata=metadata,
+        num_hours=25,
+        base_day_utc_grib=base,
+        data_hrrrh=None,
+        data_h2=None,
+        data_nbm=None,
+        data_gfs=result.dataOut_gfs,
+        data_ecmwf=None,
+        data_gefs=None,
+        data_hrdps=None,
+        data_gdps=None,
+        data_geps=None,
+        data_reps=None,
+        data_dwd_mosmix=None,
+        data_aigfs=None,
+        data_aigefs=None,
+        data_aifs=None,
+        logger=logging.getLogger(__name__),
+        loc_tag="test",
+        data_cfs=result.dataOut_cfs,
+    )
+    np.testing.assert_array_equal(merged.cfs[:, 0], base + 3600 * np.arange(25))
+    hours_since_first_store_time = (base - cfs_times[0]) // 3600 + np.arange(25)
+    np.testing.assert_array_equal(
+        merged.cfs[:, CFS["temp"]], 250 + hours_since_first_store_time % 24
+    )
+
+    # The day is past GFS, so CFS is the value each element takes
+    inputs = hourly_inputs(
+        lat=-60.0,
+        lon=359.9,
+        source_list=merged.metadata.source_list,
+        gfs=merged.gfs,
+        cfs=merged.cfs,
+    )
+    temperature = inputs["temperature_inputs"]
+    np.testing.assert_array_equal(
+        temperature[np.arange(25), np.argmin(np.isnan(temperature), axis=1)],
+        merged.cfs[:, CFS["temp"]],
+    )
+    np.testing.assert_array_equal(inputs["prcipIntensity_inputs"][:, -1], 0.5)
+    np.testing.assert_array_equal(inputs["prcipProbability_inputs"][:, -1], 0.25)
+    # CFS has no type; "none" lets the hourly block type it from temperature
+    np.testing.assert_array_equal(inputs["prcipType_inputs"][:, -1], 0)

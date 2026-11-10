@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 from scipy.spatial import cKDTree
 
+from API.constants.api_const import CFS_MAX_RUN_AGE_HOURS
 from API.constants.grid_const import (
     HRRR_X_MAX,
     HRRR_X_MIN,
@@ -424,6 +425,7 @@ class ZarrSources:
     rrfs_subh: Any = None
     rrfs_na: Any = None
     rrfs_na_6h: Any = None
+    cfs: Any = None
 
 
 @dataclass
@@ -522,6 +524,11 @@ class GridIndexingResult:
     rrfsRunTime: float | None = None
     rrfs6hRunTime: float | None = None
     rrfsSubhRunTime: float | None = None
+    # CFS (future days past the GFS store only): the requested day's rows
+    dataOut_cfs: np.ndarray | bool = False
+    cfsRunTime: float | None = None
+    x_cfs: int | None = None
+    y_cfs: int | None = None
 
 
 def _load_era5_slice(era5_data, lat: float, lon: float, base_day_utc, num_hours: int):
@@ -653,6 +660,32 @@ GEPS_LATS = np.linspace(-90.0, 90.0, 361)
 GEPS_LONS = np.linspace(0.0, 360.0 - 0.5, 720)
 WMO_ALERT_LATS = np.arange(-60, 85, 0.0625)
 WMO_ALERT_LONS = np.arange(-180, 180, 0.0625)
+# CFS: the T126 Gaussian grid, 384 x 190. Rows are the Gaussian latitudes south
+# to north (-89.277 to 89.277; the store pads two NaN rows after them), columns
+# 0 to 359.0625 degrees east every 0.9375 degrees.
+CFS_GRID_NY = 190
+CFS_GRID_NX = 384
+CFS_LATS = np.degrees(np.arcsin(np.polynomial.legendre.leggauss(CFS_GRID_NY)[0]))
+CFS_LON_STEP = 360 / CFS_GRID_NX
+CFS_LONS = np.arange(CFS_GRID_NX) * CFS_LON_STEP
+
+
+def cfs_last_time(cfs_store, now_time: datetime.datetime) -> float | None:
+    """The last stored time (Unix s) of the CFS store, or None when it is not
+    loaded or its run (first time minus the first lead) is older than
+    ``CFS_MAX_RUN_AGE_HOURS``. From the in-memory times, so no read.
+
+    Used for both the future-day horizon (preprocess) and the read decision, so
+    a stale store neither extends the horizon nor gets read.
+    """
+    if cfs_store is None or not len(cfs_store.times):
+        return None
+    run_time = cfs_store.times[0] - FIRST_FORECAST_LEAD_HOURS["CFS"] * 3600
+    now_ts = now_time.replace(tzinfo=datetime.UTC).timestamp()
+    if now_ts - run_time > CFS_MAX_RUN_AGE_HOURS * 3600:
+        logger.warning("OLD CFS")
+        return None
+    return float(cfs_store.times[-1])
 
 
 async def calculate_grid_indexing(
@@ -683,6 +716,8 @@ async def calculate_grid_indexing(
     ex_librewxr: int = 0,
     inc_aimodels: int = 0,
     inc_rrfs: int = 0,
+    future_day: bool = False,
+    ex_cfs: int = 0,
     read_wmo_alerts: bool = True,
     base_day_utc: datetime.datetime | None = None,
     num_hours: int = 0,
@@ -1000,6 +1035,33 @@ async def calculate_grid_indexing(
 
     timer.log("### GFS Detail END ###")
 
+    # CFS (months-out future days) is read only for a future day that runs past
+    # the GFS store's last hour (or any future day while no GFS store is loaded),
+    # so forecast requests and the days GFS covers read nothing more. The check
+    # uses the in-memory store times; only the day's hours are read, one hour
+    # either side for the merge's nearest-row alignment.
+    readCFS = False
+    dataOut_cfs = False
+    cfsRunTime = None
+    x_cfs = None
+    y_cfs = None
+    if future_day and not time_machine and not ex_cfs and base_day_utc is not None:
+        day_start = base_day_utc.replace(tzinfo=datetime.UTC).timestamp()
+        day_last_hour = day_start + (num_hours - 1) * 3600
+        gfs_last_time = (
+            zarr_sources.gfs.times[-1] if zarr_sources.gfs is not None else None
+        )
+        if (gfs_last_time is None or day_last_hour > gfs_last_time) and (
+            cfs_last_time(zarr_sources.cfs, now_time) is not None
+        ):
+            readCFS = True
+            cfsRunTime = (
+                zarr_sources.cfs.times[0] - FIRST_FORECAST_LEAD_HOURS["CFS"] * 3600
+            )
+            # Nearest Gaussian row; columns wrap, so 359.6 E is column 0.
+            y_cfs = int(np.argmin(np.abs(CFS_LATS - lat)))
+            x_cfs = int(np.rint(lon / CFS_LON_STEP)) % CFS_GRID_NX
+
     timer.log("### ECMWF Detail Start ###")
 
     dataOut_ecmwf = False
@@ -1311,6 +1373,15 @@ async def calculate_grid_indexing(
         )
     if readGEFS:
         zarrTasks["GEFS"] = weather.zarr_read("GEFS", zarr_sources.gefs, x_p, y_p)
+    if readCFS:
+        zarrTasks["CFS"] = weather.zarr_read_window(
+            "CFS",
+            zarr_sources.cfs,
+            x_cfs,
+            y_cfs,
+            day_start - 3600,
+            day_last_hour + 3600,
+        )
     if readHRDPS:
         zarrTasks["HRDPS"] = weather.zarr_read(
             "HRDPS", zarr_sources.hrdps, x_hrdps, y_hrdps
@@ -1612,6 +1683,19 @@ async def calculate_grid_indexing(
                 logger.debug("Failed to parse GEFS runtime for freshness check")
         else:
             gefsRunTime = None
+
+    if readCFS:
+        # Freshness was checked before the read (cfs_last_time)
+        dataOut_cfs = zarr_results["CFS"]
+        if dataOut_cfs is False:
+            cfsRunTime = None
+        else:
+            sourceIDX["cfs"] = {
+                "x": x_cfs,
+                "y": y_cfs,
+                "lat": round(float(CFS_LATS[y_cfs]), 2),
+                "lon": round(((float(CFS_LONS[x_cfs]) + 180) % 360) - 180, 2),
+            }
 
     if readHRDPS:
         dataOut_hrdps = zarr_results["HRDPS"]
@@ -1997,4 +2081,8 @@ async def calculate_grid_indexing(
         rrfsRunTime=rrfsRunTime,
         rrfs6hRunTime=rrfs6hRunTime,
         rrfsSubhRunTime=rrfsSubhRunTime,
+        dataOut_cfs=dataOut_cfs,
+        cfsRunTime=cfsRunTime,
+        x_cfs=x_cfs,
+        y_cfs=y_cfs,
     )

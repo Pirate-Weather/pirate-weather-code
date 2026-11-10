@@ -59,19 +59,24 @@ def _rows_with_time(model_data):
     without a time inside the span keeps its NaN values and gets its time from
     its neighbours, so missing data stays missing instead of being bridged.
 
+    A model with a single timed row is dropped too: on a future day (#689) a
+    store whose last hour is the day's local midnight leaves one row, which the
+    interpolations' ``[:, 0].squeeze()`` turns into a 0-d array that np.interp
+    rejects, and one hour can't be interpolated across the minutes anyway.
+
     Returns:
-        The array with a finite, increasing time column, or None when no row
-        has a time.
+        The array with a finite, increasing time column, or None when fewer
+        than two rows have a time.
     """
     if model_data is None or len(model_data) == 0:
         return model_data
 
     times = model_data[:, 0]
     has_time = np.isfinite(times)
+    if np.count_nonzero(has_time) < 2:
+        return None
     if has_time.all():
         return model_data
-    if not has_time.any():
-        return None
 
     timed_rows = np.flatnonzero(has_time)
     trimmed = model_data[timed_rows[0] : timed_rows[-1] + 1]

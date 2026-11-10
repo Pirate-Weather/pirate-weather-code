@@ -44,6 +44,8 @@ ENSEMBLE_MEMBER_COUNTS = {
     "REPS": 21,
     "ECMWF_IFS": 51,
     "ECMWF_AIFS": 51,
+    # CFSv2: the four members of one 00Z cycle (ingest/CFS_Local_Ingest.py)
+    "CFS": 4,
 }
 
 
@@ -94,4 +96,5 @@ FIRST_FORECAST_LEAD_HOURS = {
     "AIGEFS": 6,
     "ECMWF_AIFS": 6,
     "RAQDPS": 0,
+    "CFS": 6,
 }

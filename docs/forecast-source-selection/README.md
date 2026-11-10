@@ -98,9 +98,9 @@ ensemble-precipitation fields rather than temperature fields.
 
 | Region | Priority |
 | --- | --- |
-| Canada | HRDPS → REPS → GDPS → GEPS → NBM → HRRR → ECMWF IFS → GFS → GEFS → DWD MOSMIX → ERA5 |
-| North America outside Canada | NBM → HRRR → ECMWF IFS → GFS → GEFS → GDPS → GEPS → DWD MOSMIX → ERA5 → HRDPS → REPS |
-| Global / standard | NBM → HRRR → DWD MOSMIX → ECMWF IFS → GFS → GEFS → GDPS → GEPS → ERA5 → HRDPS → REPS |
+| Canada | HRDPS → REPS → GDPS → GEPS → NBM → HRRR → ECMWF IFS → GFS → GEFS → DWD MOSMIX → ERA5 → CFS |
+| North America outside Canada | NBM → HRRR → ECMWF IFS → GFS → GEFS → GDPS → GEPS → DWD MOSMIX → ERA5 → HRDPS → REPS → CFS |
+| Global / standard | NBM → HRRR → DWD MOSMIX → ECMWF IFS → GFS → GEFS → GDPS → GEPS → ERA5 → HRDPS → REPS → CFS |
 
 When `include=aimodels` is enabled, the compatible AI model is placed ahead of
 the conventional order. In North America, AIGEFS leads ensemble precipitation
@@ -115,9 +115,9 @@ requested field.
 
 | Region | Priority for compatible surface elements |
 | --- | --- |
-| Canada | RTMA-RU → HRRR SubH → HRDPS → GDPS → NBM → HRRR → ECMWF IFS → GFS → DWD MOSMIX → ERA5 |
-| North America outside Canada | RTMA-RU → HRRR SubH → NBM → HRRR → ECMWF IFS → GFS → GDPS → DWD MOSMIX → ERA5 → HRDPS |
-| Global / standard | RTMA-RU → HRRR SubH → NBM → HRRR → DWD MOSMIX → ECMWF IFS → GFS → GDPS → ERA5 → HRDPS |
+| Canada | RTMA-RU → HRRR SubH → HRDPS → GDPS → NBM → HRRR → ECMWF IFS → GFS → DWD MOSMIX → ERA5 → CFS |
+| North America outside Canada | RTMA-RU → HRRR SubH → NBM → HRRR → ECMWF IFS → GFS → GDPS → DWD MOSMIX → ERA5 → HRDPS → CFS |
+| Global / standard | RTMA-RU → HRRR SubH → NBM → HRRR → DWD MOSMIX → ECMWF IFS → GFS → GDPS → ERA5 → HRDPS → CFS |
 
 With AI models enabled, compatible AI data is selected before RTMA-RU, HRRR
 SubH, NBM, and the other conventional sources.
@@ -211,11 +211,11 @@ fall back to the hourly maximum.
 
 | Element | Effective priority |
 | --- | --- |
-| Precipitation intensity | HRDPS → GDPS → NBM → HRRR → ECMWF IFS → GEFS → GFS → DWD MOSMIX → ERA5 |
-| Precipitation probability | REPS → GEPS → NBM → ECMWF IFS → GEFS → ERA5 |
-| Precipitation type | REPS → GEPS → HRDPS → GDPS → NBM → HRRR → ECMWF IFS → GEFS → GFS → DWD MOSMIX → ERA5 |
-| Precipitation accumulation | HRDPS → REPS → GDPS → GEPS → NBM → HRRR → ECMWF IFS → GFS → GEFS → DWD MOSMIX → ERA5 |
-| Precipitation error | ECMWF IFS → GEFS → GEPS → REPS |
+| Precipitation intensity | HRDPS → GDPS → NBM → HRRR → ECMWF IFS → GEFS → GFS → DWD MOSMIX → ERA5 → CFS |
+| Precipitation probability | REPS → GEPS → NBM → ECMWF IFS → GEFS → ERA5 → CFS |
+| Precipitation type | REPS → GEPS → HRDPS → GDPS → NBM → HRRR → ECMWF IFS → GEFS → GFS → DWD MOSMIX → ERA5 → CFS |
+| Precipitation accumulation | HRDPS → REPS → GDPS → GEPS → NBM → HRRR → ECMWF IFS → GFS → GEFS → DWD MOSMIX → ERA5 → CFS |
+| Precipitation error | ECMWF IFS → GEFS → GEPS → REPS → CFS |
 
 ### Outside the Canada, conventional mode
 
@@ -223,6 +223,7 @@ For North America, NBM and HRRR remain ahead of ECMWF IFS, GFS/GEFS, GDPS/GEPS,
 and global fallbacks. For global locations, DWD MOSMIX is considered before
 ECMWF IFS when a valid station forecast is available. GDPS and GEPS are placed
 after GFS/GEFS and before the lower-priority fallback sources they support.
+CFS is last in every one of these stacks (see below).
 
 ## Element-coverage exceptions
 
@@ -239,6 +240,46 @@ an element:
 | CAPE | NBM → HRRR → HRDPS → GDPS → GFS-compatible source → ERA5 |
 | Smoke | HRRR, with SILAM used for air-quality detail where applicable |
 | Air quality | RAQDPS → SILAM; carbon monoxide uses SILAM |
+
+## Future days and CFS
+
+A request for a future `time` (more than an hour ahead) returns that local day
+in Time Machine shape: `currently` at the requested time, hourly from local
+midnight to the next, one daily point, no minutely or alerts. The day must end
+within 218 h of now (`FUTURE_FORECAST_MAX_HOURS`, the 240 h GFS/GEFS stores
+allowing a ~22 h old run), or, while the CFS store is loaded and its run is at
+most 3 days old (`CFS_MAX_RUN_AGE_HOURS`), within the CFS store's last hour
+(about 6 months). A later day is a 400 that states the limit that applied.
+`exclude=cfs`, a missing CFS store or a stale one restore the 218 h limit. Time
+Machine never reads CFS.
+
+CFS (CFSv2, T126 Gaussian grid, ~0.94°, 00Z run once a day) is read only for a
+future day whose last hour is after the GFS store's last hour, and then only
+that day's hours, so forecast requests and the days GFS covers read nothing
+more. It is last in every hourly, daily and `currently` priority order, for
+every element it has, so a day that straddles the end of GFS takes GFS (and
+any other model still running) first and CFS for the remaining hours. It is
+listed in `flags.sources`, `flags.sourceTimes` and (version 2) `sourceIDX`.
+
+- **Elements:** temperature, dew point, humidity, sea-level and station
+  pressure, wind speed and bearing, cloud cover, solar radiation, precipitation
+  intensity and accumulation, probability and intensity error.
+- **Precipitation type:** CFS has no categorical type; its hours are typed rain,
+  snow or sleet from temperature (`TEMP_THRESHOLD_RAIN_C` / `_SNOW_C`).
+- **Ensemble hand-over:** while all four members of the run exist (about 110
+  days from the 00Z run; the store's `ensemble_end` attribute) values are the
+  4-member mean, probability and error come from the members, and the daily
+  probability is the share of the 4 members wet at any hour (so 0, 0.25, 0.5,
+  0.75 or 1). After that member 01 runs alone: state variables and intensity
+  continue, but hourly and daily `precipProbability` and `precipIntensityError`
+  are missing (-999).
+- **Missing:** gust (falls back to wind speed, as for any model without it),
+  visibility, UV index, ozone, CAPE and the other thunderstorm indices, smoke,
+  nearest storm and feels-like temperature come back missing (-999) for hours
+  only CFS covers.
+- **Minutely:** CFS is not a minutely source, so `currently` precipitation
+  intensity, probability and error (copied from the first minute) come back 0
+  on hours only CFS covers.
 
 ## Fallback behavior
 

@@ -197,6 +197,27 @@ with `recheck_cached_data="open"`; "capped" also limits tensorstore's
 4. **Hosts:** API hosts with enough RAM for the page cache to hold all
    compressed stores (64 GB or more); ingest VMs with 32 GB.
 
+## 10. CFS time chunks (2026-11-10)
+
+CFS holds 4,411 hourly steps (6 months, 13 variables, 192 x 384 cells) and a
+future-day request reads ~24-30 of them, so its time axis is chunked
+(`FINAL_TIME_CHUNKS`). Measured on the 2026-11-10 00Z store rewritten with each
+layout (3 x 3 cell chunks, 24 x 24 cell shards, 2400 h time shards; "all times" is the
+layout every other store uses). Reads are tensorstore point reads at 300 random
+cells and window starts, page cache warm, tensorstore cache off, 8-core VM.
+
+| Time chunk | Store | Files | 30 h window, median / p90 | All times, median / p90 |
+|---|---|---|---|---|
+| all times | 2,185 MiB | 129 | 1.53 / 1.72 ms | 1.64 / 1.82 ms |
+| 120 h | 2,477 MiB | 257 | 0.23 / 0.27 ms | 0.75 / 0.99 ms |
+| **240 h** (chosen) | 2,417 MiB | 257 | 0.29 / 0.35 ms | 0.67 / 0.92 ms |
+| 480 h | 2,361 MiB | 257 | 0.38 / 0.59 ms | 0.77 / 1.05 ms |
+
+240 h reads a day 5x faster than one all-times chunk for 11% more storage; 120 h
+saves another 0.06 ms for 60 MiB more on every node's daily sync. (All-times reads
+of the chunked layouts are faster than the single chunk because tensorstore
+decodes the chunks in parallel.)
+
 ## Not yet measured
 
 - The Rust `zarrs` extension and the custom reader under the multi-process

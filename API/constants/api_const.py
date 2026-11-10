@@ -120,7 +120,7 @@ PRECIP_ACCUM_NOISE_THRESHOLD = (
 
 # API versioning and ingest version constants
 # Version scheme is: Major.Minor.Patch using semantic versioning
-API_VERSION = "V3.0.0a6"
+API_VERSION = "V3.0.0a7"
 
 # Generic API constants
 MAX_S3_RETRIES = 5
@@ -160,6 +160,11 @@ TIME_MACHINE_CONST = {
 # must be within 240 - 22 = 218 h of now: the rest of today and roughly the next
 # eight days, about 9 days ahead.
 FUTURE_FORECAST_MAX_HOURS = 218
+# Past that, a future day is served from CFS (ingest/CFS_Local_Ingest.py) up to
+# the last hour of its store (the ingest caps it at 6 months). The ingest runs
+# once a day, so a run older than three days means it has stopped; the horizon
+# then falls back to FUTURE_FORECAST_MAX_HOURS.
+CFS_MAX_RUN_AGE_HOURS = 72
 
 # Filename constants
 FILENAME_TIMESTAMP_SLICE_LENGTH = 12
