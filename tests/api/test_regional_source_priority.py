@@ -146,11 +146,14 @@ def test_currently_source_order_by_region(location, ai, expected):
     the reanalysis wins and GFS history fills the hours ERA5 hasn't reached.
     """
     sources = AI_CURRENT_SOURCES if ai else CONVENTIONAL_CURRENT_SOURCES
-    source_map = {name: name for name in sources}
+    # Each strategy ends with its source name
+    source_map = {name: () for name in sources}
 
-    order = _build_source_strategies(source_map, *location, prioritize_ai_models=ai)
+    strategies = _build_source_strategies(
+        source_map, *location, prioritize_ai_models=ai
+    )
 
-    assert order == expected
+    assert [strategy[-1] for strategy in strategies] == expected
 
 
 @pytest.mark.parametrize(
@@ -270,9 +273,9 @@ def test_include_rrfs_leads_every_element_even_in_canada(ai):
     asked for RRFS. Without RRFS data the orders are the existing ones (the
     tests above).
     """
-    source_map = {name: name for name in (*AI_CURRENT_SOURCES, "rrfssubh", "rrfs")}
+    source_map = {name: () for name in (*AI_CURRENT_SOURCES, "rrfssubh", "rrfs")}
     order = _build_source_strategies(source_map, *OTTAWA, prioritize_ai_models=ai)
-    assert order[:2] == ["rrfssubh", "rrfs"]
+    assert [strategy[-1] for strategy in order[:2]] == ["rrfssubh", "rrfs"]
 
     merged = {
         "rrfs": model_array(RRFS, 3, temp=5.0, intensity=1 / 3600, accum=1.0),

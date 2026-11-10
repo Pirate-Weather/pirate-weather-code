@@ -195,7 +195,12 @@ def _aggregate_stats(
 
 
 def _member_precip_share(
-    precip_member_masks, index_arrays, daily_days, first_forecast_row
+    precip_member_masks,
+    index_arrays,
+    daily_days,
+    first_forecast_row,
+    *,
+    with_sources=False,
 ):
     """Share of ensemble members with precipitation at any hour of each window.
 
@@ -215,7 +220,8 @@ def _member_precip_share(
     ``index_arrays`` holds one day index per window (midnight, 6am, ...); all
     windows are reduced in one pass, since numpy call overhead, not the few
     hundred rows, sets the cost. Returns a (window, day) array, NaN where no
-    source covers a day.
+    source covers a day; with ``with_sources``, also the (window, day) index
+    into ``precip_member_masks`` of the source each share came from (-1: none).
     """
     windows = len(index_arrays)
     rows = np.arange(index_arrays[0].size)
@@ -243,7 +249,8 @@ def _member_precip_share(
     run_starts = np.searchsorted(day_of_row, np.flatnonzero(has_rows))
     best_share = np.full(slots, np.nan)
     best_hours = np.zeros(slots)
-    for _, words, member_count in precip_member_masks:
+    best_source = np.full(slots, -1)
+    for source_index, (_, words, member_count) in enumerate(precip_member_masks):
         words = np.tile(words, (windows, 1))[in_window]
         covered = ~np.isnan(words).any(axis=1)
         if not covered.any():
@@ -257,17 +264,27 @@ def _member_precip_share(
         take = covered_hours > best_hours
         best_share[take] = share[take]
         best_hours[take] = covered_hours[take]
+        best_source[take] = source_index
         if np.array_equal(best_hours, hours_per_slot):
             break  # every slot fully covered; later sources cannot win
+    if with_sources:
+        return (
+            best_share.reshape(windows, daily_days),
+            best_source.reshape(windows, daily_days),
+        )
     return best_share.reshape(windows, daily_days)
 
 
 def _raise_prob_to_member_share(max_arr, prob_column, share):
     """Replace a window's maximum hourly probability by the member share where
     that is higher. The share goes through the same noise threshold as the
-    hourly probability; a day no ensemble covers keeps the hourly maximum."""
+    hourly probability; a day no ensemble covers keeps the hourly maximum.
+    Returns the days whose probability now comes from the member share."""
     share = zero_small_values(share.copy(), threshold=PRECIP_PROB_NOISE_THRESHOLD)
-    max_arr[:, prob_column] = np.fmax(max_arr[:, prob_column], share)
+    hourly_max = max_arr[:, prob_column]
+    raised = np.isfinite(share) & ~(share <= hourly_max)
+    max_arr[:, prob_column] = np.fmax(hourly_max, share)
+    return raised
 
 
 def _select_precip_type(window_sum, most_common_type, prepAccumUnit, logger, loc_tag):
@@ -758,6 +775,7 @@ def build_daily_section(
     hour_columns: HourColumns | None = None,
     current_hour_time: int | None = None,
     precip_member_masks=None,
+    used_sources: set | None = None,
 ) -> DailySection:
     """
     Build all daily- and half-day-level objects.
@@ -811,6 +829,8 @@ def build_daily_section(
         precip_member_masks: The ensembles' per-hour member bitmask words in
             priority order (``prepare_data_inputs``), for the daily
             precipitation probability; None or empty keeps the hourly maximum.
+        used_sources: Set the ensembles whose member share became a returned
+            probability are added to (flags.sources), or None.
 
     Returns:
         DailySection object containing the daily forecast.
@@ -909,11 +929,21 @@ def build_daily_section(
         windows = [hourlyDayIndex, hourlyDay6amIndex]
         if include_day_night:
             windows += [hourlyHalfDayIndex, hourlyHalfNightIndex]
-        member_share = _member_precip_share(
-            precip_member_masks, windows, daily_days, first_forecast_row
+        member_share, member_source = _member_precip_share(
+            precip_member_masks,
+            windows,
+            daily_days,
+            first_forecast_row,
+            with_sources=True,
         )
-        _raise_prob_to_member_share(InterPdayMax, DATA_DAY["prob"], member_share[0])
-        _raise_prob_to_member_share(InterPdayMax6am, DATA_DAY["prob"], member_share[1])
+        raised = [
+            _raise_prob_to_member_share(
+                InterPdayMax, DATA_DAY["prob"], member_share[0]
+            ),
+            _raise_prob_to_member_share(
+                InterPdayMax6am, DATA_DAY["prob"], member_share[1]
+            ),
+        ]
 
     maxPchanceDay = _select_precip_type(
         InterPdaySum, maxPchanceDay, prepAccumUnit, logger, loc_tag
@@ -939,8 +969,10 @@ def build_daily_section(
                 hourly_bearing, half_index, daily_days
             )
             if precip_member_masks:
-                _raise_prob_to_member_share(
-                    half_max, DATA_HOURLY["prob"], member_share[2 + half]
+                raised.append(
+                    _raise_prob_to_member_share(
+                        half_max, DATA_HOURLY["prob"], member_share[2 + half]
+                    )
                 )
             half_type = _select_precip_type(
                 half_sum, half_type, prepAccumUnit, logger, loc_tag
@@ -1423,6 +1455,13 @@ def build_daily_section(
 
         dayTextList.append(dayObject["summary"])
         dayIconList.append(dayIcon)
+
+    # The ensembles whose member share replaced a day's hourly maximum supplied
+    # that returned probability
+    if used_sources is not None and precip_member_masks:
+        for window, window_raised in enumerate(raised):
+            for source_index in np.unique(member_source[window][window_raised]):
+                used_sources.add(precip_member_masks[source_index][0])
 
     return DailySection(
         day_list=dayList,

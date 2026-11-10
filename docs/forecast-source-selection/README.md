@@ -19,8 +19,19 @@ Source selection follows this process:
 3. Build an ordered, element-specific list of compatible sources.
 4. Select the first non-missing value at each timestamp.
 
-The `flags.sources` field reports the models that were available to a request.
-It is not a per-element record of the model that produced every output value.
+In version 2 responses, `flags.sources` and `flags.sourceTimes` list the
+models that supplied at least one returned value: each selection records the
+model it took (per hour for the hourly elements), and a model counts when its
+values reach a returned block. The hourly block counts its returned hours
+(48, or 168 with `extend=hourly`); the daily and day/night blocks count every
+hour, since each feeds a day's aggregate, plus the ensembles whose member share
+became a day's precipitation probability; `currently` counts its own
+selections and the minutely ones (its precipitation is the first minute's).
+ETOPO1 is always listed, for the elevation. Under `include=aimodels` the AI
+model and the conventional model it is merged into are each listed only for
+the hours they supplied. `flags.sourceIDX` still describes every model read,
+and version 1 responses keep listing every available model. The flags are not
+a per-element record of the model that produced each value.
 
 Daily and day/night values aggregate the selected hourly values. They do not
 perform a separate model-selection pass.
@@ -85,7 +96,8 @@ read. When it is present:
 - RRFS provides no precipitation probability or error, so those keep their
   usual sources.
 - `flags.sources` lists `rrfs_0-18` / `rrfs_18-83` (CONUS) or `rrfs_na_0-18` /
-  `rrfs_na_18-83` (North America), and `rrfssubh`.
+  `rrfs_na_18-83` (North America), and `rrfssubh`. The two hourly stores are
+  merged, so both are listed whenever hourly RRFS supplied a value.
 
 Time Machine requests never read RRFS, which keeps no history.
 

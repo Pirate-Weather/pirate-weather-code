@@ -87,22 +87,28 @@ class InterpolationState:
     fac2: float
 
 
-def _select_value(strategies, default=MISSING_DATA):
+def _select_value(strategies, default=MISSING_DATA, used=None):
     """
     Select the first valid (non-NaN) value from a list of strategies.
 
     Args:
-        strategies: List of (predicate, getter) tuples.
+        strategies: List of (predicate, getter, source) tuples; source is the
+            name added to ``used`` when that strategy supplies the value, or
+            None for a value derived from fields already selected.
         default: Default value if no strategy matches or all return NaN.
+        used: Set collecting the sources that supplied a value (flags.sources),
+            or None.
 
     Returns:
         Selected value or default.
     """
-    for predicate, getter in strategies:
+    for predicate, getter, source in strategies:
         if predicate():
             val = getter()
             # Check if value is valid (not NaN) before returning
             if val is not None and not np.isnan(val):
+                if used is not None and source is not None:
+                    used.add(source)
                 return val
     return default
 
@@ -237,7 +243,7 @@ def _build_source_strategies(
         prioritize_ai_models: Whether to prioritize AI model sources in the stacking order.
 
     Returns:
-        List of (predicate, getter) tuples in priority order.
+        List of (predicate, getter, source) tuples in priority order.
     """
     if is_in_canada(lat, lon) and not prioritize_ai_models:
         order = _CURRENTLY_ORDER_CANADA
@@ -266,7 +272,7 @@ def _build_source_strategies(
     strategies = []
     for source in order:
         if source in source_map:
-            strategies.append(source_map[source])
+            strategies.append((*source_map[source], source))
 
     return strategies
 
@@ -448,7 +454,7 @@ def _get_temp(
         has_ecmwf=True,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return clipLog(val, CLIP_TEMP["min"], CLIP_TEMP["max"], "Temperature Current")
 
 
@@ -530,7 +536,7 @@ def _get_dew(
         has_ecmwf=True,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return clipLog(val, CLIP_TEMP["min"], CLIP_TEMP["max"], "Dewpoint Current")
 
 
@@ -636,7 +642,7 @@ def _get_humidity(
         has_ecmwf=True,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return clipLog(val, CLIP_HUMIDITY["min"], CLIP_HUMIDITY["max"], "Humidity Current")
 
 
@@ -709,7 +715,7 @@ def _get_pressure(
         has_ecmwf=True,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return clipLog(val, CLIP_PRESSURE["min"], CLIP_PRESSURE["max"], "Pressure Current")
 
 
@@ -814,7 +820,7 @@ def _get_wind(
         has_ecmwf=True,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return clipLog(val, CLIP_WIND["min"], CLIP_WIND["max"], "WindSpeed Current")
 
 
@@ -893,7 +899,9 @@ def _get_gust(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies, default=MISSING_DATA)
+    val = _select_value(
+        strategies, default=MISSING_DATA, used=model_data.get("used_sources")
+    )
     return clipLog(val, CLIP_WIND["min"], CLIP_WIND["max"], "Gust Current")
 
 
@@ -972,6 +980,9 @@ def _get_intensity(
         # A time-machine hour ERA5 doesn't have yet (NaN) falls through to the
         # other sources (GFS history) below.
         if np.isfinite(intensity):
+            used = model_data.get("used_sources")
+            if used is not None:
+                used.add("era5")
             snow_intensity = estimate_snow_height(
                 np.array([era5_current_snow_we]),
                 np.array([InterPcurrent[DATA_CURRENT["temp"]]]),
@@ -1096,7 +1107,9 @@ def _get_bearing(
         has_ecmwf=True,
         prioritize_ai_models=prioritize_ai_models,
     )
-    return _select_value(strategies, default=MISSING_DATA)
+    return _select_value(
+        strategies, default=MISSING_DATA, used=model_data.get("used_sources")
+    )
 
 
 def _get_cloud(
@@ -1197,7 +1210,9 @@ def _get_cloud(
         has_ecmwf=True,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies, default=MISSING_DATA)
+    val = _select_value(
+        strategies, default=MISSING_DATA, used=model_data.get("used_sources")
+    )
     return clipLog(val, CLIP_CLOUD["min"], CLIP_CLOUD["max"], "Cloud Current")
 
 
@@ -1262,11 +1277,13 @@ def _get_uv(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies, default=MISSING_DATA)
+    val = _select_value(
+        strategies, default=MISSING_DATA, used=model_data.get("used_sources")
+    )
     return clipLog(val, CLIP_UV["min"], CLIP_UV["max"], "UV Current")
 
 
-def _get_station_pressure(sourceList, model_data, state: InterpolationState):
+def _get_station_pressure(sourceList, model_data, state: InterpolationState, used=None):
     """
     Get current station pressure from available sources.
 
@@ -1274,26 +1291,35 @@ def _get_station_pressure(sourceList, model_data, state: InterpolationState):
         sourceList: List of available sources.
         model_data: Dictionary of model data.
         state: Interpolation state.
+        used: Set to add the supplying source to (flags.sources), or None; only
+            given when stationPressure is returned.
 
     Returns:
         Current station pressure.
     """
     val = MISSING_DATA
+    source = None
     if "rtma_ru" in sourceList and "urma" not in sourceList:
         val = model_data["dataOut_rtma_ru"][0, RTMA_RU["pressure"]]
+        source = "rtma_ru"
     else:
         # URMA, then ERA5 ahead of GFS, each filling what the one before lacks
         # (in time machine, an hour ERA5 doesn't have yet falls to GFS history).
         if "urma" in sourceList:
             val = _interp_scalar(model_data["URMA_Merged"], URMA["pressure"], state)
+            source = "urma"
         if not np.isfinite(val) and "era5" in sourceList:
             val = _interp_scalar(
                 model_data["ERA5_MERGED"], ERA5["surface_pressure"], state
             )
+            source = "era5"
         if not np.isfinite(val) and "gfs" in sourceList:
             val = _interp_scalar(
                 model_data["GFS_Merged"], GFS["station_pressure"], state
             )
+            source = "gfs"
+    if used is not None and source is not None and np.isfinite(val):
+        used.add(source)
 
     return clipLog(
         val,
@@ -1383,7 +1409,9 @@ def _get_vis(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies, default=MISSING_DATA)
+    val = _select_value(
+        strategies, default=MISSING_DATA, used=model_data.get("used_sources")
+    )
     return np.clip(val, CLIP_VIS["min"], CLIP_VIS["max"])
 
 
@@ -1438,7 +1466,9 @@ def _get_ozone(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies, default=MISSING_DATA)
+    val = _select_value(
+        strategies, default=MISSING_DATA, used=model_data.get("used_sources")
+    )
     return clipLog(val, CLIP_OZONE["min"], CLIP_OZONE["max"], "Ozone Current")
 
 
@@ -1463,6 +1493,9 @@ def _get_storm(sourceList, model_data, state: InterpolationState):
             0,
         )
         bearing = model_data["GFS_Merged"][state.idx2, GFS["storm_dir"]]
+        used = model_data.get("used_sources")
+        if used is not None and np.isfinite(dist):
+            used.add("gfs")
         return dist, bearing
     else:
         return MISSING_DATA, MISSING_DATA
@@ -1480,18 +1513,23 @@ def _get_smoke(sourceList, model_data, state: InterpolationState):
     Returns:
         Current smoke.
     """
+    used = model_data.get("used_sources")
     if model_data.get("RRFS_Merged") is not None:
         val = (
             model_data["RRFS_Merged"][state.idx1, RRFS["smoke"]] * state.fac1
             + model_data["RRFS_Merged"][state.idx2, RRFS["smoke"]] * state.fac2
         )
         if not np.isnan(val):
+            if used is not None:
+                used.add("rrfs")
             return clipLog(val, CLIP_SMOKE["min"], CLIP_SMOKE["max"], "Smoke Current")
     if model_data["has_hrrr_merged"]:
         val = (
             model_data["HRRR_Merged"][state.idx1, HRRR["smoke"]] * state.fac1
             + model_data["HRRR_Merged"][state.idx2, HRRR["smoke"]] * state.fac2
         )
+        if used is not None and not np.isnan(val):
+            used.add("hrrr")
         return clipLog(val, CLIP_SMOKE["min"], CLIP_SMOKE["max"], "Smoke Current")
     else:
         return MISSING_DATA
@@ -1575,7 +1613,9 @@ def _get_solar(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies, default=MISSING_DATA)
+    val = _select_value(
+        strategies, default=MISSING_DATA, used=model_data.get("used_sources")
+    )
     return clipLog(val, CLIP_SOLAR["min"], CLIP_SOLAR["max"], "Solar Current")
 
 
@@ -1640,7 +1680,7 @@ def _get_cape(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return clipLog(val, CLIP_CAPE["min"], CLIP_CAPE["max"], "CAPE Current")
 
 
@@ -1665,12 +1705,14 @@ def _get_feels_like(
             (
                 lambda: timeMachine and model_data.get("urma_active_current", False),
                 lambda: apparent,
+                None,
             ),
             (
                 lambda: "nbm" in sourceList,
                 lambda: _interp_scalar(
                     model_data["NBM_Merged"], NBM["apparent"], state
                 ),
+                "nbm",
             ),
             # Time machine with ERA5 for this hour: computed from ERA5's
             # temperature, wind and humidity, ahead of GFS's apparent temperature.
@@ -1685,16 +1727,19 @@ def _get_feels_like(
                     )
                 ),
                 lambda: apparent,
+                None,
             ),
             (
                 lambda: "gfs" in sourceList,
                 lambda: _interp_scalar(
                     model_data["GFS_Merged"], GFS["apparent"], state
                 ),
+                "gfs",
             ),
-            (lambda: timeMachine, lambda: apparent),
+            (lambda: timeMachine, lambda: apparent, None),
         ],
         default=MISSING_DATA,
+        used=model_data.get("used_sources"),
     )
     return clipLog(
         val, CLIP_TEMP["min"], CLIP_TEMP["max"], "Apparent Temperature Current"
@@ -1785,7 +1830,7 @@ def _get_lifted_index(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return clipLog(
         val, CLIP_LIFTED_INDEX["min"], CLIP_LIFTED_INDEX["max"], "Lifted Index Current"
     )
@@ -1841,7 +1886,7 @@ def _get_vertical_velocity(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return clipLog(
         val,
         CLIP_VERTICAL_VELOCITY["min"],
@@ -1895,7 +1940,7 @@ def _get_convective_inhibition(
         prioritize_ai_models=prioritize_ai_models,
     )
     # Use np.clip instead of clipLog to prevent -999 for values above 0
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return np.clip(val, CLIP_CIN["min"], CLIP_CIN["max"])
 
 
@@ -1935,7 +1980,7 @@ def _get_k_index(
         has_ecmwf=False,
         prioritize_ai_models=prioritize_ai_models,
     )
-    val = _select_value(strategies)
+    val = _select_value(strategies, used=model_data.get("used_sources"))
     return clipLog(val, CLIP_K_INDEX["min"], CLIP_K_INDEX["max"], "K Index Current")
 
 
@@ -1994,6 +2039,7 @@ def build_current_section(
     URMA_Merged=None,
     rrfsSubHInterpolation=None,
     RRFS_Merged=None,
+    used_sources: set | None = None,
 ) -> CurrentSection:
     """
     Calculate the currently block and return it alongside the raw array.
@@ -2045,6 +2091,9 @@ def build_current_section(
         loc_tag: Location tag.
         log_timing: Optional timing logger.
         include_currently: Whether to include the currently block.
+        used_sources: Set the sources that supplied a currently value are added
+            to (flags.sources), or None. Precipitation comes from the minutely
+            block, which reports its own sources.
 
     Returns:
         CurrentSection object containing the current forecast.
@@ -2103,7 +2152,15 @@ def build_current_section(
             and ("hrrr_0-18" in sourceList)
             and ("hrrr_18-48" in sourceList)
         ),
+        "used_sources": used_sources,
     }
+    # Time machine without tmextra doesn't return the UV index, CAPE or storm
+    # fields, so the sources they come from don't count for flags.sources
+    hidden_field_data = (
+        {**model_data, "used_sources": None}
+        if timeMachine and not tmExtra and used_sources is not None
+        else model_data
+    )
 
     InterPcurrent[DATA_CURRENT["temp"]] = _get_temp(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
@@ -2150,10 +2207,13 @@ def build_current_section(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["uv"]] = _get_uv(
-        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
+        sourceList, hidden_field_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["station_pressure"]] = _get_station_pressure(
-        sourceList, model_data, state
+        sourceList,
+        model_data,
+        state,
+        used_sources if "stationPressure" in extraVars else None,
     )
     InterPcurrent[DATA_CURRENT["vis"]] = _get_vis(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
@@ -2165,7 +2225,7 @@ def build_current_section(
     (
         InterPcurrent[DATA_CURRENT["storm_dist"]],
         InterPcurrent[DATA_CURRENT["storm_dir"]],
-    ) = _get_storm(sourceList, model_data, state)
+    ) = _get_storm(sourceList, hidden_field_data, state)
 
     InterPcurrent[DATA_CURRENT["smoke"]] = _get_smoke(sourceList, model_data, state)
     # If HRRR smoke is unavailable, fall back to SILAM PM_FRP_column smoke
@@ -2173,6 +2233,8 @@ def build_current_section(
     if np.isnan(InterPcurrent[DATA_CURRENT["smoke"]]) and aq_inputs is not None:
         smoke_frp = aq_inputs.get("smoke_frp")
         if smoke_frp is not None and len(smoke_frp) > 0 and not np.isnan(smoke_frp[0]):
+            if used_sources is not None:
+                used_sources.add("silam")
             InterPcurrent[DATA_CURRENT["smoke"]] = clipLog(
                 float(smoke_frp[0]),
                 CLIP_SMOKE["min"],
@@ -2183,7 +2245,7 @@ def build_current_section(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
     InterPcurrent[DATA_CURRENT["cape"]] = _get_cape(
-        sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
+        sourceList, hidden_field_data, state, lat, lon_IN, prioritize_ai_models
     )
 
     InterPcurrent[DATA_CURRENT["apparent"]] = calculate_apparent_temperature(
@@ -2238,6 +2300,10 @@ def build_current_section(
         _fill_curr_aq("no2", "no2", CLIP_NO2_PPB["min"], CLIP_NO2_PPB["max"])
         _fill_curr_aq("so2", "so2", CLIP_SO2_PPB["min"], CLIP_SO2_PPB["max"])
         _fill_curr_aq("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
+        if used_sources is not None:
+            for aq_source, aq_hours in aq_inputs.get("hour_sources", {}).items():
+                if aq_hours[[idx1, idx2]].any():
+                    used_sources.add(aq_source)
 
         try:
             # Compute AQI using the same averaged approach as the hourly block

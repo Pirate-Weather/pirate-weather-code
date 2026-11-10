@@ -229,4 +229,4 @@ CO (`coConcentration`) is sourced exclusively from SILAM. RAQDPS does not publis
 
 ### Flags
 
-When AQ data is loaded, `flags.sources` and `flags.sourceTimes` will include `raqdps` and/or `silam` entries with their respective model run timestamps.
+When RAQDPS or SILAM supplies a returned air-quality value (or SILAM the smoke fallback), `flags.sources` and `flags.sourceTimes` include `raqdps` and/or `silam` with their model run timestamps; a model that was read but whose values were all replaced by the other is not listed.
