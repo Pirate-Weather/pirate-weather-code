@@ -114,7 +114,7 @@ IFS_OPER_CFGRIB_GROUPS = (
 # every lead of the whole grid while it assembles tiles (~20 GB at 0.1 degrees).
 PROCESS_TIME_CHUNK = 1
 
-# Ensemble members in a run (control plus 50 perturbed); the run fails before
+# Ensemble members in a run (the 50 perturbed members); the run fails before
 # publishing when the GRIB holds a different number
 ECMWF_IFS_MEMBER_COUNT = ENSEMBLE_MEMBER_COUNTS["ECMWF_IFS"]
 # Per-hour member bitmask words (pack_member_mask), from which the API gets the

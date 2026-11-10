@@ -11,9 +11,7 @@ then move the entry to Done.
 ## Plan (2026-11-09)
 
 Work through the open items in this order, small ones first:
-1. Small: reload the DWD station and RAQDPS lat/lon pickles when the sync updates
-   them; re-publish the README developer snapshot in the sharded layout; consistent
-   clipping (#760).
+1. Small: all done (see Done below).
 2. Bigger: future dates in time machine (#689); only list the sources used (#554);
    next-update field (#668).
 
@@ -35,11 +33,7 @@ pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
   the week's `zarr.json`, then `ts.open` reads it again (`API/io/ZarrHelpers.py`).
 
 ### Remaining storage clean-up
-- Re-publish the static developer snapshot linked from `README.md` in the
-  sharded, versioned layout.
 - Expire old history stores on the remote (nothing deletes them).
-- The DWD station and RAQDPS lat/lon pickles are loaded once at API start; the
-  sync updates the files but a running worker does not reload them.
 
 ### Tune the shard and cache sizes from real requests
 `FINAL_SHARD_SIZES` follow a ~150 MB-per-shard write-memory rule and
@@ -61,11 +55,40 @@ Sky allowed time-machine requests for future dates; Pirate Weather returns HTTP 
 when the forecast data will next refresh. The run-time pickles and the ingest
 schedules already hold what is needed.
 
-### Consistent clipping
-[pirate-weather-code#760](https://github.com/Pirate-Weather/pirate-weather-code/issues/760):
-some fields use `clipLog`, others `np.clip`.
-
 ## Done
+
+### GEFS converts each member in tiles (2026-11-10)
+The 13:00Z GEFS job was OOM-killed twice at the container's 11 GiB limit before its third
+attempt succeeded. Profiled locally under a cgroup with the cluster's settings: the
+process peaked at 6.0 GiB RSS (unchanged by the member masks), but each member's NetCDF
+was loaded whole for the APCP differencing (five 330 MB fields plus temporaries, a 4.1 GiB
+floor with spikes to 5.6 GiB), and with 3-5 GiB of page cache from the run's working
+files the cgroup high-water mark was 11.3 GiB. Opening each member in the 198-cell
+processing tiles runs the differencing inside `to_zarr`: RSS peak 6.0 -> 2.3 GiB, cgroup
+high-water 11.3 -> 7.4 GiB, run time 574 -> 570 s, final store byte-identical (sha256 of
+all 121 files, same 06Z cycle). The GEFS job limit was also raised to 14 Gi (ovh #14).
+
+### Hourly fields clip with `clipLog` where it is safe (2026-11-09)
+[#760](https://github.com/Pirate-Weather/pirate-weather-code/issues/760): the hourly
+precipitation probability, CAPE, solar and (placeholder) fire columns now use `clipLog`
+like their current counterparts, so a value past 125 % of the maximum (a unit or data
+bug) is logged and blanked instead of quietly clamped. Interpolation noise still clamps
+(-1e-6 -> 0). About 5 us per call. Left as `np.clip` on purpose:
+- visibility (hourly and current): GFS, HRRR and RRFS report clear air as about
+  24 km, past the 20.1 km limit for the 16.09 km maximum, so every clear hour would blank;
+- AQ concentrations: near-fire PM2.5 in RAQDPS-FW and SILAM can pass 1250 ug/m3, and a
+  blank would drop a hazardous AQI to missing;
+- AQI and Israel AQI, the Fosberg index and moon phase: bounds of a computed scale;
+- hourly feels-like and CIN (hourly and current): `clipLog` gives no margin past a
+  negative minimum or a zero maximum, so feels-like below -60 C or CIN above 0 would
+  blank (the current feels-like and the temperature already do this);
+- indices, interpolation weights, RH and rates inside the visibility estimate,
+  haversine and the SILAM blend weights: numerical, not output values.
+
+### README developer snapshot dropped (2026-11-09)
+The README's static store snapshot (November 2024, unsharded) no longer worked with the
+reader and is not being re-published. The Docker instructions now only cover reading
+stores from a bucket; the example `curl` used the wrong port (8083 for a container on 8000).
 
 ### KEEPBITS steps confirmed for the less-used variables (2026-11-09)
 Checked with `numcodecs.BitRound` against how the API uses each field; no bit counts
@@ -95,6 +118,17 @@ to object storage for render nodes are in upstream LibreWXR (#55, #56; v0.9.0). 
 the `pirate-librewxr` pipeline runs `ingest/LibreWXR_Local_Ingest.py` from its nowcast
 hook and publishes snapshots to `s3://pirate-librewxr/librewxr`, which a render node
 pulls.
+
+### Support pickles reloaded while serving (2026-11-09)
+The DWD MOSMIX station map and the RAQDPS lat/lon grid were loaded once at worker start,
+so a running worker never saw the files `store_sync` replaced. Both now live on
+`ZarrStores` (`SUPPORT_PICKLES` in `API/io/store_reader.py`, which `store_sync`'s
+`SUPPORT_FILES` is built from) and are loaded by the store poll from the store root, with
+a tensorstore read conditional on the held generation: a stat per file every 10 s on
+local disk, a 304 GET on S3 in TESTING, nothing on the request path. A file that fails to
+unpickle keeps the held copy with a warning. The sync already replaced the files
+atomically. The RAQDPS grid bundled in `API/data` is still loaded at start
+and used until a published copy is found next to the stores. `tests/api/test_support_pickle_reload.py` covers the reload.
 
 ### Daily PoP from ensemble members (2026-11-09)
 Daily `precipProbability` was the maximum of the hourly probabilities over the local day,
