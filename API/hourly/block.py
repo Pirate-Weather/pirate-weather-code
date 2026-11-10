@@ -405,6 +405,7 @@ def _calculate_derived_metrics(
     baseTimeOffset,
     timeMachine,
     urma_hour_mask=None,
+    currentHourOffset=None,
 ):
     """
     Calculate derived metrics like apparent temperature and accumulation.
@@ -412,8 +413,12 @@ def _calculate_derived_metrics(
     Args:
         InterPhour: Hourly interpolated data.
         hourlyDayIndex: Hourly day index.
-        baseTimeOffset: Base time offset.
+        baseTimeOffset: First hour row returned; precipitation before it is zeroed.
         timeMachine: Whether this is a time machine request.
+        urma_hour_mask: Hours where URMA supplied the temperature, humidity or wind.
+        currentHourOffset: Hour row of the requested time, where the day-zero
+            (currentDay*) totals stop; defaults to baseTimeOffset. A future day
+            starts its rows at midnight but totals up to the requested hour.
 
     Returns:
         Tuple containing day zero rain, snow, and ice accumulation.
@@ -502,20 +507,23 @@ def _calculate_derived_metrics(
         missing_intensity_mask, DATA_HOURLY["accum"]
     ]
 
+    if currentHourOffset is None:
+        currentHourOffset = baseTimeOffset
+
     dayZeroPrepRain = InterPhour[:, DATA_HOURLY["rain"]].copy()
     dayZeroPrepRain[hourlyDayIndex != 0] = 0
     if not timeMachine:
-        dayZeroPrepRain[int(baseTimeOffset) :] = 0
+        dayZeroPrepRain[int(currentHourOffset) :] = 0
 
     dayZeroPrepSnow = InterPhour[:, DATA_HOURLY["snow"]].copy()
     dayZeroPrepSnow[hourlyDayIndex != 0] = 0
     if not timeMachine:
-        dayZeroPrepSnow[int(baseTimeOffset) :] = 0
+        dayZeroPrepSnow[int(currentHourOffset) :] = 0
 
     dayZeroPrepSleet = InterPhour[:, DATA_HOURLY["ice"]].copy()
     dayZeroPrepSleet[hourlyDayIndex != 0] = 0
     if not timeMachine:
-        dayZeroPrepSleet[int(baseTimeOffset) :] = 0
+        dayZeroPrepSleet[int(currentHourOffset) :] = 0
 
     dayZeroRain = dayZeroPrepRain.sum()
     dayZeroSnow = dayZeroPrepSnow.sum()
@@ -779,6 +787,7 @@ def build_hourly_block(
     minute_presence: dict | None = None,
     urma_hour_mask: np.ndarray | None = None,
     display_hours: range | None = None,
+    currentHourOffset: float | None = None,
 ):
     """
     Build hourly output objects and summary text/icon lists.
@@ -838,6 +847,8 @@ def build_hourly_block(
         version: API version.
         display_hours: Hours (indices) to build response objects for; None
             builds all. See ``build_hourly_objects``.
+        currentHourOffset: Hour row of the requested time when it differs from
+            baseTimeOffset (a future day); see ``_calculate_derived_metrics``.
 
     Returns:
         Tuple containing hourly lists and arrays.
@@ -933,6 +944,7 @@ def build_hourly_block(
         baseTimeOffset,
         timeMachine,
         urma_hour_mask,
+        currentHourOffset,
     )
 
     # Mark hours as mixed when all component types are present for that hour.
@@ -953,7 +965,9 @@ def build_hourly_block(
     # minute-derived detection for that hour (more accurate for short bursts).
     if minute_presence is not None:
         try:
-            idx = int(baseTimeOffset)
+            idx = int(
+                baseTimeOffset if currentHourOffset is None else currentHourOffset
+            )
             if (
                 0 <= idx < InterPhour.shape[0]
                 and minute_presence.get("has_rain", False)

@@ -15,7 +15,11 @@ import reverse_geocode
 from fastapi import HTTPException, Request
 from timezonefinder import TimezoneFinder
 
-from API.constants.api_const import COORDINATE_CONST, TIME_MACHINE_CONST
+from API.constants.api_const import (
+    COORDINATE_CONST,
+    FUTURE_FORECAST_MAX_HOURS,
+    TIME_MACHINE_CONST,
+)
 from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.unit_const import country_units
 from API.hourly.builder import initialize_time_grids
@@ -108,6 +112,7 @@ class InitialRequestContext:
     now_time: datetime.datetime
     utc_time: datetime.datetime
     time_machine: bool
+    future_day: bool
     stage: str
     loc_tag: str
     timing_tracker: TimingTracker
@@ -253,7 +258,7 @@ def _validate_time(
         logger: Logger instance.
 
     Returns:
-        Tuple containing UTC time and time machine flag.
+        Tuple containing UTC time, the time machine flag and the future day flag.
 
     Raises:
         HTTPException: If time specification is invalid or out of allowed range.
@@ -270,6 +275,7 @@ def _validate_time(
         )
 
     time_machine = False
+    future_day = False
     if (now_time - utc_time) > datetime.timedelta(hours=25):
         if (
             ("localhost" in str(request.url))
@@ -287,9 +293,9 @@ def _validate_time(
         if (utc_time - now_time) < datetime.timedelta(hours=1):
             utc_time = now_time
         else:
-            raise HTTPException(
-                status_code=400, detail="Requested Time is in the Future"
-            )
+            # As Dark Sky did, a future time returns the forecast for that local
+            # day. The horizon is checked once the local day is known.
+            future_day = True
     elif (now_time - utc_time) < datetime.timedelta(
         hours=TIME_MACHINE_CONST["threshold_hours"]
     ) and "timemachine" in str(request.url):
@@ -298,7 +304,7 @@ def _validate_time(
             logger.debug("Near term timemachine request")
             logger.debug(now_time - utc_time)
 
-    return utc_time, time_machine
+    return utc_time, time_machine, future_day
 
 
 def _setup_units(units: str | None, loc_name: dict[str, str]):
@@ -429,6 +435,7 @@ def _parse_parameters(
     now_time: datetime.datetime,
     utc_time: datetime.datetime,
     time_machine: bool,
+    future_day: bool,
     tm_extra: bool,
 ):
     exclude_params = exclude or ""
@@ -492,7 +499,7 @@ def _parse_parameters(
         ex_dwd_mosmix = 1
         ex_librewxr = 1
 
-    read_wmo_alerts = not (time_machine or ex_alerts == 1)
+    read_wmo_alerts = not (time_machine or future_day or ex_alerts == 1)
 
     if time_machine and not tm_extra:
         ex_minutely = 1
@@ -501,6 +508,14 @@ def _parse_parameters(
         # RRFS stores keep no history
         inc_rrfs = 0
         ex_dwd_mosmix = 1
+        ex_librewxr = 1
+    if future_day:
+        # A future day has no minute-by-minute nowcast, and alerts are for now.
+        # RTMA-RU (an analysis) and LibreWXR (a radar nowcast) describe the
+        # present, not the requested time.
+        ex_minutely = 1
+        ex_alerts = 1
+        ex_rtma_ru = 1
         ex_librewxr = 1
 
     return (
@@ -541,7 +556,7 @@ def _parse_parameters(
 
 
 def _setup_time_grids(
-    time_machine: bool,
+    single_day: bool,
     extend_flag: int,
     base_time: datetime.datetime,
     base_day: datetime.datetime,
@@ -549,7 +564,7 @@ def _setup_time_grids(
     timemachine_days: int = 1,
     timemachine_output_hours: int = 24,
 ):
-    if time_machine:
+    if single_day:
         daily_days = timemachine_days
         daily_day_hours = 1
         output_hours = timemachine_output_hours
@@ -666,7 +681,7 @@ async def prepare_initial_request(
         prefix=f"{loc_tag} ",
     )
 
-    utc_time, time_machine = _validate_time(
+    utc_time, time_machine, future_day = _validate_time(
         request,
         location_req,
         now_time,
@@ -748,6 +763,7 @@ async def prepare_initial_request(
         now_time,
         utc_time,
         time_machine,
+        future_day,
         tm_extra,
     )
 
@@ -818,6 +834,24 @@ async def prepare_initial_request(
         tzinfo=local_tz,
     )
     base_day_utc = base_day.astimezone(datetime.UTC)
+
+    if future_day:
+        # Adding a day to a local datetime keeps the wall clock, so this is the
+        # next local midnight on a 23 or 25 hour day too.
+        day_end_utc = (base_day + datetime.timedelta(days=1)).astimezone(datetime.UTC)
+        day_end_hours = (
+            day_end_utc.replace(tzinfo=None) - now_time
+        ).total_seconds() / SECONDS_PER_HOUR
+        if day_end_hours > FUTURE_FORECAST_MAX_HOURS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Requested Time is beyond the forecast horizon. The requested "
+                    f"local day must end within {FUTURE_FORECAST_MAX_HOURS} hours "
+                    f"(about {round(FUTURE_FORECAST_MAX_HOURS / 24)} days) of now."
+                ),
+            )
+
     base_day_utc_grib = (
         (
             np.datetime64(base_day.astimezone(datetime.UTC).replace(tzinfo=None))
@@ -841,7 +875,9 @@ async def prepare_initial_request(
         hour_array,
         day_array_grib,
     ) = _setup_time_grids(
-        time_machine,
+        # Time Machine and future requests both return one local day (Dark Sky's
+        # shape): hourly from local midnight to the next, one daily point.
+        time_machine or future_day,
         extend_flag,
         base_time,
         base_day,
@@ -850,11 +886,12 @@ async def prepare_initial_request(
         timemachine_hours,
     )
 
-    if time_machine:
+    if time_machine or future_day:
         output_days = timemachine_days
         # A requested range of days covers their local hours, 23 or 25 on a DST
-        # change day; an explicit hours parameter stays that many hours.
-        if request.query_params.get("hours") is None:
+        # change day; an explicit hours parameter (Time Machine only) stays that
+        # many hours.
+        if not time_machine or request.query_params.get("hours") is None:
             output_hours = int(
                 (day_array_grib[output_days] - day_array_grib[0]) // SECONDS_PER_HOUR
             )
@@ -869,6 +906,7 @@ async def prepare_initial_request(
         now_time=now_time,
         utc_time=utc_time,
         time_machine=time_machine,
+        future_day=future_day,
         stage=stage,
         loc_tag=loc_tag,
         timing_tracker=timing_tracker,

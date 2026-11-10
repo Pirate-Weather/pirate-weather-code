@@ -12,8 +12,7 @@ then move the entry to Done.
 
 Work through the open items in this order, small ones first:
 1. Small: all done (see Done below).
-2. Bigger: future dates in time machine (#689); only list the sources used (#554);
-   next-update field (#668).
+2. Bigger: only list the sources used (#554); next-update field (#668).
 
 ## v3 goals
 
@@ -41,11 +40,6 @@ pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
 benchmarks. Replay a day of real request coordinates against the new reader to
 pick the cache size (the shard indexes alone are ~35 MB), and check the write
 peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
-
-### Future dates in time machine
-[pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): Dark
-Sky allowed time-machine requests for future dates; Pirate Weather returns HTTP 400.
-
 ### Only list the sources used
 [pirateweather#554](https://github.com/Pirate-Weather/pirateweather/issues/554):
 `sources` lists every model covering the point, not just the ones used in the response.
@@ -55,7 +49,31 @@ Sky allowed time-machine requests for future dates; Pirate Weather returns HTTP 
 when the forecast data will next refresh. The run-time pickles and the ingest
 schedules already hold what is needed.
 
+### Longer future horizon from CFS (#689 follow-up)
+Future-dated requests stop where the 240 h GFS/GEFS stores end (about 9 days). A CFS
+ingest would extend them to ~45 days. Not planned yet.
+
 ## Done
+
+### Future-dated requests (2026-11-09)
+[pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): a time
+more than an hour ahead returned HTTP 400; it now returns Dark Sky's Time Machine shape
+for a future day: `currently` at the requested time, hourly from local midnight to the
+next (23 or 25 hours on a DST change day), one daily point, no minutely or alerts, and
+time-machine style hourly/daily summaries. It is still a forecast (`time_machine` stays
+False, `future_day` is set): the forecast models, fields and sources are those of a normal
+request, except RTMA-RU and LibreWXR, which describe the present. `currentDay*` totals run
+from local midnight to the requested hour. Not version-gated. Times within an hour are
+still read as now. The horizon is `FUTURE_FORECAST_MAX_HOURS` (218 h, `api_const.py`):
+the requested local day must end within 240 h of the newest GFS/GEFS run allowing that run
+to be ~22 h old; later days are a 400. Run-age freshness checks in `calculate_grid_indexing`
+are now measured from `min(requested time, now)`, so a future day keeps the current runs;
+the sub-hourly HRRR/RRFS, RTMA-RU and LibreWXR checks stay on the requested time and drop
+out. `_aligned_rows` gave a day after a store's end that store's last row at local midnight
+(and the one-row REPS array crashed the minutely interpolation); such a day now gets no
+rows from it. Checked in-process against the local GEFS/REPS stores (Toronto, +4 days):
+24 hourly rows from local midnight, one daily point, no minutely or alerts; +10 days is a
+400. `sources` still lists a model whose store ends before the requested day (#554).
 
 ### GEFS converts each member in tiles (2026-11-10)
 The 13:00Z GEFS job was OOM-killed twice at the container's 11 GiB limit before its third
