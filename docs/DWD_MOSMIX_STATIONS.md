@@ -54,14 +54,14 @@ When a user makes a request to the API with version >= 2 and DWD MOSMIX data is 
    - `build_grid_to_stations_map()`: Creates the grid-to-stations mapping using BallTree for efficient spatial queries
    - Saves the mapping to a pickle file during ingest
 
-2. **responseLocal.py**
-   - Loads the station mapping on startup
+2. **io/store_reader.py** and **responseLocal.py**
+   - The store poll loads the station mapping next to the stores and reloads it when the sync replaces the file
    - Looks up stations for the requested grid cell
    - Adds stations to the flags section when version >= 2
 
 ### Requirements
 
-- Station map must exist at: `{save_dir}/{ingest_version}/DWD_MOSMIX_stations.pickle`
+- Station map must exist next to the stores the API reads: `{save_dir}/DWD_MOSMIX_stations.pickle` (DEV/PROD), or the published bucket prefix in TESTING
 - Request must use version >= 2 (add `?version=2` to the URL)
 - DWD MOSMIX data must be available for the requested location
 
