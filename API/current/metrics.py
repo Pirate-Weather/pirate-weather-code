@@ -43,6 +43,7 @@ from API.constants.clip_const import (
 from API.constants.forecast_const import (
     DATA_CURRENT,
     DATA_DAY,
+    DATA_HOURLY,
     DATA_MINUTELY,
 )
 from API.constants.model_const import (
@@ -1992,6 +1993,45 @@ def _get_k_index(
     )
     val = _select_value(strategies)
     return clipLog(val, CLIP_K_INDEX["min"], CLIP_K_INDEX["max"], "K Index Current")
+
+
+def use_hourly_precip_for_first_minute(
+    InterPminute: np.ndarray,
+    minuteItems: list,
+    InterPhour: np.ndarray,
+    hour_item: dict,
+    hour_row: int,
+) -> None:
+    """Overwrite the first minute's precipitation with one hourly row, in place.
+
+    ``currently`` copies its precipitation from the first minute. On a future
+    day (#689) that minute is the wrong source: the minutely block picks one
+    source per element for its whole 61-minute window, so on the day the
+    shorter-range stores end it can disagree with the hourly row, which falls
+    back source by source per hour; and a future day returns no minutely block.
+    So the requested hour's row is copied in: the display item (intensity,
+    probability, error and type as the hourly item shows them) and the SI
+    columns (``InterPhour`` after the hourly block), which also back the
+    rain/snow/sleet minute arrays, views of ``InterPminute``.
+    """
+    for key in (
+        "precipIntensity",
+        "precipProbability",
+        "precipIntensityError",
+        "precipType",
+    ):
+        minuteItems[0][key] = hour_item[key]
+    for column in (
+        "intensity",
+        "prob",
+        "error",
+        "rain_intensity",
+        "snow_intensity",
+        "ice_intensity",
+    ):
+        InterPminute[0, DATA_MINUTELY[column]] = InterPhour[
+            hour_row, DATA_HOURLY[column]
+        ]
 
 
 def build_current_section(

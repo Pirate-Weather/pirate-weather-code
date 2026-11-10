@@ -70,7 +70,10 @@ from API.constants.shared_const import (
     KELVIN_TO_CELSIUS,
     MISSING_DATA,
 )
-from API.current.metrics import build_current_section
+from API.current.metrics import (
+    build_current_section,
+    use_hourly_precip_for_first_minute,
+)
 from API.daily.builder import build_daily_section
 from API.data_inputs import prepare_aq_inputs, prepare_data_inputs
 from API.forecast_sources import (
@@ -883,7 +886,6 @@ async def PW_Forecast(
             gdps_data=GDPS_Merged if "gdps" in sourceList else None,
             geps_data=GEPS_Merged if "geps" in sourceList else None,
             reps_data=REPS_Merged if "reps" in sourceList else None,
-            cfs_data=merge_result.cfs,
             prep_intensity_unit=prepIntensityUnit,
             version=version,
             lat=lat,
@@ -1220,6 +1222,18 @@ async def PW_Forecast(
     # 15. Generate the current weather conditions section
     # This builds the 'currently' block of the API response, representing the weather right now
     with timing_tracker.track("Current block"):
+        if futureDay:
+            # A future day's `currently` takes its precipitation from the hourly
+            # row of the hour holding the requested time, not the first minute
+            # (see use_hourly_precip_for_first_minute).
+            requested_hour_row = int(requestedHourOffset)
+            use_hourly_precip_for_first_minute(
+                InterPminute,
+                minuteItems,
+                InterPhour,
+                hourList[requested_hour_row],
+                requested_hour_row,
+            )
         current_section = build_current_section(
             sourceList=sourceList,
             hour_array_grib=hour_array_grib,

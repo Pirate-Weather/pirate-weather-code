@@ -130,40 +130,37 @@ tcdcclm, dswsfc) x 4 members = 32 files, ~1.1 GB, capped by a Herbie `search` at
   (GDPS, London 2026-11-20) left one row, which crashed the minutely interpolation
   (`np.interp` on a 0-d time column); `_rows_with_time` now drops a model with fewer than
   two timed rows. Unreachable before, as such days were past 218 h.
-- **Feels-like and `currently` precipitation on CFS hours:** CFS has no apparent
-  temperature, so feels-like is computed from its temperature, humidity, wind and solar
-  (last in `feels_like_inputs` and `_get_feels_like`), and CFS is the last minutely
-  source (intensity, probability, error; typed from temperature like DWD MOSMIX), which
-  `currently` copies. Before, they were -999 and 0. Measured as above (60 and 150 days,
-  8 cities): hourly feels-like has no -999 left; Jakarta 60 days `currently` 0.81 mm/h,
-  probability 1.0, error 0.78 (was 0/0/0); New York 150 days 2.09 mm/h with probability
-  and error -999 (after `ensemble_end`). Normal and 5-day responses (6 cities) are
-  identical to before apart from `processTime`; processing median of 180 requests, two
-  rounds, 10.0/10.0 ms normal and 6.3/6.4 ms 5-day vs 10.1/9.9 and 6.6/6.3 before.
-- **`currently` on the day GFS ends, and dry minutes after `ensemble_end`:** the day
-  holding GFS's last hour reads CFS, but GFS, GEFS or ECMWF rows from earlier in it won
-  the per-day minutely source choice and were NaN past their end, so `currently` came
-  out -999 "Mixed Precipitation" (or a NaN zeroed to 0 "none" where the minute was
-  untyped). When CFS is loaded, `build_minutely_block` now fills the minutes whose
-  chosen intensity is NaN from CFS (typed from its temperature), and a NaN
-  probability or error from CFS's. Past `ensemble_end` a dry CFS minute's probability
-  and error stay -999 instead of being zeroed by the "none"-type rule, as in the hourly
-  block. Measured with GFS ending 2026-11-20 06Z: New York 07Z and 08Z -999/-999/-999
-  "mixed" to 0/0/0 "none" "Partly Cloudy"; Sydney 06-08Z 0/0/0 "none" to 0.81 mm/h,
-  0.5, 1.04 rain (ECMWF ended 00Z); Seattle and Sydney at 150 days dry minutes
-  probability and error 0 to -999. 60-day minutes, hourly and daily unchanged.
-  Normal and 5-day responses (6 cities) identical to before apart from `processTime`;
-  handler medians of 90 requests, two rounds: normal 198.5/199.6 ms vs 200.0/224.1
-  (S3 grid reads), 5-day 7.8/7.4 vs 7.5/7.4, 60-day 7.3/7.3 vs 7.3/7.3.
+- **Feels-like on CFS hours:** CFS has no apparent temperature, so feels-like is
+  computed from its temperature, humidity, wind and solar (last in `feels_like_inputs`
+  and `_get_feels_like`); it was -999. Measured as above (60 and 150 days, 8 cities):
+  hourly feels-like has no -999 left. Normal and 5-day responses (6 cities) identical to
+  before apart from `processTime`; processing median of 180 requests, two rounds,
+  10.0/10.0 ms normal and 6.3/6.4 ms 5-day vs 10.1/9.9 and 6.6/6.3 before.
+- **`currently` precipitation on a future day is the requested hour's hourly item:**
+  `currently` copied its precipitation from minute 0, and the minutely block picks one
+  source per element for its whole 61-minute window, while the hourly rows fall back per
+  hour. On the day the shorter-range stores end the two disagreed (Sydney 2026-11-20
+  12-17 local, ECMWF ended: `currently` 0.33-0.81 mm/h, hourly 0.06-0.11 GFS; New York at
+  GFS's last hour 06Z: 0 mm/h "Mixed Precipitation", hourly 0 "rain" "Clear"), and at
+  5 days too (Seattle 01 local `currently` 0.254 mm/h, hourly 0.4233; London dry hours
+  probability and error 0, hourly 0.06-0.08 and 0.03-0.10). On a future day the handler
+  now overwrites minute 0 with the hourly row of the hour holding the requested time
+  (`use_hourly_precip_for_first_minute`: the display item's intensity, probability,
+  error and type, and `InterPminute`'s intensity, probability, error and rain/snow/ice
+  columns from the post-block `InterPhour`), so the seven precipitation fields, and the
+  summary and icon they drive, equal that hourly item; there is no interpolation within
+  the hour any more. A future day returns no minutely block, so CFS is no longer a
+  minutely source (the minutely CFS chains, the straddle fill and the missing-probability
+  masks of the previous two commits are removed). Measured (TESTING stage, production
+  v32 stores, local CFS run 2026-11-10 00Z, GFS ending 2026-11-20 06Z): 6 cities, every
+  hour of the straddle day, 5, 60 and 150 days out and 4 DST change days (23 and 25
+  hours), plus hh:30 and hh:39 and `units=us` requests: 1,094 cases, 0 mismatches against
+  the hourly item (475 before). Probability stays -999 at 150 days, wet and dry. Normal
+  and Time Machine responses (6 cities) are identical apart from `processTime`; handler
+  medians of 90 requests, two rounds: normal 11.1/11.0 ms vs 12.1/10.9, 5-day 7.4/7.5 vs
+  7.4/7.3, 60-day 7.1/7.2 vs 7.2/7.3.
 - **Not done:** visibility, UV, ozone, CAPE are -999 on CFS-only hours (no CFS field);
   `sources` still lists models with no rows on the day (#554).
-- **Not done (minutely on the day GFS ends):** the minutely block picks one source per
-  element for the whole hour, not per minute like the hourly block, so a minute past
-  ECMWF's end takes CFS even where GFS still runs (Sydney 03-06Z: `currently` 0.33-0.81
-  mm/h CFS, hourly 0.08-0.11 GFS). An hour whose 61 minutes cross GFS's last hour is all
-  "mixed" (any NaN type row forces it), including the covered first minute (New York
-  06Z: 0 mm/h "Mixed Precipitation"). Both predate CFS; by the same code (not measured)
-  a future day GFS covers but ECMWF ends in shows such minutes as 0 "none".
 
 ### Future-dated requests (2026-11-09)
 [pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): a time

@@ -123,8 +123,10 @@ With AI models enabled, compatible AI data is selected before RTMA-RU, HRRR
 SubH, NBM, and the other conventional sources.
 
 Current precipitation fields (`precipIntensity`, `precipProbability`,
-`precipIntensityError`, and `precipType`) are copied from the first minute of
-the minutely block and therefore use the minutely rules below.
+`precipIntensityError`, `precipType` and the rain, snow and ice intensities)
+are copied from the first minute of the minutely block and therefore use the
+minutely rules below, except on a future day, where they are the hourly item of
+the requested hour (see Future days and CFS).
 
 Some current elements have intentionally narrower source sets:
 
@@ -159,10 +161,10 @@ not eligible in AI mode.
 
 | Element | Priority |
 | --- | --- |
-| Precipitation intensity | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 → CFS |
-| Precipitation type | HRRR SubH → NBM → ECMWF IFS → GFS → DWD MOSMIX → GEFS → GDPS → GEPS → ERA5 → CFS |
-| Precipitation probability | REPS → GEPS → NBM → ECMWF IFS → GEFS → ERA5 → CFS |
-| Precipitation intensity error | REPS → ECMWF IFS → GEFS → GEPS → CFS |
+| Precipitation intensity | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 |
+| Precipitation type | HRRR SubH → NBM → ECMWF IFS → GFS → DWD MOSMIX → GEFS → GDPS → GEPS → ERA5 |
+| Precipitation probability | REPS → GEPS → NBM → ECMWF IFS → GEFS → ERA5 |
+| Precipitation intensity error | REPS → ECMWF IFS → GEFS → GEPS |
 
 The HRRR SubH priority applies whenever its data is available and AI mode is not
 enabled. NBM is the next conventional intensity/type source. REPS is the
@@ -173,17 +175,15 @@ precipitation-probability field.
 
 | Element | North America | Global / standard |
 | --- | --- | --- |
-| Precipitation intensity | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 → CFS | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 → CFS |
-| Precipitation type | HRRR SubH → NBM → ECMWF IFS → GFS → DWD MOSMIX → GEFS → GDPS → GEPS → ERA5 → CFS | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GFS → GEFS → GDPS → GEPS → ERA5 → CFS |
-| Precipitation probability | NBM → ECMWF IFS → GEFS → GEPS → ERA5 → CFS | NBM → ECMWF IFS → GEFS → GEPS → ERA5 → CFS |
-| Precipitation intensity error | ECMWF IFS → GEFS → GEPS → CFS | ECMWF IFS → GEFS → GEPS → CFS |
+| Precipitation intensity | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 |
+| Precipitation type | HRRR SubH → NBM → ECMWF IFS → GFS → DWD MOSMIX → GEFS → GDPS → GEPS → ERA5 | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GFS → GEFS → GDPS → GEPS → ERA5 |
+| Precipitation probability | NBM → ECMWF IFS → GEFS → GEPS → ERA5 | NBM → ECMWF IFS → GEFS → GEPS → ERA5 |
+| Precipitation intensity error | ECMWF IFS → GEFS → GEPS | ECMWF IFS → GEFS → GEPS |
 
 GDPS and GEPS are deliberately late minutely fallbacks outside Canada,
-after the GFS/GEFS family. CFS is read only for future days past the GFS
-store. It is chosen when none of the others is present, and on the day that
-holds the end of GFS it also fills the minutes the chosen source has no value
-for (intensity, probability and error each, the type with the intensity). It
-has no type, so its minutes are typed rain, snow or sleet from its temperature.
+after the GFS/GEFS family. CFS is not a minutely source: it is only read for
+future days, which return no minutely block and take `currently`
+precipitation from the hourly row instead (see Future days and CFS).
 
 ## Hourly, daily, and day/night precipitation
 
@@ -265,6 +265,16 @@ every element it has, so a day that straddles the end of GFS takes GFS (and
 any other model still running) first and CFS for the remaining hours. It is
 listed in `flags.sources`, `flags.sourceTimes` and (version 2) `sourceIDX`.
 
+On a future day `currently`'s precipitation (`precipIntensity`,
+`precipProbability`, `precipIntensityError`, `precipType`, and the rain, snow
+and ice intensities, with the summary and icon they drive) is the hourly item
+of the hour holding the requested time, not the first minute. The minutely
+block picks one source per element for its whole 61-minute window, while the
+hourly rows fall back source by source per hour, so on the day the
+shorter-range models (ECMWF, GFS, GEFS) end the two disagreed; and a future
+day returns no minutely block that could explain the difference. The other
+`currently` fields are still interpolated to the requested time.
+
 - **Elements:** temperature, dew point, humidity, sea-level and station
   pressure, wind speed and bearing, cloud cover, solar radiation, precipitation
   intensity and accumulation, probability and intensity error.
@@ -283,14 +293,8 @@ listed in `flags.sources`, `flags.sourceTimes` and (version 2) `sourceIDX`.
 - **Feels-like:** CFS has no apparent temperature, so on its hours feels-like
   is computed from its temperature, humidity, wind and solar radiation, as
   `apparentTemperature` is.
-- **Minutely:** CFS is the last minutely source, so on days only it covers
-  `currently` precipitation intensity, probability, error and type come from
-  it (type from temperature). On the day that holds the end of GFS, the
-  minutes past the source chosen for the day (GFS, GEFS, ...) take CFS's values
-  instead of -999 and "mixed". After the 4-member range probability and error
-  are -999 at every minute, dry ones included: the rule that zeroes them on a
-  minute typed "none" is skipped where CFS has no value, as in the hourly
-  block.
+- **Minutely:** CFS is not a minutely source; `currently` precipitation
+  comes from the hourly rows, as above.
 
 ## Fallback behavior
 
