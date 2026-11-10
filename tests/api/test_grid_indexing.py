@@ -443,11 +443,14 @@ def test_far_future_day_is_served_from_cfs_and_only_then_read():
     to column 0), its rows land on the day's hours, and ``cfs`` is listed as a
     source and fills each element last, including the computed feels-like and
     the minutely precipitation ``currently`` copies (-999 and 0 without them).
+    On the day holding GFS's last hour, the minutes past an earlier-day source
+    take CFS (they were -999 "mixed"), and past CFS's 4-member range a dry
+    minute's probability stays missing instead of becoming 0.
     CFS is time-chunked and months long, so a forecast request or a future day
     GFS still covers must not read it at all; that would add a read to every
     request.
     """
-    from API.constants.model_const import CFS, GFS
+    from API.constants.model_const import CFS, GEFS, GFS
     from API.constants.shared_const import HISTORY_PERIODS
     from API.forecast_sources import build_source_metadata, merge_hourly_models
     from API.io.store_reader import ModelStore, WeatherParallel
@@ -621,3 +624,50 @@ def test_far_future_day_is_served_from_cfs_and_only_then_read():
     assert minute_items[0]["precipProbability"] == 0.25
     assert minute_items[0]["precipType"] != "none"
     assert np.isnan(minute_items[0]["precipIntensityError"])
+
+    def minutes(start_hour, cfs, gefs=None):
+        return build_minutely_block(
+            minute_array_grib=base + start_hour * 3600 + 60 * np.arange(61.0),
+            source_list=merged.metadata.source_list + ["gefs"] * (gefs is not None),
+            hrrr_subh_data=None,
+            hrrr_merged=None,
+            nbm_data=None,
+            dwd_mosmix_data=None,
+            gefs_data=gefs,
+            gfs_data=None,
+            ecmwf_data=None,
+            era5_data=None,
+            cfs_data=cfs,
+            prep_intensity_unit=1.0,
+            version=2,
+            lat=-60.0,
+            lon=359.9,
+        )[2]
+
+    # The day holding GFS's last hour: GEFS has rows to 12Z and wins the source
+    # choice, so the minutes past them came out -999 and "mixed". They take CFS;
+    # the minutes GEFS covers keep its values.
+    gefs = np.full((25, max(GEFS.values()) + 1), np.nan)
+    gefs[:, 0] = base + 3600 * np.arange(25)
+    gefs[:13, [GEFS["accum"], GEFS["prob"], GEFS["error"]]] = [2.0, 0.8, 0.3]
+    gefs[:13, [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"]]] = 0
+    gefs[:13, GEFS["rain"]] = 1
+    straddle = minutes(11.5, merged.cfs, gefs)
+    assert straddle[0]["precipIntensity"] == 2.0
+    assert straddle[0]["precipProbability"] == 0.8
+    assert straddle[-1]["precipIntensity"] == 0.5
+    assert straddle[-1]["precipProbability"] == 0.25
+    assert straddle[-1]["precipType"] not in ("none", "mixed")
+
+    # Dry CFS minutes report probability and error 0 inside the 4-member range,
+    # but missing after it (NaN in the store), as the hourly block does.
+    dry_cfs = merged.cfs.copy()
+    dry_cfs[:, CFS["intensity"]] = 0
+    dry_cfs[:, CFS["error"]] = 0.1
+    dry_cfs[13:, [CFS["prob"], CFS["error"]]] = np.nan
+    in_range, past_range = minutes(6, dry_cfs)[0], minutes(18, dry_cfs)[0]
+    assert in_range["precipType"] == past_range["precipType"] == "none"
+    assert in_range["precipIntensity"] == past_range["precipIntensity"] == 0
+    assert in_range["precipProbability"] == in_range["precipIntensityError"] == 0
+    assert np.isnan(past_range["precipProbability"])
+    assert np.isnan(past_range["precipIntensityError"])

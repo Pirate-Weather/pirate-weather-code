@@ -179,9 +179,11 @@ precipitation-probability field.
 | Precipitation intensity error | ECMWF IFS → GEFS → GEPS → CFS | ECMWF IFS → GEFS → GEPS → CFS |
 
 GDPS and GEPS are deliberately late minutely fallbacks outside Canada,
-after the GFS/GEFS family. CFS is used only when none of the others is
-present (future days past the GFS store); it has no type, so its minutes are
-typed rain, snow or sleet from its temperature.
+after the GFS/GEFS family. CFS is read only for future days past the GFS
+store. It is chosen when none of the others is present, and on the day that
+holds the end of GFS it also fills the minutes the chosen source has no value
+for (intensity, probability and error each, the type with the intensity). It
+has no type, so its minutes are typed rain, snow or sleet from its temperature.
 
 ## Hourly, daily, and day/night precipitation
 
@@ -283,8 +285,12 @@ listed in `flags.sources`, `flags.sourceTimes` and (version 2) `sourceIDX`.
   `apparentTemperature` is.
 - **Minutely:** CFS is the last minutely source, so on days only it covers
   `currently` precipitation intensity, probability, error and type come from
-  it (type from temperature). After the 4-member range probability and error
-  are -999 at a wet minute; a dry minute reports 0, as for every source.
+  it (type from temperature). On the day that holds the end of GFS, the
+  minutes past the source chosen for the day (GFS, GEFS, ...) take CFS's values
+  instead of -999 and "mixed". After the 4-member range probability and error
+  are -999 at every minute, dry ones included: the rule that zeroes them on a
+  minute typed "none" is skipped where CFS has no value, as in the hourly
+  block.
 
 ## Fallback behavior
 

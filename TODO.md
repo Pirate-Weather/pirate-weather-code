@@ -140,8 +140,30 @@ tcdcclm, dswsfc) x 4 members = 32 files, ~1.1 GB, capped by a Herbie `search` at
   and error -999 (after `ensemble_end`). Normal and 5-day responses (6 cities) are
   identical to before apart from `processTime`; processing median of 180 requests, two
   rounds, 10.0/10.0 ms normal and 6.3/6.4 ms 5-day vs 10.1/9.9 and 6.6/6.3 before.
+- **`currently` on the day GFS ends, and dry minutes after `ensemble_end`:** the day
+  holding GFS's last hour reads CFS, but GFS, GEFS or ECMWF rows from earlier in it won
+  the per-day minutely source choice and were NaN past their end, so `currently` came
+  out -999 "Mixed Precipitation" (or a NaN zeroed to 0 "none" where the minute was
+  untyped). When CFS is loaded, `build_minutely_block` now fills the minutes whose
+  chosen intensity is NaN from CFS (typed from its temperature), and a NaN
+  probability or error from CFS's. Past `ensemble_end` a dry CFS minute's probability
+  and error stay -999 instead of being zeroed by the "none"-type rule, as in the hourly
+  block. Measured with GFS ending 2026-11-20 06Z: New York 07Z and 08Z -999/-999/-999
+  "mixed" to 0/0/0 "none" "Partly Cloudy"; Sydney 06-08Z 0/0/0 "none" to 0.81 mm/h,
+  0.5, 1.04 rain (ECMWF ended 00Z); Seattle and Sydney at 150 days dry minutes
+  probability and error 0 to -999. 60-day minutes, hourly and daily unchanged.
+  Normal and 5-day responses (6 cities) identical to before apart from `processTime`;
+  handler medians of 90 requests, two rounds: normal 198.5/199.6 ms vs 200.0/224.1
+  (S3 grid reads), 5-day 7.8/7.4 vs 7.5/7.4, 60-day 7.3/7.3 vs 7.3/7.3.
 - **Not done:** visibility, UV, ozone, CAPE are -999 on CFS-only hours (no CFS field);
   `sources` still lists models with no rows on the day (#554).
+- **Not done (minutely on the day GFS ends):** the minutely block picks one source per
+  element for the whole hour, not per minute like the hourly block, so a minute past
+  ECMWF's end takes CFS even where GFS still runs (Sydney 03-06Z: `currently` 0.33-0.81
+  mm/h CFS, hourly 0.08-0.11 GFS). An hour whose 61 minutes cross GFS's last hour is all
+  "mixed" (any NaN type row forces it), including the covered first minute (New York
+  06Z: 0 mm/h "Mixed Precipitation"). Both predate CFS; by the same code (not measured)
+  a future day GFS covers but ECMWF ends in shows such minutes as 0 "none".
 
 ### Future-dated requests (2026-11-09)
 [pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): a time

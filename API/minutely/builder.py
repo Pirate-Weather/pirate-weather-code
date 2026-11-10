@@ -1128,6 +1128,8 @@ def _process_minute_items(
     minuteType,
     prep_intensity_unit,
     refc_used,
+    cfs_missing_prob=None,
+    cfs_missing_error=None,
 ):
     """
     Process minutely items for output.
@@ -1137,6 +1139,8 @@ def _process_minute_items(
         minuteType: List of precipitation types.
         prep_intensity_unit: Precipitation intensity unit.
         refc_used: Whether reflectivity data was used in the request.
+        cfs_missing_prob: Minutes CFS gave no probability (None without CFS).
+        cfs_missing_error: Minutes CFS gave no error (None without CFS).
 
     Returns:
         Tuple containing minute items and SI minute items.
@@ -1177,8 +1181,15 @@ def _process_minute_items(
     minuteRainIntensity[zero_type_mask] = 0.0
     minuteSnowIntensity[zero_type_mask] = 0.0
     minuteSleetIntensity[zero_type_mask] = 0.0
-    minuteProbability[zero_type_mask] = 0.0
-    minuteIntensityError[zero_type_mask] = 0.0
+    # Past CFS's 4-member range a dry minute has no probability or error; they
+    # stay missing, as in the hourly block, rather than become 0.
+    prob_zero_mask = zero_type_mask
+    error_zero_mask = zero_type_mask
+    if cfs_missing_prob is not None:
+        prob_zero_mask = zero_type_mask & ~cfs_missing_prob
+        error_zero_mask = zero_type_mask & ~cfs_missing_error
+    minuteProbability[prob_zero_mask] = 0.0
+    minuteIntensityError[error_zero_mask] = 0.0
     minuteIntensity[zero_type_mask] = 0.0
 
     minuteIntensity_display = np.round(minuteIntensity * prep_intensity_unit, 4)
@@ -1534,6 +1545,48 @@ def build_minutely_block(
         cfsMinuteInterpolation=cfsMinuteInterpolation,
     )
 
+    # CFS is read only for a future day past the GFS store (#689). On the day
+    # that holds GFS's last hour, GFS, GEFS or DWD MOSMIX rows from earlier in
+    # the day still win the choices above but are NaN past their last hour, so
+    # minutes the chosen intensity source misses take CFS's intensity, typed
+    # from its temperature as in its own branch, and a missing probability or
+    # error takes CFS's (thresholded as above). Covered minutes keep theirs.
+    cfs_missing_prob = None
+    cfs_missing_error = None
+    if cfsMinuteInterpolation is not None:
+        cfs_intensity = cfsMinuteInterpolation[:, CFS["intensity"]]
+        cfs_fill = np.isnan(InterPminute[:, DATA_MINUTELY["intensity"]]) & np.isfinite(
+            cfs_intensity
+        )
+        InterPminute[cfs_fill, DATA_MINUTELY["intensity"]] = cfs_intensity[cfs_fill]
+        precipTypes[cfs_fill] = PRECIP_TYPES["none"]
+        cfs_wet = cfs_fill & (cfs_intensity > 0)
+        temp_arr = cfsMinuteInterpolation[:, CFS["temp"]]
+        precipTypes[cfs_wet] = np.where(
+            temp_arr[cfs_wet] >= TEMP_THRESHOLD_RAIN_C,
+            PRECIP_TYPES["rain"],
+            np.where(
+                temp_arr[cfs_wet] <= TEMP_THRESHOLD_SNOW_C,
+                PRECIP_TYPES["snow"],
+                PRECIP_TYPES["sleet"],
+            ),
+        )
+        minuteType = precipTypes.tolist()
+        maxPchance = np.array([ptype_to_idx.get(ptype, 0) for ptype in precipTypes])
+
+        for column in ("prob", "error"):
+            missing = np.isnan(InterPminute[:, DATA_MINUTELY[column]])
+            InterPminute[missing, DATA_MINUTELY[column]] = cfsMinuteInterpolation[
+                missing, CFS[column]
+            ]
+        prob_column = InterPminute[:, DATA_MINUTELY["prob"]]
+        prob_column[prob_column < 0.05] = 0
+
+        # Still NaN means CFS has none either: past its 4-member range
+        # (ensemble_end) it has no probability or spread.
+        cfs_missing_prob = np.isnan(prob_column)
+        cfs_missing_error = np.isnan(InterPminute[:, DATA_MINUTELY["error"]])
+
     # Distribute intensity to specific types
     InterPminute[:, DATA_MINUTELY["rain_intensity"]] = 0
     InterPminute[:, DATA_MINUTELY["snow_intensity"]] = 0
@@ -1562,6 +1615,8 @@ def build_minutely_block(
         minuteType,
         prep_intensity_unit,
         refc_used,
+        cfs_missing_prob=cfs_missing_prob,
+        cfs_missing_error=cfs_missing_error,
     )
 
     return (
