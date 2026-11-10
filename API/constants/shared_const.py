@@ -42,8 +42,10 @@ ENSEMBLE_MEMBER_COUNTS = {
     "AIGEFS": 30,
     "GEPS": 21,
     "REPS": 21,
-    "ECMWF_IFS": 51,
-    "ECMWF_AIFS": 51,
+    # The open-data enfo files hold the 50 perturbed members; the control
+    # member is not among them (runs of 2026-11-09/10 had 50)
+    "ECMWF_IFS": 50,
+    "ECMWF_AIFS": 50,
 }
 
 
