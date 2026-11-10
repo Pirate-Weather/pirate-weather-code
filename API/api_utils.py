@@ -171,8 +171,12 @@ def calculate_apparent_temperature(air_temp_c, humidity, wind, solar=None):
 def clipLog(data, min_val, max_val, name):
     """Clip data to min_val and max_val, replacing implausible values as missing.
 
-    A value a little out of range (up to 25 % past the limit, plus 2 below the
-    minimum) is model noise and is clamped to the limit. Anything further is bad
+    A value a little out of range is model noise and is clamped to the limit:
+    up to 25 % above a positive maximum, and below a non-negative minimum down
+    to 0.75 * min_val - 2 (so tiny negatives from interpolation clamp to 0).
+    A negative minimum or a maximum of 0 or below has no margin: anything past
+    it becomes MISSING_DATA rather than being clamped (e.g. a feels-like below
+    -60 C is missing, not -60). Out-of-range values beyond the margin are bad
     data: only that value becomes MISSING_DATA and is logged, so one bad hour
     doesn't blank plausible values beside it.
     """

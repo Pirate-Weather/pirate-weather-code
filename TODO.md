@@ -11,8 +11,7 @@ then move the entry to Done.
 ## Plan (2026-11-09)
 
 Work through the open items in this order, small ones first:
-1. Small: re-publish the README developer snapshot in the sharded layout; consistent
-   clipping (#760).
+1. Small: re-publish the README developer snapshot in the sharded layout.
 2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689); only list
    the sources used (#554); next-update field (#668).
 
@@ -63,10 +62,6 @@ Sky allowed time-machine requests for future dates; Pirate Weather returns HTTP 
 when the forecast data will next refresh. The run-time pickles and the ingest
 schedules already hold what is needed.
 
-### Consistent clipping
-[pirate-weather-code#760](https://github.com/Pirate-Weather/pirate-weather-code/issues/760):
-some fields use `clipLog`, others `np.clip`.
-
 ## Done
 
 ### GEFS converts each member in tiles (2026-11-10)
@@ -79,6 +74,23 @@ files the cgroup high-water mark was 11.3 GiB. Opening each member in the 198-ce
 processing tiles runs the differencing inside `to_zarr`: RSS peak 6.0 -> 2.3 GiB, cgroup
 high-water 11.3 -> 7.4 GiB, run time 574 -> 570 s, final store byte-identical (sha256 of
 all 121 files, same 06Z cycle). The GEFS job limit was also raised to 14 Gi (ovh #14).
+
+### Hourly fields clip with `clipLog` where it is safe (2026-11-09)
+[#760](https://github.com/Pirate-Weather/pirate-weather-code/issues/760): the hourly
+precipitation probability, CAPE, solar and (placeholder) fire columns now use `clipLog`
+like their current counterparts, so a value past 125 % of the maximum (a unit or data
+bug) is logged and blanked instead of quietly clamped. Interpolation noise still clamps
+(-1e-6 -> 0). About 5 us per call. Left as `np.clip` on purpose:
+- visibility (hourly and current): GFS, HRRR and RRFS report clear air as about
+  24 km, past the 20.1 km limit for the 16.09 km maximum, so every clear hour would blank;
+- AQ concentrations: near-fire PM2.5 in RAQDPS-FW and SILAM can pass 1250 ug/m3, and a
+  blank would drop a hazardous AQI to missing;
+- AQI and Israel AQI, the Fosberg index and moon phase: bounds of a computed scale;
+- hourly feels-like and CIN (hourly and current): `clipLog` gives no margin past a
+  negative minimum or a zero maximum, so feels-like below -60 C or CIN above 0 would
+  blank (the current feels-like and the temperature already do this);
+- indices, interpolation weights, RH and rates inside the visibility estimate,
+  haversine and the SILAM blend weights: numerical, not output values.
 
 ### Moved to OVHCloud (2026-11)
 The API, the ingests, LibreWXR and the daily ERA5 job run on OVH's RBX Kubernetes
