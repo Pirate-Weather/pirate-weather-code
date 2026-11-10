@@ -11,7 +11,6 @@ import datetime
 import functools
 import logging
 import os
-import pickle
 import platform
 import sys
 import threading
@@ -19,7 +18,6 @@ from contextlib import asynccontextmanager
 
 import numpy as np
 import orjson
-import tensorstore as ts
 from astral import LocationInfo, moon
 from fastapi import FastAPI, HTTPException, Request, Response
 from pirateweather_translations.dynamic_loader import load_all_translations
@@ -78,7 +76,7 @@ from API.forecast_sources import (
     merge_hourly_models,
 )
 from API.hourly.block import build_hourly_block
-from API.io.store_reader import load_stores, remote_store_root, watch_stores
+from API.io.store_reader import load_stores, watch_stores
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -132,9 +130,6 @@ formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(messag
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-
-DWD_MOSMIX_Stations = None
-
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -165,35 +160,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(TimingMiddleware)
-
-# Load DWD MOSMIX station mapping
-try:
-    station_map_file = None
-
-    if STAGE in ("DEV", "PROD"):
-        station_map_file = os.path.join(save_dir, "DWD_MOSMIX_stations.pickle")
-    elif STAGE in ("TESTING", "TM_TESTING") and save_type in ("S3", "S3Zarr"):
-        # The map is optional: without it the DWD MOSMIX source is left out.
-        try:
-            kvstore = ts.KvStore.open(remote_store_root().kvstore).result()
-            station_map = kvstore.read("DWD_MOSMIX_stations.pickle").result()
-            if station_map.state == "value":
-                DWD_MOSMIX_Stations = pickle.loads(bytes(station_map.value))
-                logger.info("Loaded DWD MOSMIX station map from S3")
-        except (ValueError, OSError, pickle.UnpicklingError, EOFError) as e:
-            logger.warning("Could not load DWD MOSMIX station map from S3: %s", e)
-    elif STAGE in ("TESTING", "TM_TESTING"):
-        station_map_file = os.path.join(s3_bucket, "DWD_MOSMIX_stations.pickle")
-
-    if station_map_file and os.path.exists(station_map_file):
-        with open(station_map_file, "rb") as f:
-            DWD_MOSMIX_Stations = pickle.load(f)
-            logger.info(f"Loaded DWD MOSMIX station map from: {station_map_file}")
-    elif station_map_file and DWD_MOSMIX_Stations is None:
-        # File path was configured for this stage but file is missing
-        logger.debug(f"DWD MOSMIX station map not found at: {station_map_file}")
-except (OSError, pickle.UnpicklingError) as e:
-    logger.debug(f"Error loading DWD MOSMIX station map: {e}")
 
 lats_etopo = np.arange(
     COORDINATE_CONST["latitude_min"],
@@ -558,6 +524,7 @@ async def PW_Forecast(
     # 2. Initialize Zarr sources
     # The stores held now; a version swapped in mid-request is used from the next one
     stores = request.app.state.stores
+    dwd_mosmix_stations = stores.DWD_MOSMIX_Stations
     zarr_sources = ZarrSources(
         subh=stores.SubH_Zarr,
         hrrr_6h=stores.HRRR_6H_Zarr,
@@ -1395,13 +1362,13 @@ async def PW_Forecast(
         # Calculate distance to nearest station if stations are available
         nearest_station_distance = -999  # Default value when no stations available
         if (
-            DWD_MOSMIX_Stations is not None
+            dwd_mosmix_stations is not None
             and grid_result.x_dwd is not None
             and grid_result.y_dwd is not None
             and "dwd_mosmix" in sourceList
         ):
             grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
-            stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
+            stations_at_grid = dwd_mosmix_stations.get(grid_key, [])
             if stations_at_grid:
                 # Calculate distance to each station and find the minimum
                 # Performance: Use a generator expression with min() for efficiency
@@ -1446,13 +1413,13 @@ async def PW_Forecast(
 
             # Add DWD MOSMIX stations for this grid cell (if available)
             if (
-                DWD_MOSMIX_Stations is not None
+                dwd_mosmix_stations is not None
                 and grid_result.x_dwd is not None
                 and grid_result.y_dwd is not None
                 and "dwd_mosmix" in sourceList
             ):
                 grid_key = (int(grid_result.y_dwd), int(grid_result.x_dwd))
-                stations_at_grid = DWD_MOSMIX_Stations.get(grid_key, [])
+                stations_at_grid = dwd_mosmix_stations.get(grid_key, [])
                 if stations_at_grid:
                     returnOBJ["flags"]["sourceIDX"]["dwd_mosmix"] = {
                         "stations": stations_at_grid

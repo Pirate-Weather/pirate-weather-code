@@ -194,14 +194,12 @@ However, the response script/container is significantly lighter, requiring only 
 The most interesting part of this project is the response script, which takes the raw model data and generates the API response. While spinning up the entire API is one way to work on this, it's much easier to simply run either the docker container or a virtual Python environment and use the existing Zarr stores!
 
 ##### Docker
-Two options are available to do this via Docker- either download a static copy of the forecast files and reference those, or access the live Zarr files directly. Live access is much easier, but does require credentials for the bucket holding the stores.
-
-For Option 1:
+Run the response container against the Zarr stores in a bucket. This needs credentials for the bucket holding the stores (or your own stores, published by running an ingest).
 
 ```
 docker run -e STAGE=TESTING -e save_type=S3 -e REMOTE_PATH=<BUCKET>/<PREFIX>/v32 -e s3_endpoint=<ENDPOINT> -e s3_region=<REGION> -e AWS_ACCESS_KEY_ID=<KEY> -e AWS_SECRET_ACCESS_KEY=<SECRET> -p 8000:8000 public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8000 
 
-curl 127.0.0.1:8083/forecast/123456/45.4215,-75.6972
+curl 127.0.0.1:8000/forecast/123456/45.4215,-75.6972
 ```
 That's it! Responses will be somewhat slow, since every read goes to object storage, but everything just works out of the box. For OVH, `s3_endpoint` is e.g. `https://s3.rbx.io.cloud.ovh.net` and `s3_region` is `rbx`.
 
@@ -211,25 +209,10 @@ git clone https://github.com/Pirate-Weather/pirate-weather-code.git
 
 docker run -e STAGE=TESTING -e save_type=S3 -e REMOTE_PATH=<BUCKET>/<PREFIX>/v32 -e s3_endpoint=<ENDPOINT> -e s3_region=<REGION> -e AWS_ACCESS_KEY_ID=<KEY> -e AWS_SECRET_ACCESS_KEY=<SECRET> -p 8000:8000 -v ~/pirate-weather-code/API:/app public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8000 
 ```
-  
-For Option 2:
 
-```
-git clone https://github.com/Pirate-Weather/pirate-weather-code.git
-
-wget https://files.alexanderrey.ca/api/public/dl/9jMgSLpi
-unzip 9jMgSLpi -d ~/pw-data
-
-docker run -d -p 8083:8083 -v ~/pirate-weather-code/API:/app -v ~/pw-data:/tmp -e "STAGE=TESTING" -e "use_etopo=FALSE" -e "TIMING=TRUE" -e "save_type=Download" -e "force_now=1730869200" --workdir=/efs public.ecr.aws/j9v4j3c7/pirate-alpine-zarr:dev responseLocal:app --host 0.0.0.0 --port 8083
-
-curl 127.0.0.1:8083/forecast/123456/47.1756,27.594,1730869200
-```
-
-In either case, the dockerfiles to build the underlying images are [available](https://github.com/Pirate-Weather/pirate-weather-code/tree/dev/Docker), allowing the image to be rebuilt as well. This is helpful for adding additional Python packages or updating versions. 
+The dockerfiles to build the underlying images are [available](https://github.com/Pirate-Weather/pirate-weather-code/tree/dev/Docker), allowing the image to be rebuilt as well. This is helpful for adding additional Python packages or updating versions. 
 
 **Note:** 
-- The static snapshot predates the sharded store layout (below); it needs a re-published snapshot before it works with the current reader.
-- Because the model files are a static snapshot, the time parameter (around Wed Nov 06 2024) must be used!
 - The container will initially not do anything, since FastAPI doesn't appear to pass along the logs until it's initialized. It should be up and running within ~5 minutes 
 
 This setup disables all the file updating processes within the response script and reads the data directly from the Zarr stores, focusing on the response. 
