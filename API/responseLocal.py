@@ -883,6 +883,7 @@ async def PW_Forecast(
             gdps_data=GDPS_Merged if "gdps" in sourceList else None,
             geps_data=GEPS_Merged if "geps" in sourceList else None,
             reps_data=REPS_Merged if "reps" in sourceList else None,
+            cfs_data=merge_result.cfs,
             prep_intensity_unit=prepIntensityUnit,
             version=version,
             lat=lat,

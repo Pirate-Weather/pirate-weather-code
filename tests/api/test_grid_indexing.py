@@ -441,14 +441,17 @@ def test_far_future_day_is_served_from_cfs_and_only_then_read():
     """Past the GFS store's last hour a future day (#689) comes from CFS: the
     day's window is read at the nearest Gaussian cell (longitudes near 360 wrap
     to column 0), its rows land on the day's hours, and ``cfs`` is listed as a
-    source and fills each element last. CFS is time-chunked and months long, so
-    a forecast request or a future day GFS still covers must not read it at
-    all; that would add a read to every request.
+    source and fills each element last, including the computed feels-like and
+    the minutely precipitation ``currently`` copies (-999 and 0 without them).
+    CFS is time-chunked and months long, so a forecast request or a future day
+    GFS still covers must not read it at all; that would add a read to every
+    request.
     """
     from API.constants.model_const import CFS, GFS
     from API.constants.shared_const import HISTORY_PERIODS
     from API.forecast_sources import build_source_metadata, merge_hourly_models
     from API.io.store_reader import ModelStore, WeatherParallel
+    from API.minutely.builder import build_minutely_block
     from tests.helpers.model_arrays import hourly_inputs
 
     now = datetime.datetime(2026, 11, 10, 12)
@@ -468,6 +471,9 @@ def test_far_future_day_is_served_from_cfs_and_only_then_read():
     values[CFS["temp"] - 1, :, cell_y, 0] = 250 + hour_of_store % 24
     values[CFS["intensity"] - 1, :, cell_y, 0] = 0.5
     values[CFS["prob"] - 1, :, cell_y, 0] = 0.25
+    values[CFS["humidity"] - 1, :, cell_y, 0] = 80.0
+    values[CFS["wind_u"] - 1, :, cell_y, 0] = 3.0
+    values[CFS["wind_v"] - 1, :, cell_y, 0] = 4.0
     cfs_store = ModelStore(
         array=ts.array(values.astype(np.float32)), times=cfs_times, version="test"
     )
@@ -589,3 +595,29 @@ def test_far_future_day_is_served_from_cfs_and_only_then_read():
     np.testing.assert_array_equal(inputs["prcipProbability_inputs"][:, -1], 0.25)
     # CFS has no type; "none" lets the hourly block type it from temperature
     np.testing.assert_array_equal(inputs["prcipType_inputs"][:, -1], 0)
+    # No CFS apparent field: feels-like is computed from its own conditions
+    assert np.isfinite(inputs["feels_like_inputs"][:, -1]).all()
+
+    # `currently` copies the first minute. The error is NaN in this store (as
+    # after the 4-member range) and must stay missing rather than become 0.
+    minute_items = build_minutely_block(
+        minute_array_grib=base + 12 * 3600 + 60 * np.arange(61.0),
+        source_list=merged.metadata.source_list,
+        hrrr_subh_data=None,
+        hrrr_merged=None,
+        nbm_data=None,
+        dwd_mosmix_data=None,
+        gefs_data=None,
+        gfs_data=merged.gfs,
+        ecmwf_data=None,
+        era5_data=None,
+        cfs_data=merged.cfs,
+        prep_intensity_unit=1.0,
+        version=2,
+        lat=-60.0,
+        lon=359.9,
+    )[2]
+    assert minute_items[0]["precipIntensity"] == 0.5
+    assert minute_items[0]["precipProbability"] == 0.25
+    assert minute_items[0]["precipType"] != "none"
+    assert np.isnan(minute_items[0]["precipIntensityError"])

@@ -21,6 +21,7 @@ from API.constants.api_const import (
 )
 from API.constants.forecast_const import DATA_MINUTELY
 from API.constants.model_const import (
+    CFS,
     DWD_MOSMIX,
     ECMWF,
     ERA5,
@@ -495,6 +496,7 @@ def _calculate_prob(
     lat,
     lon,
     prioritize_ai_models=False,
+    cfsMinuteInterpolation=None,
 ):
     """
     Calculate precipitation probability.
@@ -506,6 +508,8 @@ def _calculate_prob(
         ecmwfMinuteInterpolation: ECMWF interpolated data.
         gefsMinuteInterpolation: GEFS interpolated data.
         era5_MinuteInterpolation: ERA5 interpolated data.
+        cfsMinuteInterpolation: CFS interpolated data (future days past GFS),
+            already a 0-1 probability and NaN after the 4-member range.
 
     Returns:
         Array of precipitation probabilities.
@@ -525,6 +529,8 @@ def _calculate_prob(
             InterPminute_prob = gefsMinuteInterpolation[:, GEFS["prob"]]
         elif "era5" in source_list and era5_MinuteInterpolation is not None:
             InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
+        elif "cfs" in source_list and cfsMinuteInterpolation is not None:
+            InterPminute_prob = cfsMinuteInterpolation[:, CFS["prob"]]
         InterPminute_prob[InterPminute_prob < 0.05] = 0
         return InterPminute_prob
 
@@ -540,6 +546,8 @@ def _calculate_prob(
                 InterPminute_prob = gepsMinuteInterpolation[:, GEPS["prob"]]
             elif "era5" in source_list and era5_MinuteInterpolation is not None:
                 InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
+            elif "cfs" in source_list and cfsMinuteInterpolation is not None:
+                InterPminute_prob = cfsMinuteInterpolation[:, CFS["prob"]]
         else:
             if "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
                 InterPminute_prob = ecmwfMinuteInterpolation[:, ECMWF["prob"]]
@@ -551,6 +559,8 @@ def _calculate_prob(
                 InterPminute_prob = gepsMinuteInterpolation[:, GEPS["prob"]]
             elif "era5" in source_list and era5_MinuteInterpolation is not None:
                 InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
+            elif "cfs" in source_list and cfsMinuteInterpolation is not None:
+                InterPminute_prob = cfsMinuteInterpolation[:, CFS["prob"]]
         InterPminute_prob[InterPminute_prob < 0.05] = 0
         return InterPminute_prob
 
@@ -564,6 +574,8 @@ def _calculate_prob(
         InterPminute_prob = gepsMinuteInterpolation[:, GEPS["prob"]]
     elif "era5" in source_list and era5_MinuteInterpolation is not None:
         InterPminute_prob = era5_MinuteInterpolation[:, ERA5["prob"]] * 0.01
+    elif "cfs" in source_list and cfsMinuteInterpolation is not None:
+        InterPminute_prob = cfsMinuteInterpolation[:, CFS["prob"]]
 
     InterPminute_prob[InterPminute_prob < 0.05] = 0
     return InterPminute_prob
@@ -878,6 +890,7 @@ def _calculate_intensity(
     lon,
     prioritize_ai_models=False,
     rrfsSubHInterpolation=None,
+    cfsMinuteInterpolation=None,
 ):
     """
     Calculate precipitation intensity.
@@ -994,6 +1007,21 @@ def _calculate_intensity(
         )
     elif "era5" in source_list and era5_MinuteInterpolation is not None:
         intensity = _era5_minutely_intensity(era5_MinuteInterpolation)
+    elif "cfs" in source_list and cfsMinuteInterpolation is not None:
+        # CFS stores mm/h already and has no precipitation type, so its minutes
+        # are typed from its temperature, as for DWD MOSMIX above.
+        intensity = cfsMinuteInterpolation[:, CFS["intensity"]]
+        temp_arr = cfsMinuteInterpolation[:, CFS["temp"]]
+        mask = (precipTypes == PRECIP_TYPES["none"]) & (intensity > 0)
+        precipTypes[mask] = np.where(
+            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
+            PRECIP_TYPES["rain"],
+            np.where(
+                temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C,
+                PRECIP_TYPES["snow"],
+                PRECIP_TYPES["sleet"],
+            ),
+        )
 
     return intensity, precipTypes, refc_used
 
@@ -1050,6 +1078,7 @@ def _calculate_error(
     lat,
     lon,
     prioritize_ai_models=False,
+    cfsMinuteInterpolation=None,
 ):
     """
     Calculate precipitation intensity error.
@@ -1087,6 +1116,9 @@ def _calculate_error(
         error = gefsMinuteInterpolation[:, GEFS["error"]]
     elif "geps" in source_list and gepsMinuteInterpolation is not None:
         error = gepsMinuteInterpolation[:, GEPS["error"]]
+    elif "cfs" in source_list and cfsMinuteInterpolation is not None:
+        # mm/h, NaN after the 4-member range
+        error = cfsMinuteInterpolation[:, CFS["error"]]
 
     return error
 
@@ -1225,6 +1257,7 @@ def build_minutely_block(
     librewxr_data: np.ndarray | None = None,
     rrfs_subh_data: np.ndarray | None = None,
     rrfs_merged: np.ndarray | None = None,
+    cfs_data: np.ndarray | None = None,
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -1259,6 +1292,8 @@ def build_minutely_block(
         rrfs_subh_data: RRFS sub-hourly data (include=rrfs only).
         rrfs_merged: RRFS merged hourly data (include=rrfs only). RRFS leads
             every model; only the LibreWXR radar observations take precedence.
+        cfs_data: CFS merged data (future days past the GFS store only). Last
+            in every order, it feeds `currently` on the days only CFS covers.
         prep_intensity_unit: Precipitation intensity unit.
         version: API version.
         lat: Latitude of the location.
@@ -1286,6 +1321,7 @@ def build_minutely_block(
     reps_data = _rows_with_time(reps_data)
     rrfs_subh_data = _rows_with_time(rrfs_subh_data)
     rrfs_merged = _rows_with_time(rrfs_merged)
+    cfs_data = _rows_with_time(cfs_data)
 
     # Interpolate data sources
     gefsMinuteInterpolation = (
@@ -1332,6 +1368,10 @@ def build_minutely_block(
     repsMinuteInterpolation = (
         _interp_cmc(minute_array_grib, reps_data) if "reps" in source_list else None
     )
+    # Every CFS column is continuous, so it is interpolated linearly like GFS
+    cfsMinuteInterpolation = (
+        _interp_gfs(minute_array_grib, cfs_data) if "cfs" in source_list else None
+    )
 
     # Handle GEFS error interpolation inside HRRR block logic from original code
     # The original code updated gefsMinuteInterpolation inside the HRRR block.
@@ -1366,6 +1406,7 @@ def build_minutely_block(
         lat,
         lon,
         prioritize_ai_models,
+        cfsMinuteInterpolation=cfsMinuteInterpolation,
     )
 
     # Calculate Precip Type Probs
@@ -1444,6 +1485,7 @@ def build_minutely_block(
         lon,
         prioritize_ai_models,
         rrfsSubHInterpolation=rrfsSubHInterpolation,
+        cfsMinuteInterpolation=cfsMinuteInterpolation,
     )
     # LibreWXR radar takes precedence over every model wherever it has coverage
     if librewxrMinuteInterpolation is not None:
@@ -1489,6 +1531,7 @@ def build_minutely_block(
         lat,
         lon,
         prioritize_ai_models,
+        cfsMinuteInterpolation=cfsMinuteInterpolation,
     )
 
     # Distribute intensity to specific types

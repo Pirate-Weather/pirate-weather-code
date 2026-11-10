@@ -5,6 +5,7 @@ import numpy as np
 from API.api_utils import (
     _lookup_precip_codes,
     _precip_code_table,
+    calculate_apparent_temperature,
     estimate_visibility_gultepe_rh_pr_numpy,
     map_canadian_precip_type_to_ptype,
     map_ensemble_precip_rates_to_ptype,
@@ -1207,10 +1208,22 @@ def prepare_data_inputs(
             np.nan,
             _normalize_length(num_hours, gfs_apparent, label="gfs"),
         )
+    # CFS has no apparent temperature: on its hours feels-like is computed from
+    # its temperature (C by now), humidity (% to fraction), wind and solar
+    # radiation, with the formula the hourly block uses for apparentTemperature.
+    cfs_apparent = None
+    if cfs_merged is not None:
+        cfs_apparent = calculate_apparent_temperature(
+            cfs_merged[:, CFS["temp"]],
+            cfs_merged[:, CFS["humidity"]] * 0.01,
+            _wind_speed(cfs_merged[:, CFS["wind_u"]], cfs_merged[:, CFS["wind_v"]]),
+            solar=cfs_merged[:, CFS["solar"]],
+        )
     feels_like_inputs = _stack_fields(
         num_hours,
         nbm_merged[:, NBM["apparent"]] if nbm_merged is not None else None,
         gfs_apparent,
+        cfs_apparent,
     )
 
     # --- solar_inputs ---

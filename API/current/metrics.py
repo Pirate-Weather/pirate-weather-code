@@ -1744,6 +1744,9 @@ def _get_feels_like(
                     model_data["GFS_Merged"], GFS["apparent"], state
                 ),
             ),
+            # CFS has no apparent temperature: computed from the current
+            # temperature, humidity, wind and solar, which are CFS's on its hours.
+            (lambda: model_data.get("CFS_Merged") is not None, lambda: apparent),
             (lambda: timeMachine, lambda: apparent),
         ],
         default=MISSING_DATA,

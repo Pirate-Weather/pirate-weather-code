@@ -130,9 +130,18 @@ tcdcclm, dswsfc) x 4 members = 32 files, ~1.1 GB, capped by a Herbie `search` at
   (GDPS, London 2026-11-20) left one row, which crashed the minutely interpolation
   (`np.interp` on a 0-d time column); `_rows_with_time` now drops a model with fewer than
   two timed rows. Unreachable before, as such days were past 218 h.
-- **Not done:** `currently` precipitation comes from the minutely block, which has no CFS
-  input, so it is 0 on CFS-only hours; feels-like, visibility, UV, ozone, CAPE are -999
-  there (no CFS field); `sources` still lists models with no rows on the day (#554).
+- **Feels-like and `currently` precipitation on CFS hours:** CFS has no apparent
+  temperature, so feels-like is computed from its temperature, humidity, wind and solar
+  (last in `feels_like_inputs` and `_get_feels_like`), and CFS is the last minutely
+  source (intensity, probability, error; typed from temperature like DWD MOSMIX), which
+  `currently` copies. Before, they were -999 and 0. Measured as above (60 and 150 days,
+  8 cities): hourly feels-like has no -999 left; Jakarta 60 days `currently` 0.81 mm/h,
+  probability 1.0, error 0.78 (was 0/0/0); New York 150 days 2.09 mm/h with probability
+  and error -999 (after `ensemble_end`). Normal and 5-day responses (6 cities) are
+  identical to before apart from `processTime`; processing median of 180 requests, two
+  rounds, 10.0/10.0 ms normal and 6.3/6.4 ms 5-day vs 10.1/9.9 and 6.6/6.3 before.
+- **Not done:** visibility, UV, ozone, CAPE are -999 on CFS-only hours (no CFS field);
+  `sources` still lists models with no rows on the day (#554).
 
 ### Future-dated requests (2026-11-09)
 [pirateweather#689](https://github.com/Pirate-Weather/pirateweather/issues/689): a time

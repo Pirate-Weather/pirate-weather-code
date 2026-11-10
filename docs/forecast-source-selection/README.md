@@ -134,7 +134,7 @@ Some current elements have intentionally narrower source sets:
 | Ozone | GFS-compatible source → ERA5 |
 | Nearest storm | GFS-compatible source |
 | Smoke | HRRR → SILAM |
-| Feels-like temperature | NBM → GFS-compatible source |
+| Feels-like temperature | NBM → GFS-compatible source → CFS (computed from its temperature, humidity, wind and solar radiation) |
 
 ## Minutely
 
@@ -159,10 +159,10 @@ not eligible in AI mode.
 
 | Element | Priority |
 | --- | --- |
-| Precipitation intensity | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 |
-| Precipitation type | HRRR SubH → NBM → ECMWF IFS → GFS → DWD MOSMIX → GEFS → GDPS → GEPS → ERA5 |
-| Precipitation probability | REPS → GEPS → NBM → ECMWF IFS → GEFS → ERA5 |
-| Precipitation intensity error | REPS → ECMWF IFS → GEFS → GEPS |
+| Precipitation intensity | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 → CFS |
+| Precipitation type | HRRR SubH → NBM → ECMWF IFS → GFS → DWD MOSMIX → GEFS → GDPS → GEPS → ERA5 → CFS |
+| Precipitation probability | REPS → GEPS → NBM → ECMWF IFS → GEFS → ERA5 → CFS |
+| Precipitation intensity error | REPS → ECMWF IFS → GEFS → GEPS → CFS |
 
 The HRRR SubH priority applies whenever its data is available and AI mode is not
 enabled. NBM is the next conventional intensity/type source. REPS is the
@@ -173,13 +173,15 @@ precipitation-probability field.
 
 | Element | North America | Global / standard |
 | --- | --- | --- |
-| Precipitation intensity | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 |
-| Precipitation type | HRRR SubH → NBM → ECMWF IFS → GFS → DWD MOSMIX → GEFS → GDPS → GEPS → ERA5 | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GFS → GEFS → GDPS → GEPS → ERA5 |
-| Precipitation probability | NBM → ECMWF IFS → GEFS → GEPS → ERA5 | NBM → ECMWF IFS → GEFS → GEPS → ERA5 |
-| Precipitation intensity error | ECMWF IFS → GEFS → GEPS | ECMWF IFS → GEFS → GEPS |
+| Precipitation intensity | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 → CFS | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GEFS → GFS → GDPS → GEPS → ERA5 → CFS |
+| Precipitation type | HRRR SubH → NBM → ECMWF IFS → GFS → DWD MOSMIX → GEFS → GDPS → GEPS → ERA5 → CFS | HRRR SubH → NBM → DWD MOSMIX → ECMWF IFS → GFS → GEFS → GDPS → GEPS → ERA5 → CFS |
+| Precipitation probability | NBM → ECMWF IFS → GEFS → GEPS → ERA5 → CFS | NBM → ECMWF IFS → GEFS → GEPS → ERA5 → CFS |
+| Precipitation intensity error | ECMWF IFS → GEFS → GEPS → CFS | ECMWF IFS → GEFS → GEPS → CFS |
 
 GDPS and GEPS are deliberately late minutely fallbacks outside Canada,
-after the GFS/GEFS family.
+after the GFS/GEFS family. CFS is used only when none of the others is
+present (future days past the GFS store); it has no type, so its minutes are
+typed rain, snow or sleet from its temperature.
 
 ## Hourly, daily, and day/night precipitation
 
@@ -236,7 +238,7 @@ an element:
 | Ozone | GFS-compatible source → GDPS → ERA5 |
 | Visibility | Regional stack filtered to NBM, HRRR, DWD MOSMIX, GFS-compatible source, and ERA5 |
 | Nearest storm | GFS-compatible source only |
-| Feels-like temperature | NBM → GFS-compatible source |
+| Feels-like temperature | NBM → GFS-compatible source → CFS (computed from its temperature, humidity, wind and solar radiation) |
 | CAPE | NBM → HRRR → HRDPS → GDPS → GFS-compatible source → ERA5 |
 | Smoke | HRRR, with SILAM used for air-quality detail where applicable |
 | Air quality | RAQDPS → SILAM; carbon monoxide uses SILAM |
@@ -275,11 +277,14 @@ listed in `flags.sources`, `flags.sourceTimes` and (version 2) `sourceIDX`.
   are missing (-999).
 - **Missing:** gust (falls back to wind speed, as for any model without it),
   visibility, UV index, ozone, CAPE and the other thunderstorm indices, smoke,
-  nearest storm and feels-like temperature come back missing (-999) for hours
-  only CFS covers.
-- **Minutely:** CFS is not a minutely source, so `currently` precipitation
-  intensity, probability and error (copied from the first minute) come back 0
-  on hours only CFS covers.
+  and nearest storm come back missing (-999) for hours only CFS covers.
+- **Feels-like:** CFS has no apparent temperature, so on its hours feels-like
+  is computed from its temperature, humidity, wind and solar radiation, as
+  `apparentTemperature` is.
+- **Minutely:** CFS is the last minutely source, so on days only it covers
+  `currently` precipitation intensity, probability, error and type come from
+  it (type from temperature). After the 4-member range probability and error
+  are -999 at a wet minute; a dry minute reports 0, as for every source.
 
 ## Fallback behavior
 
