@@ -74,5 +74,7 @@ def hourly_block_kwargs(num_hours, **overrides):
         "version": 2,
     }
     kwargs.update({name: np.full((num_hours, 1), np.nan) for name in _STACKED_INPUTS})
+    # prepare_data_inputs also returns the daily builder's member masks
+    overrides.pop("precip_member_masks", None)
     kwargs.update(overrides)
     return kwargs

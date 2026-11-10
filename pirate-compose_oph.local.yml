@@ -54,7 +54,7 @@ x-ingest-env: &ingest_env
   herbie_retry_sleep_seconds: "${herbie_retry_sleep_seconds:-20}"
 
 services:
-  # Read-only forecast API. It writes reader heartbeats to /data/v31/.readers,
+  # Read-only forecast API. It writes reader heartbeats to /data/v32/.readers,
   # so the mount must be writable. ETOPO_DA_C.zarr is not produced by any
   # ingest; without it elevation is reported as 0.
   api:
@@ -67,7 +67,7 @@ services:
       - ${PW_PROD_ROOT}:/data
     environment:
       STAGE: "PROD"
-      save_dir: "/data/v31"
+      save_dir: "/data/v32"
       use_etopo: "${use_etopo:-false}"
     command: ["API.responseLocal:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
 
