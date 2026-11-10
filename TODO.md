@@ -11,7 +11,7 @@ then move the entry to Done.
 ## Plan (2026-11-09)
 
 Work through the open items in this order, small ones first:
-1. Small: re-publish the README developer snapshot in the sharded layout.
+1. Small: all done (see Done below).
 2. Bigger: confirm the KEEPBITS steps; future dates in time machine (#689); only list
    the sources used (#554); next-update field (#668).
 
@@ -33,8 +33,6 @@ pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
   the week's `zarr.json`, then `ts.open` reads it again (`API/io/ZarrHelpers.py`).
 
 ### Remaining storage clean-up
-- Re-publish the static developer snapshot linked from `README.md` in the
-  sharded, versioned layout.
 - Expire old history stores on the remote (nothing deletes them).
 
 ### Tune the shard and cache sizes from real requests
@@ -91,6 +89,11 @@ bug) is logged and blanked instead of quietly clamped. Interpolation noise still
   blank (the current feels-like and the temperature already do this);
 - indices, interpolation weights, RH and rates inside the visibility estimate,
   haversine and the SILAM blend weights: numerical, not output values.
+
+### README developer snapshot dropped (2026-11-09)
+The README's static store snapshot (November 2024, unsharded) no longer worked with the
+reader and is not being re-published. The Docker instructions now only cover reading
+stores from a bucket; the example `curl` used the wrong port (8083 for a container on 8000).
 
 ### Moved to OVHCloud (2026-11)
 The API, the ingests, LibreWXR and the daily ERA5 job run on OVH's RBX Kubernetes
