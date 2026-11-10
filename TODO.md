@@ -234,6 +234,17 @@ some fields use `clipLog`, others `np.clip`.
 
 ## Done
 
+### GEFS converts each member in tiles (2026-11-10)
+The 13:00Z GEFS job was OOM-killed twice at the container's 11 GiB limit before its third
+attempt succeeded. Profiled locally under a cgroup with the cluster's settings: the
+process peaked at 6.0 GiB RSS (unchanged by the member masks), but each member's NetCDF
+was loaded whole for the APCP differencing (five 330 MB fields plus temporaries, a 4.1 GiB
+floor with spikes to 5.6 GiB), and with 3-5 GiB of page cache from the run's working
+files the cgroup high-water mark was 11.3 GiB. Opening each member in the 198-cell
+processing tiles runs the differencing inside `to_zarr`: RSS peak 6.0 -> 2.3 GiB, cgroup
+high-water 11.3 -> 7.4 GiB, run time 574 -> 570 s, final store byte-identical (sha256 of
+all 121 files, same 06Z cycle). The GEFS job limit was also raised to 14 Gi (ovh #14).
+
 ### Daily PoP from ensemble members (2026-11-09)
 Daily `precipProbability` was the maximum of the hourly probabilities over the local day,
 which understates rain whose timing the members disagree on. On real GEFS members (31
