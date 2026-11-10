@@ -790,6 +790,10 @@ results); the storage and read-path measurements behind the current design are i
   one shard (`shard_whole_variables`) and are downloaded to local disk before the
   merge (`download_history_stores` / `open_history_arrays`), because OVH answers
   each GET in 100–400 ms and per-chunk reads ran at 3–4 MB/s.
+- **CFS is the one time-chunked final store** (`FINAL_TIME_CHUNKS`): 4,411 hourly
+  steps (6 months), of which a future-day request needs ~24-30, so it is read with
+  `WeatherParallel.zarr_read_window`, never `zarr_read`. Its `ensemble_end`
+  attribute is the last 4-member time; probability, spread and mask are NaN after it.
 
 ## Performance lessons from the end-to-end runs
 
@@ -807,6 +811,10 @@ results); the storage and read-path measurements behind the current design are i
 - NOMADS pacing adapts (starts at 1 s, backs off on rate-limit responses). Avoid
   Herbie probes per file; AIGEFS downloads each file with a single GET. The AWS
   "EAGLE" AIGEFS objects are an experimental model, not a mirror of NOMADS.
+- CFS time-series files are one object per variable per member per run, fetched
+  through Herbie with a lead-capped `search`; Herbie drops a file's last index
+  message when selected, so leads come from the decoded data, and PRMSL is on a
+  1 degree grid (the rest T126 Gaussian). Their JPEG 2000 decode is the CPU cost.
 
 ## Running ingests end to end
 

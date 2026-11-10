@@ -9,6 +9,7 @@ from API.api_utils import relative_humidity_from_dewpoint_c
 from API.constants.model_const import (
     AIGEFS,
     AIGFS,
+    CFS,
     DWD_MOSMIX,
     ECMWF,
     ECMWF_AIFS,
@@ -53,6 +54,7 @@ USED_SOURCE_KEYS = (
     "dwd_mosmix",
     "raqdps",
     "silam",
+    "cfs",
 )
 USED_SOURCE_COLUMN = {key: column for column, key in enumerate(USED_SOURCE_KEYS)}
 # The hourly stacks and the daily member masks call ECMWF IFS "ecmwf"
@@ -119,6 +121,7 @@ class MergeResult:
     metadata: SourceMetadata
     urma: np.ndarray | None = None
     rrfs: np.ndarray | None = None
+    cfs: np.ndarray | None = None
 
 
 def nearest_index(a, v) -> int:
@@ -280,6 +283,10 @@ def build_source_metadata(
 
     if isinstance(grid_result.dataOut_gefs, np.ndarray):
         metadata.add("gefs", run_time=_rounded_run_time(grid_result.gefsRunTime))
+
+    # CFS is only read for a future day past the GFS store (grid_indexing)
+    if isinstance(grid_result.dataOut_cfs, np.ndarray):
+        metadata.add("cfs", run_time=_rounded_run_time(grid_result.cfsRunTime))
 
     if isinstance(grid_result.dataOut_hrdps, np.ndarray):
         metadata.add("hrdps", run_time=_rounded_run_time(grid_result.hrdpsRunTime))
@@ -715,6 +722,7 @@ def merge_hourly_models(
     data_rrfs: np.ndarray | None = None,
     data_rrfs_6h: np.ndarray | None = None,
     rrfs_grid: str | None = None,
+    data_cfs: np.ndarray | None = None,
 ) -> MergeResult:
     hrrr_merged = None
     nbm_merged = None
@@ -731,6 +739,7 @@ def merge_hourly_models(
     aifs_merged = None
     urma_merged = None
     rrfs_merged = None
+    cfs_merged = None
 
     if rrfs_grid is not None and (data_rrfs is not None or data_rrfs_6h is not None):
         rrfs_merged = _merge_rrfs_blocks(
@@ -863,6 +872,17 @@ def merge_hourly_models(
     if "ecmwf_aifs" in metadata.source_list and isinstance(data_aifs, np.ndarray):
         aifs_merged = _merge_aifs_as_ecmwf(data_aifs, base_day_utc_grib, num_hours)
 
+    # CFS holds only the requested day's window (zarr_read_window), so its rows
+    # align like any forecast-only store's
+    if "cfs" in metadata.source_list and isinstance(data_cfs, np.ndarray):
+        cfs_merged = _merge_simple_source(
+            data_cfs,
+            base_day_utc_grib,
+            num_hours,
+            max(CFS.values()) + 1,
+            source_columns=data_cfs.shape[1],
+        )
+
     return MergeResult(
         hrrr=hrrr_merged,
         nbm=nbm_merged,
@@ -880,4 +900,5 @@ def merge_hourly_models(
         metadata=metadata,
         urma=urma_merged,
         rrfs=rrfs_merged,
+        cfs=cfs_merged,
     )

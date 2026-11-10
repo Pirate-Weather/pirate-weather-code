@@ -40,11 +40,118 @@ pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
 benchmarks. Replay a day of real request coordinates against the new reader to
 pick the cache size (the shard indexes alone are ~35 MB), and check the write
 peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
-### Longer future horizon from CFS (#689 follow-up)
-Future-dated requests stop where the 240 h GFS/GEFS stores end (about 9 days). A CFS
-ingest would extend them to ~45 days. Not planned yet.
 
 ## Done
+
+### Block icon ties no longer depend on the hash seed (2026-11-10)
+The hourly and daily block text and icon without summary text (always for Time
+Machine) were picked with `max(set(lst), key=lst.count)`, so a tie went to whichever
+value the process's string hash seed put first and pods disagreed on the same request:
+a Sydney Time Machine day's `hourly.icon` was "rain" under `PYTHONHASHSEED` 1, 3, 5
+and "wind" under 2, 4, 6 (9 hours each). `API/legacy/summary.py` now uses
+`most_common` (a `Counter`), so a tie goes to the earliest hour/day. Text and icon are
+still picked separately, as before. Over 6 cities x (forecast + Time Machine) x 3 seeds
+against the v32 stores, only that Sydney block differed between seeds (old) and none
+does now; forecast requests use summary text and were unchanged.
+
+### CFS ingest for months-out future requests (2026-11-10)
+`ingest/CFS_Local_Ingest.py` publishes `CFS.zarr` for future-day requests past the
+240 h GFS/GEFS stores. Source: the CFSv2 time-series files on AWS through Herbie
+(`product="time_series"`), one object per variable per member holding the whole run at
+6-hourly leads from 6 h, on the T126 Gaussian grid (384 x 190) except `prmsl` (1 degree,
+regridded bilinearly). Eight variables (tmp2m, q2m, pressfc, prmsl, wnd10m, prate,
+tcdcclm, dswsfc) x 4 members = 32 files, ~1.1 GB, capped by a Herbie `search` at
+`CFS_FORECAST_DAYS = 184` (6 months; member 01 runs ~295 days).
+
+- **00Z only, once a day:** its members 02-04 run ~111 days (45 at 06/12/18Z), and a
+  months-out forecast gains nothing from 6-hourly refreshes.
+- **Ensemble hand-over:** state variables are the 4-member mean while all four run and
+  member 01 after (2026-11-10 00Z: 4 members to 2027-02-28 18Z, lead 2658 h; member 01
+  to the cap, 4416 h). Dew point and RH come from the mean T, q and surface pressure.
+  `Precipitation_Prob`, `APCP_StdDev` and the member-mask word exist only in the
+  4-member range and are NaN after the store's `ensemble_end` attribute.
+- **Leads from the data:** Herbie drops the last index message of a file when it is
+  selected, so members 02-04 came back with 443 of 444 leads (wnd10m's u and v one lead
+  apart); each member keeps the leads all its variables share.
+- **Store:** hourly (4,411 steps), the one time-chunked final store
+  (`FINAL_TIME_CHUNKS`, read with `zarr_read_window`); size and read times in
+  `Notes/STORAGE_AND_READ_BENCHMARKS.md`.
+- **Measured** (8-core VM, local publish): 186 s wall (download + wgrib2 decode 56 s,
+  member reduction 17 s, validation + hourly interpolation + write 110 s), 3.9 GB peak
+  RSS (7.9 GB while the 6-hourly stack was held in memory; it is now a local zarr),
+  2.3 CPU cores on average, 7.4 GB peak scratch. Store 2.4 GB, 257 files, 15.7 GiB
+  uncompressed. wgrib2's OpenMP threads do not speed up these JPEG 2000 files (9.0 s
+  on 1 thread, 10.9 s on 8), so conversions run single-threaded side by side, and
+  `-stats` shares the NetCDF pass. Spot-checked against `wgrib2 -lon` at 4 points,
+  leads 120 h (4-member mean) and 3000 h (member 01): equal within bitround precision.
+- **Rejected: TMAX/TMIN correction** of the interpolated temperature. 6-hourly
+  sampling understates the daily high by 0.21 K on average (p90 0.58 K, p99 2.8 K,
+  |lat| < 60), far below the forecast error at these ranges, so tmax/tmin are not
+  downloaded.
+- **API side (API v3.0.0a7):** a future day may end at the CFS store's last stored hour
+  (~4,400 h, 183 days) instead of 218 h while CFS is loaded, not `exclude=cfs`d and its
+  run is at most `CFS_MAX_RUN_AGE_HOURS` (72) old; the check uses the in-memory store
+  times (`cfs_last_time` in `grid_indexing.py`, called from `prepare_initial_request`),
+  and the 400 states the limit that applied. CFS is read (`zarr_read_window`, the day's
+  25 rows plus an hour either side) only when `future_day` is set and the day's last hour
+  is after the GFS store's last hour (or no GFS store is loaded); nearest Gaussian row,
+  columns wrap at 360. It is last in every hourly, precipitation, probability, error and
+  `currently` order, with its member mask word feeding the daily probability; it has no
+  precipitation type, so its hours get "none" and the hourly temperature fallback types
+  them. `cfs` is in `FORECAST_SOURCES` and `sourceIDX`, and in version 2 `sources` /
+  `sourceTimes` when it supplied a returned value (#554); `PUBLISH_SCHEDULE_HOURS` has it
+  at (24, 12.55) for `flags.nextUpdate` (#668).
+- **Measured** (TESTING stage reading the production v32 stores on OVH RBX in-process,
+  plus this store locally; 6 cities incl. 359.8 E and three southern ones; days 5, 9.6,
+  12, 60, 150, 200): every day to 150 is 200 with 24 hourly rows; 200 days is a 400 at
+  4,400 h; `exclude=cfs` at 60 days is a 400 at 218 h. Values match the store cell
+  (60 days, New York, 4 hours: temperature, wind, cloud, probability, intensity equal).
+  Daily probability comes in quarters inside the 4-member range and is -999 at 150 days
+  (after `ensemble_end`); Moscow in January is typed snow. A straddle day takes GFS to
+  its last hour, DWD MOSMIX where it runs longer, then CFS (New York 2026-11-20: 12.1 C
+  MOSMIX to 5.6 C CFS across the switch). Handler time, in-process, 6 cities, median of
+  180 warm requests, HEAD vs this change: normal request (`exclude=alerts`, as the alert
+  grids read from S3 add ~190 ms) 10.0/10.1/10.0 vs 10.0/10.0/10.0 ms with no CFS read; a
+  5-day future day 7.2 vs 7.1-7.4 ms with no CFS read; a 60-day day 6.7-7.1 ms with one
+  CFS window read (local store).
+- **Fixed on the way:** a straddle day where a store's last hour is local midnight
+  (GDPS, London 2026-11-20) left one row, which crashed the minutely interpolation
+  (`np.interp` on a 0-d time column); `_rows_with_time` now drops a model with fewer than
+  two timed rows. Unreachable before, as such days were past 218 h.
+- **Feels-like on CFS hours:** CFS has no apparent temperature, so feels-like is
+  computed from its temperature, humidity, wind and solar (last in `feels_like_inputs`
+  and `_get_feels_like`); it was -999. Measured as above (60 and 150 days, 8 cities):
+  hourly feels-like has no -999 left. Normal and 5-day responses (6 cities) identical to
+  before apart from `processTime`; processing median of 180 requests, two rounds,
+  10.0/10.0 ms normal and 6.3/6.4 ms 5-day vs 10.1/9.9 and 6.6/6.3 before.
+- **`currently` precipitation on a future day is the requested hour's hourly item:**
+  `currently` copied its precipitation from minute 0, and the minutely block picks one
+  source per element for its whole 61-minute window, while the hourly rows fall back per
+  hour. On the day the shorter-range stores end the two disagreed (Sydney 2026-11-20
+  12-17 local, ECMWF ended: `currently` 0.33-0.81 mm/h, hourly 0.06-0.11 GFS; New York at
+  GFS's last hour 06Z: 0 mm/h "Mixed Precipitation", hourly 0 "rain" "Clear"), and at
+  5 days too (Seattle 01 local `currently` 0.254 mm/h, hourly 0.4233; London dry hours
+  probability and error 0, hourly 0.06-0.08 and 0.03-0.10). On a future day the handler
+  now overwrites minute 0 with the hourly row of the hour holding the requested time
+  (`use_hourly_precip_for_first_minute`: the display item's intensity, probability,
+  error and type, and `InterPminute`'s intensity, probability, error and rain/snow/ice
+  columns from the post-block `InterPhour`), so the seven precipitation fields, and the
+  summary and icon they drive, equal that hourly item; there is no interpolation within
+  the hour any more. A future day returns no minutely block, so CFS is no longer a
+  minutely source (the minutely CFS chains, the straddle fill and the missing-probability
+  masks of the previous two commits are removed). Measured (TESTING stage, production
+  v32 stores, local CFS run 2026-11-10 00Z, GFS ending 2026-11-20 06Z): 6 cities, every
+  hour of the straddle day, 5, 60 and 150 days out and 4 DST change days (23 and 25
+  hours), plus hh:30 and hh:39 and `units=us` requests: 1,094 cases, 0 mismatches against
+  the hourly item (475 before). Probability stays -999 at 150 days, wet and dry. Normal
+  and Time Machine responses (6 cities) are identical apart from `processTime`; handler
+  medians of 90 requests, two rounds: normal 11.1/11.0 ms vs 12.1/10.9, 5-day 7.4/7.5 vs
+  7.4/7.3, 60-day 7.1/7.2 vs 7.2/7.3.
+- **With #554 and #668:** each CFS stack carries its `cfs` usage column, the currently
+  strategies and station pressure report `cfs`, and on a future day the used sources
+  of `currently`'s precipitation are those of the hourly row it copies (the minutely
+  selections are dropped, as no minutely value is returned).
+- **Not done:** visibility, UV, ozone, CAPE are -999 on CFS-only hours (no CFS field).
 
 ### flags.nextUpdate (2026-11-09)
 [pirateweather#668](https://github.com/Pirate-Weather/pirateweather/issues/668): version 2
@@ -90,7 +197,8 @@ request, except RTMA-RU and LibreWXR, which describe the present. `currentDay*` 
 from local midnight to the requested hour. Not version-gated. Times within an hour are
 still read as now. The horizon is `FUTURE_FORECAST_MAX_HOURS` (218 h, `api_const.py`):
 the requested local day must end within 240 h of the newest GFS/GEFS run allowing that run
-to be ~22 h old; later days are a 400. Run-age freshness checks in `calculate_grid_indexing`
+to be ~22 h old; later days are a 400. Since 2026-11-10 a fresh CFS store extends it to the
+store's last hour (previous entry). Run-age freshness checks in `calculate_grid_indexing`
 are now measured from `min(requested time, now)`, so a future day keeps the current runs;
 the sub-hourly HRRR/RRFS, RTMA-RU and LibreWXR checks stay on the requested time and drop
 out. `_aligned_rows` gave a day after a store's end that store's last row at local midnight
@@ -242,7 +350,8 @@ downloads, so their times compare with each other but not with a full ingest.
 | GDPS | 8.3 GiB | 5.1 GiB | not run | not run |
 | GEFS | 6.4 GiB | 6.0 GiB | not run | not run |
 
-AIFS (5.6 GiB), AIGEFS (2.1) and AIGFS (1.9) only changed thread defaults.
+AIFS (5.6 GiB), AIGEFS (2.1) and AIGFS (1.9) only changed thread defaults. CFS (added
+2026-11-10): 3.9 GiB, 186 s on 8 cores, 7.4 GB scratch.
 
 History merged at a different tile holds tiles in memory (GFS 14.9 GB), so GFS history
 moved to `GFS_Hist_v5`, written at the new tile. The first run rebuilds all 48 stores

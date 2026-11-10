@@ -25,7 +25,7 @@
 #   docker compose -f pirate-compose_oph.local.yml --profile ingest create
 #   docker compose -f pirate-compose_oph.local.yml up -d
 # The ingest services are in the "ingest" profile so a plain `up` does not start
-# all 27 at once (their combined peak memory is far above one server's).
+# all 28 at once (their combined peak memory is far above one server's).
 # `create` makes their containers; Ofelia starts them on the schedule below.
 # After rebuilding pirateingest:latest, run the `create` again to recreate them.
 
@@ -158,6 +158,11 @@ services:
       ofelia.job-run.aigefs.schedule: "0 20 2,8,14,20 * * *"
       ofelia.job-run.aigefs.container: "pirate-ingest-aigefs"
       ofelia.job-run.aigefs.no-overlap: "true"
+      # CFS: 00Z only; member 01's last file is posted ~11:25 UTC. The 15:30 run
+      # catches a late cycle and otherwise exits "No Update".
+      ofelia.job-run.cfs.schedule: "0 30 12,15 * * *"
+      ofelia.job-run.cfs.container: "pirate-ingest-cfs"
+      ofelia.job-run.cfs.no-overlap: "true"
       ofelia.job-run.nbm.schedule: "0 45 * * * *"
       ofelia.job-run.nbm.container: "pirate-ingest-nbm"
       ofelia.job-run.nbm.no-overlap: "true"
@@ -303,6 +308,17 @@ services:
       forecast_process_dir: "/work/AIGEFS"
       zarr_store_workers: "2"
     command: ["ingest/AIGEFS_Local_Ingest.py"]
+
+  # Months-out future days. Peak 3.9 GB, ~7.4 GB scratch, ~3 min (2026-11-10).
+  cfs_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-cfs
+    mem_limit: 6g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/CFS"
+      zarr_store_workers: "2"
+    command: ["ingest/CFS_Local_Ingest.py"]
 
   nbm_ingest:
     <<: *ingest

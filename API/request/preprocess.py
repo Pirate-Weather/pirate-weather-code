@@ -23,7 +23,8 @@ from API.constants.api_const import (
 from API.constants.shared_const import KELVIN_TO_CELSIUS
 from API.constants.unit_const import country_units
 from API.hourly.builder import initialize_time_grids
-from API.io.store_reader import WeatherParallel
+from API.io.store_reader import ModelStore, WeatherParallel
+from API.request.grid_indexing import cfs_last_time
 from API.utils.geo import get_offset
 from API.utils.offline_geocode import geocode_city_country
 from API.utils.timing import TimingTracker
@@ -152,6 +153,7 @@ class InitialRequestContext:
     ex_gdps: int
     ex_geps: int
     ex_reps: int
+    ex_cfs: int
     inc_day_night: int
     inc_aimodels: int
     inc_rrfs: int
@@ -474,6 +476,7 @@ def _parse_parameters(
     ex_gdps = int(exclude_cmc or "gdps" in excluded)
     ex_geps = int(exclude_cmc or "geps" in excluded)
     ex_reps = int(exclude_cmc or "reps" in excluded)
+    ex_cfs = int("cfs" in excluded)
     summary_text = "summary" not in exclude_params
     inc_day_night = int("day_night_forecast" in include_params)
     inc_aimodels = int("aimodels" in included)
@@ -552,6 +555,7 @@ def _parse_parameters(
         ex_urma,
         ex_librewxr,
         inc_rrfs,
+        ex_cfs,
     )
 
 
@@ -631,6 +635,7 @@ async def prepare_initial_request(
     force_now: str | bool | None,
     logger: logging.Logger,
     start_time: datetime.datetime,
+    cfs_store: ModelStore | None = None,
 ) -> InitialRequestContext:
     """
     Run the initial request parsing and time grid setup.
@@ -657,6 +662,8 @@ async def prepare_initial_request(
         force_now: Forced current time.
         logger: Logger instance.
         start_time: Request start time.
+        cfs_store: The loaded CFS store, which sets how far ahead a future
+            day can be (only its in-memory times are used).
 
     Returns:
         InitialRequestContext object containing processed request data.
@@ -756,6 +763,7 @@ async def prepare_initial_request(
         ex_urma,
         ex_librewxr,
         inc_rrfs,
+        ex_cfs,
     ) = _parse_parameters(
         exclude,
         include,
@@ -842,13 +850,23 @@ async def prepare_initial_request(
         day_end_hours = (
             day_end_utc.replace(tzinfo=None) - now_time
         ).total_seconds() / SECONDS_PER_HOUR
-        if day_end_hours > FUTURE_FORECAST_MAX_HOURS:
+        # Past the GFS/GEFS horizon, a fresh CFS store serves the day up to its
+        # last stored hour; excluded, missing or stale, the horizon stays at
+        # FUTURE_FORECAST_MAX_HOURS. Time Machine never gets here.
+        horizon_hours = FUTURE_FORECAST_MAX_HOURS
+        cfs_end = None if ex_cfs else cfs_last_time(cfs_store, now_time)
+        if cfs_end is not None:
+            now_ts = now_time.replace(tzinfo=datetime.UTC).timestamp()
+            horizon_hours = max(
+                horizon_hours, int((cfs_end - now_ts) // SECONDS_PER_HOUR)
+            )
+        if day_end_hours > horizon_hours:
             raise HTTPException(
                 status_code=400,
                 detail=(
                     "Requested Time is beyond the forecast horizon. The requested "
-                    f"local day must end within {FUTURE_FORECAST_MAX_HOURS} hours "
-                    f"(about {round(FUTURE_FORECAST_MAX_HOURS / 24)} days) of now."
+                    f"local day must end within {horizon_hours} hours "
+                    f"(about {round(horizon_hours / 24)} days) of now."
                 ),
             )
 
@@ -945,6 +963,7 @@ async def prepare_initial_request(
         ex_gdps=ex_gdps,
         ex_geps=ex_geps,
         ex_reps=ex_reps,
+        ex_cfs=ex_cfs,
         ex_librewxr=ex_librewxr,
         inc_day_night=inc_day_night,
         inc_aimodels=inc_aimodels,

@@ -44,6 +44,7 @@ from API.constants.forecast_const import (
 )
 from API.constants.model_const import (
     AIGFS,
+    CFS,
     DWD_MOSMIX,
     ECMWF,
     ECMWF_AIFS,
@@ -67,7 +68,10 @@ from API.constants.shared_const import (
     KELVIN_TO_CELSIUS,
     MISSING_DATA,
 )
-from API.current.metrics import build_current_section
+from API.current.metrics import (
+    build_current_section,
+    use_hourly_precip_for_first_minute,
+)
 from API.daily.builder import build_daily_section
 from API.data_inputs import prepare_aq_inputs, prepare_data_inputs
 from API.forecast_sources import (
@@ -197,6 +201,7 @@ def convert_data_to_celsius(
     dataOut_rrfs=None,
     dataOut_rrfs_6h=None,
     dataOut_rrfs_subh=None,
+    dataOut_cfs=None,
 ):
     """
     Converts temperature, dew point, and apparent temperature from Kelvin to Celsius
@@ -233,6 +238,7 @@ def convert_data_to_celsius(
         (dataOut_rrfs, RRFS, ["temp", "dew"]),
         (dataOut_rrfs_6h, RRFS, ["temp", "dew"]),
         (dataOut_rrfs_subh, RRFS_SUBH, ["temp", "dew"]),
+        (dataOut_cfs, CFS, ["temp", "dew"]),
     ]
 
     for data_array, indices_dict, keys in model_mappings:
@@ -420,6 +426,11 @@ async def PW_Forecast(
         if raw is not None
     }
 
+    # The stores held now; a version swapped in mid-request is used from the next
+    # one. CFS's store is taken here because it also sets the future-day horizon.
+    stores = request.app.state.stores
+    cfs_store = stores.CFS_Zarr
+
     # 1. Parse request parameters and initialize variables
     # This function handles all the input validation and setup
     initial = await prepare_initial_request(
@@ -440,6 +451,7 @@ async def PW_Forecast(
         force_now=force_now,
         logger=logger,
         start_time=T_Start,
+        cfs_store=cfs_store,
     )
 
     lat = initial.lat
@@ -491,6 +503,7 @@ async def PW_Forecast(
     exGDPS = initial.ex_gdps
     exGEPS = initial.ex_geps
     exREPS = initial.ex_reps
+    exCFS = initial.ex_cfs
     incAirQualityDetails = initial.inc_airqualitydetails
     inc_day_night = initial.inc_day_night
     summaryText = initial.summary_text
@@ -537,8 +550,6 @@ async def PW_Forecast(
     timer.log("### HRRR Start ###")
 
     # 2. Initialize Zarr sources
-    # The stores held now; a version swapped in mid-request is used from the next one
-    stores = request.app.state.stores
     dwd_mosmix_stations = stores.DWD_MOSMIX_Stations
     zarr_sources = ZarrSources(
         subh=stores.SubH_Zarr,
@@ -569,6 +580,7 @@ async def PW_Forecast(
         rrfs_subh=stores.RRFS_SubH_Zarr,
         rrfs_na=stores.RRFS_NA_Zarr,
         rrfs_na_6h=stores.RRFS_NA_6H_Zarr,
+        cfs=cfs_store,
     )
 
     # 3. Calculate grid indices for the requested location to retrieve data from Zarr stores
@@ -601,6 +613,8 @@ async def PW_Forecast(
         ex_librewxr=exLIBREWXR,
         inc_aimodels=incAIModels,
         inc_rrfs=incRRFS,
+        future_day=futureDay,
+        ex_cfs=exCFS,
         read_wmo_alerts=readWMOAlerts,
         base_day_utc=baseDayUTC,
         num_hours=numHours,
@@ -634,6 +648,7 @@ async def PW_Forecast(
     dataOut_rrfs = grid_result.dataOut_rrfs
     dataOut_rrfs_6h = grid_result.dataOut_rrfs_6h
     dataOut_rrfs_subh = grid_result.dataOut_rrfs_subh
+    dataOut_cfs = grid_result.dataOut_cfs
 
     ERA5_MERGED = grid_result.era5_merged
 
@@ -658,6 +673,7 @@ async def PW_Forecast(
         dataOut_rrfs=dataOut_rrfs,
         dataOut_rrfs_6h=dataOut_rrfs_6h,
         dataOut_rrfs_subh=dataOut_rrfs_subh,
+        dataOut_cfs=dataOut_cfs,
     )
 
     # 5. Build metadata about the data sources used for this forecast
@@ -747,6 +763,7 @@ async def PW_Forecast(
         if isinstance(dataOut_rrfs_6h, np.ndarray)
         else None,
         rrfs_grid=grid_result.rrfs_grid,
+        data_cfs=dataOut_cfs if isinstance(dataOut_cfs, np.ndarray) else None,
     )
 
     HRRR_Merged = merge_result.hrrr
@@ -974,6 +991,7 @@ async def PW_Forecast(
         reps_merged=REPS_Merged,
         gdps_merged=GDPS_Merged,
         geps_merged=GEPS_Merged,
+        cfs_merged=merge_result.cfs,
     )
 
     InterThour_inputs = inputs["InterThour_inputs"]
@@ -1246,6 +1264,34 @@ async def PW_Forecast(
     # 15. Generate the current weather conditions section
     # This builds the 'currently' block of the API response, representing the weather right now
     with timing_tracker.track("Current block"):
+        if futureDay:
+            # A future day's `currently` takes its precipitation from the hourly
+            # row of the hour holding the requested time, not the first minute
+            # (see use_hourly_precip_for_first_minute).
+            requested_hour_row = int(requestedHourOffset)
+            use_hourly_precip_for_first_minute(
+                InterPminute,
+                minuteItems,
+                InterPhour,
+                hourList[requested_hour_row],
+                requested_hour_row,
+            )
+            if current_used is not None:
+                # The minutely selections no longer reach the response (a
+                # future day has no minutely block, and its first minute is now
+                # the hourly row), so flags.sources (#554) takes the sources of
+                # that row's precipitation instead.
+                minutely_used.clear()
+                for name in (
+                    "prcipIntensity_inputs",
+                    "prcipProbability_inputs",
+                    "error_inputs",
+                ):
+                    row = inputs[name][requested_hour_row]
+                    columns = input_sources.get(name)
+                    finite = np.flatnonzero(np.isfinite(row))
+                    if columns and finite.size:
+                        current_used.add(USED_SOURCE_KEYS[columns[finite[0]]])
         current_section = build_current_section(
             sourceList=sourceList,
             hour_array_grib=hour_array_grib,
@@ -1293,6 +1339,7 @@ async def PW_Forecast(
             ERA5_MERGED=ERA5_MERGED,
             HRDPS_Merged=HRDPS_Merged,
             GDPS_Merged=GDPS_Merged,
+            CFS_Merged=merge_result.cfs,
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,

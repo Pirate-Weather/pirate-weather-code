@@ -122,6 +122,25 @@ AIGEFS = {
     "member_mask_1": 5,
 }
 
+# CFSv2 (ingest/CFS_Local_Ingest.py): 4-member means while all four members run,
+# member 01 alone after (store attribute ensemble_end); prob, error and the mask
+# word are NaN after ensemble_end. Intensity is in mm/h, unlike GFS PRATE.
+CFS = {
+    "temp": 1,
+    "dew": 2,
+    "humidity": 3,
+    "pressure": 4,
+    "station_pressure": 5,
+    "wind_u": 6,
+    "wind_v": 7,
+    "intensity": 8,
+    "cloud": 9,
+    "solar": 10,
+    "prob": 11,
+    "error": 12,
+    "member_mask_0": 13,
+}
+
 ECMWF = {
     "pressure": 1,
     "temp": 2,
@@ -503,6 +522,8 @@ FORECAST_SOURCES = frozenset(
         "aigefs",
         "ecmwf_aifs",
         "era5",
+        # Future days past the GFS store (#689)
+        "cfs",
     }
 )
 # LibreWXR global radar composite (ingest/LibreWXR_Local_Ingest.py): composite

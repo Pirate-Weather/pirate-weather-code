@@ -211,6 +211,26 @@ LAYOUTS = [
     pytest.param(
         ("REPS_Local_Ingest", "probVars"), "REPS", _CANADIAN_ENSEMBLE_LAYOUT, id="reps"
     ),
+    pytest.param(
+        "CFS_Local_Ingest",
+        "CFS",
+        {
+            "temp": "TMP_2maboveground",
+            "dew": "DPT_2maboveground",
+            "humidity": "RH_2maboveground",
+            "pressure": "PRMSL_meansealevel",
+            "station_pressure": "PRES_surface",
+            "wind_u": "UGRD_10maboveground",
+            "wind_v": "VGRD_10maboveground",
+            "intensity": "PRATE_surface",
+            "cloud": "TCDC_entireatmosphere",
+            "solar": "DSWRF_surface",
+            "prob": "Precipitation_Prob",
+            "error": "APCP_StdDev",
+            "member_mask_0": "Precipitation_Member_Mask_0",
+        },
+        id="cfs",
+    ),
     pytest.param("RTMA-RU_Local_Ingest", "RTMA_RU", _ANALYSIS_LAYOUT, id="rtma_ru"),
     pytest.param("URMA_Local_Ingest", "URMA", _ANALYSIS_LAYOUT, id="urma"),
     pytest.param(
@@ -315,7 +335,7 @@ def test_member_mask_words_cover_every_member_and_stay_exact():
     assert MEMBER_MASK_BITS_PER_WORD <= EXACT_BITS + 1
     assert ENSEMBLE_MEMBER_COUNTS["AIGEFS"] == ENSEMBLE_MEMBER_COUNTS["GEFS"]
     assert ENSEMBLE_MEMBER_COUNTS["ECMWF_AIFS"] == ENSEMBLE_MEMBER_COUNTS["ECMWF_IFS"]
-    for model in ("GEFS", "AIGEFS", "GEPS", "REPS", "ECMWF", "ECMWF_AIFS"):
+    for model in ("GEFS", "AIGEFS", "GEPS", "REPS", "ECMWF", "ECMWF_AIFS", "CFS"):
         index_map = getattr(model_const, model)
         mask_columns = [v for k, v in index_map.items() if k.startswith("member_mask_")]
         count_key = {"ECMWF": "ECMWF_IFS"}.get(model, model)

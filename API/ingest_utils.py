@@ -64,6 +64,9 @@ CHUNK_SIZES = {
     "RAQDPS": 250,
     "SILAM": 200,
     "URMA": 200,
+    # One final shard: a CFS tile is interpolated to 4,411 hourly steps in
+    # memory (13 x 4,411 x 24 x 24 float32 = 132 MB per task)
+    "CFS": 24,
 }
 
 # Inner chunk edge, in grid cells, of each final store. One chunk holds every
@@ -101,6 +104,8 @@ FINAL_CHUNK_SIZES = {
     "SILAM": 5,
     # Same layout as the other models; with ~283 hours one chunk is 283 KB
     "URMA": 5,
+    # T126 Gaussian grid (~0.94 deg), time-chunked (FINAL_TIME_CHUNKS)
+    "CFS": 3,
     # The alert grids are string arrays of (y, x)
     "ALERTS": 10,
 }
@@ -138,7 +143,17 @@ FINAL_SHARD_SIZES = {
     "ECMWF": 99,  # 180 with the 3 member-mask words (also ECMWF_AIFS, 131)
     "NBM": 99,  # 151
     "GFS": 48,  # 136 (also AIGFS, which would fit 99 but shares GFS's chunk keys)
+    "CFS": 24,  # 72 per time shard (13 variables x 2400 h)
     "ALERTS": 100,
+}
+
+# Stores whose time axis is chunked, as (inner chunk, shard) lengths in time
+# steps (hours). Every other store keeps all its times in one chunk, so a point
+# forecast is one chunk read. CFS holds 4,411 hourly steps (6 months), while a
+# future-day request needs ~24-30 of them, so one all-times chunk would be read
+# and decompressed ~150x over; it is read with zarr_read_window instead.
+FINAL_TIME_CHUNKS = {
+    "CFS": (240, 2400),
 }
 
 # Mantissa bits kept per stored variable (float32 has 23). Bitround's error is at
@@ -1278,6 +1293,10 @@ def write_final_zarr(
     zarr_store_workers: int,
     variables: Sequence[str],
     times: Sequence[float],
+    *,
+    time_chunk: int | None = None,
+    time_shard: int | None = None,
+    extra_attributes: dict | None = None,
 ) -> None:
     """Write the final ``(variable, time, y, x)`` array the API reads.
 
@@ -1300,6 +1319,13 @@ def write_final_zarr(
     NaN fill value for them. Each run publishes to a new versioned path, so no
     chunk of a previous run has to be overwritten.
 
+    ``time_chunk`` and ``time_shard`` (``FINAL_TIME_CHUNKS``) chunk the time
+    axis too, for CFS only: its 4,411 hourly steps make an all-times chunk ~150x
+    what a future-day request (~24-30 rows, read with ``zarr_read_window``)
+    needs. Left as None, a chunk and shard hold every time step, as for every
+    other store. ``extra_attributes`` are stored next to ``time`` and
+    ``variables`` (CFS's ``ensemble_end``).
+
     Dask writes one shard per task (whatever ``stacked``'s chunks), which is why ``FINAL_SHARD_SIZES`` keeps a
     shard under ~150 MB uncompressed. Blosc zstd with byte shuffle beat bit
     shuffle, no shuffle, lz4, zstd 1 and 9 (9 was 7% smaller but wrote 9x
@@ -1317,25 +1343,34 @@ def write_final_zarr(
         raise ValueError("times must be finite and strictly increasing")
     if shard % final_chunk:
         raise ValueError(f"shard {shard} is not a multiple of chunk {final_chunk}")
+    if (time_chunk is None) != (time_shard is None):
+        raise ValueError("time_chunk and time_shard must be given together")
+    if time_chunk is None:
+        time_chunk = time_shard = stacked.shape[1]
+    elif time_chunk < 1 or time_shard % time_chunk:
+        raise ValueError(
+            f"time shard {time_shard} is not a multiple of time chunk {time_chunk}"
+        )
 
     store = zarr.storage.LocalStore(store_path)
     zarr_array = zarr.create_array(
         store=store,
         shape=stacked.shape,
-        shards=(stacked.shape[0], stacked.shape[1], shard, shard),
-        chunks=(stacked.shape[0], stacked.shape[1], final_chunk, final_chunk),
+        shards=(stacked.shape[0], time_shard, shard, shard),
+        chunks=(stacked.shape[0], time_chunk, final_chunk, final_chunk),
         compressors=zarr.codecs.BloscCodec(cname="zstd", clevel=3),
         dtype="float32",
         attributes={
             "time": [round(t) for t in times],
             "variables": list(variables),
+            **(extra_attributes or {}),
         },
     )
 
     # dask rechunks to "auto" blocks made of whole shards before writing to a
     # sharded array; capping a block at one shard's bytes makes it exactly one
     # shard, so a task never holds more than one (see FINAL_SHARD_SIZES).
-    shard_bytes = stacked.shape[0] * stacked.shape[1] * shard * shard * 4
+    shard_bytes = stacked.shape[0] * time_shard * shard * shard * 4
     with dask.config.set(
         {"array.chunk-size": shard_bytes},
         scheduler="threads",

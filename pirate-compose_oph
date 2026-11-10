@@ -96,6 +96,12 @@ services:
       ofelia.job-run.aigefs-ingest.environment: '["wgrib2_path=/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/AIGEFS", "forecast_path=/data/Prod/AIGEFS", "historic_path=/data/Hist/AIGEFS", "save_type=Download"]'
       ofelia.job-run.aigefs-ingest.command: "API/AIGEFS_Local_Ingest.py" 
       ofelia.job-run.aigefs-ingest.no-overlap: "true"
+      ofelia.job-run.cfs-ingest.schedule: "0 30 12,15 * * *"
+      ofelia.job-run.cfs-ingest.image: "pirateingest:latest" 
+      ofelia.job-run.cfs-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'
+      ofelia.job-run.cfs-ingest.environment: '["wgrib2_path=/build/wgrib2_build/bin/wgrib2 ", "forecast_process_dir=/tmp/Process/CFS", "forecast_path=/data/Prod/CFS", "save_type=Download"]'
+      ofelia.job-run.cfs-ingest.command: "ingest/CFS_Local_Ingest.py" 
+      ofelia.job-run.cfs-ingest.no-overlap: "true"
       ofelia.job-run.hrdps-ingest.schedule: "0 0 4/6 * * *"
       ofelia.job-run.hrdps-ingest.image: "pirateingest:latest" 
       ofelia.job-run.hrdps-ingest.volume: '["/home/ubuntu/Weather:/data:rw", "/mnt/block:/tmp:rw"]'

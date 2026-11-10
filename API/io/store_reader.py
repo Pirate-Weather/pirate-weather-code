@@ -90,6 +90,8 @@ FORECAST_STORES = (
     ("RRFS_SubH_Zarr", "RRFS_SubH"),
     ("RRFS_NA_Zarr", "RRFS_NA"),
     ("RRFS_NA_6H_Zarr", "RRFS_NA_6H"),
+    # CFS is time-chunked and read with zarr_read_window (future-day requests)
+    ("CFS_Zarr", "CFS"),
 )
 ALERT_STORES = (
     ("NWS_Alerts_Zarr", "NWS_Alerts"),
@@ -299,6 +301,7 @@ class ZarrStores:
     RRFS_SubH_Zarr: ModelStore | None = None
     RRFS_NA_Zarr: ModelStore | None = None
     RRFS_NA_6H_Zarr: ModelStore | None = None
+    CFS_Zarr: ModelStore | None = None
     RAQDPS_LatLon: Any | None = None
     DWD_MOSMIX_Stations: dict | None = None
     # Tensorstore generation of each loaded support pickle, by file name
@@ -734,6 +737,49 @@ class WeatherParallel:
             # Missing values stay NaN so the merge takes another model for
             # those hours instead of interpolating values the model never gave.
             data_out = with_time_column(values, store.times)
+
+            if self.timing_enabled:
+                self.logger.debug("### %s Done! %s", model, self.loc_tag)
+            return data_out
+
+        self.logger.error("### %s Failure! %s", model, self.loc_tag)
+        return False
+
+    async def zarr_read_window(
+        self, model, store: ModelStore | None, x, y, start_unix, end_unix
+    ):
+        """Like ``zarr_read``, but only the stored times within
+        ``[start_unix, end_unix]`` (Unix seconds), or False if the store is
+        missing or unreadable or no stored time falls in the window.
+
+        For the time-chunked CFS store (``FINAL_TIME_CHUNKS``): a future day
+        reads the one or two time chunks it overlaps instead of all 4,411
+        hours. The window is found in the in-memory times, so it costs no
+        extra read.
+        """
+        if store is None:
+            self.logger.error("### %s store not loaded! %s", model, self.loc_tag)
+            return False
+        first = int(np.searchsorted(store.times, start_unix, side="left"))
+        stop = int(np.searchsorted(store.times, end_unix, side="right"))
+        if stop <= first:
+            self.logger.info(
+                "### %s has no times in the window %s-%s %s",
+                model,
+                start_unix,
+                end_unix,
+                self.loc_tag,
+            )
+            return False
+        if self.timing_enabled:
+            self.logger.debug("### %s Reading window! %s", model, self.loc_tag)
+        for _ in range(MAX_ZARR_READ_RETRIES):
+            try:
+                values = await self._await_read(store.array[:, first:stop, y, x].read())
+            except (ValueError, OSError, IndexError):
+                self.logger.exception("### %s Failure! %s", model, self.loc_tag)
+                continue
+            data_out = with_time_column(values, store.times[first:stop])
 
             if self.timing_enabled:
                 self.logger.debug("### %s Done! %s", model, self.loc_tag)

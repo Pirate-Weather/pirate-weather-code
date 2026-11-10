@@ -46,6 +46,8 @@ ENSEMBLE_MEMBER_COUNTS = {
     # member is not among them (runs of 2026-11-09/10 had 50)
     "ECMWF_IFS": 50,
     "ECMWF_AIFS": 50,
+    # CFSv2: the four members of one 00Z cycle (ingest/CFS_Local_Ingest.py)
+    "CFS": 4,
 }
 
 
@@ -96,6 +98,7 @@ FIRST_FORECAST_LEAD_HOURS = {
     "AIGEFS": 6,
     "ECMWF_AIFS": 6,
     "RAQDPS": 0,
+    "CFS": 6,
 }
 
 # When each forecast source normally publishes its next run, for version 2
@@ -150,6 +153,10 @@ PUBLISH_SCHEDULE_HOURS = {
     # FMI posts the 00Z SILAM run near 12:55 the next day; the ingest starts at
     # 14:00 (+38 h), and at 19:00 for the days it is posted near 17:50.
     "silam": (24, 38.25),
+    # CFS (future days past the GFS store only) takes the 00Z cycle once a day
+    # at 12:30 UTC and publishes about 3 min later. The 15:30 retry for a late
+    # cycle is not modelled: an overdue run rolls forward to the next 12:30.
+    "cfs": (24, 12.55),
     # RRFS (include=rrfs) posting on AWS is irregular, and each ingest takes
     # the newest cycle whose last lead exists (hourly stores checked at :50,
     # the 6-hourly 18-83 h stores at :20). No measured runs; estimates.

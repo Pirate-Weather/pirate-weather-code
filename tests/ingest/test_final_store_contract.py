@@ -163,6 +163,56 @@ def test_member_mask_words_survive_the_store_round_trip(tmp_path):
     assert share == wet[:, 1:, 5, 7].any(axis=1).mean()
 
 
+def test_time_chunked_store_window_read_matches_full_read(tmp_path):
+    """CFS is the one store with a chunked time axis, read by future-day
+    requests through zarr_read_window. A window must return exactly the rows a
+    full read gives for those times, across time-chunk and time-shard
+    boundaries and with the window's own times in column 0; an off-by-one in
+    the searchsorted bounds would serve the neighbouring day's hours with no
+    error. A window outside the stored times must read as missing (False), so
+    the API falls back instead of serving an empty day.
+    """
+    times = 1.79e9 + 3600 * np.arange(50)
+    rng = np.random.default_rng(2)
+    values = rng.random((2, 50, 7, 8), dtype="float32") * 100
+    values[0] += 230
+    store_path = tmp_path / "process" / "CFS.zarr"
+    write_final_zarr(
+        pad_to_chunk_size(da.from_array(values, chunks=(2, 50, 4, 4)), 3),
+        str(store_path),
+        final_chunk=3,
+        shard=9,
+        zarr_store_workers=2,
+        variables=VARIABLES,
+        times=times,
+        time_chunk=4,
+        time_shard=12,
+        extra_attributes={"ensemble_end": int(times[20])},
+    )
+    remote = open_remote(str(tmp_path / "remote"), "Download")
+    publish_store(str(store_path), remote, "CFS.zarr")
+    api_dir = tmp_path / "api"
+    assert store_sync.sync_store(remote, "CFS", str(api_dir))
+    store = _load(api_dir).CFS_Zarr
+    weather = WeatherParallel()
+
+    full = asyncio.run(weather.zarr_read("CFS", store, 5, 4))
+    # Hours 10-35 cross time chunks (every 4) and the shard boundaries at 12 and 24
+    window = asyncio.run(
+        weather.zarr_read_window("CFS", store, 5, 4, times[10], times[35])
+    )
+    np.testing.assert_array_equal(window, full[10:36])
+    # A window starting between stored hours begins at the next one
+    window = asyncio.run(
+        weather.zarr_read_window("CFS", store, 5, 4, times[10] + 1, times[-1] + 7200)
+    )
+    np.testing.assert_array_equal(window, full[11:])
+    after = asyncio.run(
+        weather.zarr_read_window("CFS", store, 5, 4, times[-1] + 1, times[-1] + 9e4)
+    )
+    assert after is False
+
+
 def test_old_version_is_kept_until_readers_move_on(tmp_path, monkeypatch):
     """Deleting a store under a running reader makes its reads silently return
     NaN, so a new publish must be swapped in by the API worker and the old
