@@ -27,6 +27,26 @@ logger = logging.getLogger(__name__)
 # metpy's degC -> kelvin conversion, exactly (see relative_humidity_from_dewpoint_c)
 KELVIN_OFFSET = 273.15
 
+# Visibility estimate cap: 10 statute miles, the top of the observed and
+# modelled visibility other sources report (CLIP_VIS clips to 16,090 m)
+VIS_ESTIMATE_MAX_KM = 16.09344
+# Gültepe & Milbrandt (2010) Table 2 rain intensity classes (mm/h): light below
+# 2.6, moderate to 7.6, heavy above
+GULTEPE_LIGHT_RAIN_MAX_MMH = 2.6
+GULTEPE_MODERATE_RAIN_MAX_MMH = 7.6
+# Snow extinction of Stoelinga & Warner (2003), as in the NCEP UPP: beta (km-1)
+# = 10.36 * C**0.7776, C the snow mass concentration (g m-3). C comes from the
+# liquid-equivalent rate over a typical aggregate fall speed (Locatelli & Hobbs
+# 1974: 0.5-1.5 m/s). Their beta is for a 2% contrast threshold (ln 50 = 3.912).
+SNOW_EXTINCTION_COEFFICIENT = 10.36
+SNOW_EXTINCTION_EXPONENT = 0.7776
+SNOW_FALL_SPEED_M_S = 1.0
+STOELINGA_WARNER_CONTRAST_CONSTANT = 3.912
+# Koschmieder constant of the Gultepe fits used here (5% contrast threshold)
+VIS_KOSCHMIEDER_CONSTANT = 3.0
+SECONDS_PER_HOUR = 3600.0
+GRAMS_PER_KG = 1000.0
+
 
 def relative_humidity_from_dewpoint_c(temperature_c, dewpoint_c):
     """Relative humidity (0-1) from air and dew point temperatures in Celsius.
@@ -230,32 +250,24 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     params: dict | None = None,
 ) -> np.ndarray:
     """
-    Visibility (km) using Gültepe & Milbrandt (2010):
+    Visibility (m) from ERA5 rows using Gültepe & Milbrandt (2010):
       - RH→VIS via FRAM/AIRS2 fit
       - PRR→VIS via Table 2 rain-type parameterizations (heavy/moderate/light)
 
-    Requires metpy for RH computation.
-    Inputs (1-based indices in var_index):
-      - "2m_temperature" (K), "2m_dewpoint_temperature" (K)
-    Optional (for PRR in m s^-1 water equivalent):
+    Inputs (indices in var_index):
+      - "2m_temperature" (°C), "2m_dewpoint_temperature" (°C): the API has
+        already converted ERA5's kelvin values (convert_data_to_celsius)
+    Optional (rain rates in kg m-2 s-1, i.e. mm/s of water):
       - "large_scale_rain_rate", "convective_rain_rate"
       - (Snow not parameterized in Table 2; ignored here by default.)
     """
-    try:
-        from metpy.calc import relative_humidity_from_dewpoint as _rh_from_td
-    except Exception as e:
-        raise ImportError("Requires MetPy (`pip install metpy`).") from e
-
     # ------------------- parameters -------------------
     p = {
         "rh_fit": which_rh_fit,  # "FRAM" or "AIRS2"
         "rh_min": 30.0,  # % clamp lower bound
         "rh_max": 100.0,  # % clamp upper bound
         "vis_min_km": 0.05,
-        "vis_max_km": 16.0,
-        # Rain-type thresholds per Glickman (2000) used by Gültepe & Milbrandt (2010):
-        "pr_light_max": 2.6,  # mm/h
-        "pr_moderate_max": 7.6,  # mm/h (heavy > 7.6)
+        "vis_max_km": VIS_ESTIMATE_MAX_KM,
     }
     if params:
         p.update(params)
@@ -268,12 +280,9 @@ def estimate_visibility_gultepe_rh_pr_numpy(
 
         return np.asarray(arr[idx1, ...] if var_axis == 0 else arr[..., idx1])
 
-    def mmh(x):  # kg/m2 s^-1 -> mm h^-1
-        return x * 3600.0
-
     # ------------------- inputs -------------------
-    T2m = pick("2m_temperature")  # K
-    Td2m = pick("2m_dewpoint_temperature")  # K
+    T2m = pick("2m_temperature")  # °C
+    Td2m = pick("2m_dewpoint_temperature")  # °C
     if T2m is None or Td2m is None:
         raise ValueError(
             "Need '2m_temperature' and '2m_dewpoint_temperature' in the array/map."
@@ -286,10 +295,9 @@ def estimate_visibility_gultepe_rh_pr_numpy(
         n_time = T2m.shape[0]
 
     # ------------------- RH via MetPy -------------------
-    Rh_frac = _rh_from_td(
+    Rh_frac = mp.calc.relative_humidity_from_dewpoint(
         (T2m * mp.units.units.degC), (Td2m * mp.units.units.degC)
     ).magnitude
-    # ... (keep the MetPy RH computation as-is) ...
     RH = np.clip(Rh_frac * 100.0, p["rh_min"], p["rh_max"])
 
     if use_precip:
@@ -299,7 +307,8 @@ def estimate_visibility_gultepe_rh_pr_numpy(
             ls_rain = np.zeros(n_time)
         if cv_rain is None:
             cv_rain = np.zeros(n_time)
-        pr_mm_hr: np.ndarray | None = (ls_rain + cv_rain) * 3600.0  # m/s → mm/hr
+        # kg m-2 s-1 is mm/s of water, so seconds per hour gives mm/h
+        pr_mm_hr: np.ndarray | None = (ls_rain + cv_rain) * 3600.0
     else:
         pr_mm_hr = None
 
@@ -317,23 +326,51 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     return vis[0] if vis.size == 1 else vis
 
 
+def wet_bulb_temperature_stull_c(temperature_c, rh_percent):
+    """Wet-bulb temperature (°C) from air temperature (°C) and RH (%), Stull (2011).
+
+    A closed-form fit, used instead of metpy's iterative ``wet_bulb_temperature``
+    because it only has to place hours either side of a rain/snow threshold.
+    Within about 1 °C for RH 5-99% and -20 to 50 °C; RH is clipped to that range
+    and the result capped at the air temperature, so it stays below any
+    threshold above the air temperature.
+    """
+    temperature_c = np.asarray(temperature_c, dtype=np.float64)
+    rh = np.clip(np.asarray(rh_percent, dtype=np.float64), 5.0, 99.0)
+    wet_bulb = (
+        temperature_c * np.arctan(0.151977 * np.sqrt(rh + 8.313659))
+        + np.arctan(temperature_c + rh)
+        - np.arctan(rh - 1.676331)
+        + 0.00391838 * rh**1.5 * np.arctan(0.023101 * rh)
+        - 4.686035
+    )
+    return np.minimum(wet_bulb, temperature_c)
+
+
 def estimate_visibility_from_rh_pr(
     rh_percent: np.ndarray,
     pr_mm_hr: np.ndarray | None = None,
     wind_speed_ms: np.ndarray | None = None,
+    snow_mm_hr: np.ndarray | None = None,
     which_rh_fit: str = "FRAM",
     rh_min: float = 30.0,
     rh_max: float = 100.0,
     vis_min_km: float = 0.05,
-    vis_max_km: float = 16.09344,
+    vis_max_km: float = VIS_ESTIMATE_MAX_KM,
     u_ref: float = 2.0,
 ) -> np.ndarray:
     """Estimate visibility (m) from RH, precipitation, and optional wind speed.
 
     Args:
         rh_percent: Relative humidity in % (clamped to rh_min-rh_max).
-        pr_mm_hr: Precipitation rate in mm/hr. None omits precipitation.
+        pr_mm_hr: Precipitation rate in mm/hr. None omits precipitation, and
+          rates below PRECIP_NOISE_THRESHOLD_MMH count as dry. The rate is
+          treated as rain whatever its type: Table 2 has no snow fit, so pass
+          snow separately as snow_mm_hr.
         wind_speed_ms: Wind speed in m/s. None omits wind adjustment.
+        snow_mm_hr: Liquid-equivalent snowfall rate in mm/hr, extinguishing
+          with the Stoelinga & Warner (2003) snow relation. None omits snow,
+          and rates below PRECIP_NOISE_THRESHOLD_MMH count as no snow.
         which_rh_fit: "FRAM" (default), "AIRS2", or "RUC".
         rh_min, rh_max: Clamping limits for RH.
         vis_min_km, vis_max_km: Minimum/Maximum visibility output in km.
@@ -363,21 +400,46 @@ def estimate_visibility_from_rh_pr(
         wind_factor = 0.1 + 0.9 * np.exp(-u / u_ref)
         beta_rh = beta_rh * wind_factor
 
-    # 3. Compute baseline visibility from precipitation
+    # 3. Compute baseline visibility from precipitation, with the rain-type
+    # thresholds of Glickman (2000) used by Gültepe & Milbrandt (2010)
     if pr_mm_hr is not None:
         pr = np.clip(np.asarray(pr_mm_hr, dtype=np.float64), 0.0, None)
         vis_pr = np.where(
-            pr > 7.6,
+            pr > GULTEPE_MODERATE_RAIN_MAX_MMH,
             np.maximum(-0.45 * np.power(pr, 0.394) + 2.28, 0.05),
             np.where(
-                pr >= 2.6,
+                pr >= GULTEPE_LIGHT_RAIN_MAX_MMH,
                 np.maximum(-2.65 * np.power(pr, 0.256) + 7.65, 0.05),
                 np.maximum(-863.26 * np.power(pr, 0.003) + 874.19, 0.05),
             ),
         )
         beta_pr = 3.0 / np.maximum(vis_pr, 0.05)
+        # The light-rain fit's tiny exponent makes it jump from 874 km at 0 to
+        # 46 km at 1e-6 mm/h, so a trace rate (the norm in model means, e.g. a
+        # CFS ensemble mean) would cut visibility by a third. Below the noise
+        # threshold the hour is dry and precipitation adds no extinction.
+        beta_pr = np.where(pr < PRECIP_NOISE_THRESHOLD_MMH, 0.0, beta_pr)
     else:
         beta_pr = 0.0
+
+    # Snow lowers visibility far more than the same liquid rate of rain: 1 mm/h
+    # of snow water gives about 1 km, the same rain about 11 km. The snow
+    # concentration (g m-3) is the mass flux (kg m-2 s-1) over the fall speed,
+    # and its extinction is rescaled to the 5% contrast used above.
+    if snow_mm_hr is not None:
+        snow = np.clip(np.asarray(snow_mm_hr, dtype=np.float64), 0.0, None)
+        snow_concentration_g_m3 = (
+            snow / SECONDS_PER_HOUR / SNOW_FALL_SPEED_M_S * GRAMS_PER_KG
+        )
+        beta_snow_2pct = SNOW_EXTINCTION_COEFFICIENT * np.power(
+            snow_concentration_g_m3, SNOW_EXTINCTION_EXPONENT
+        )
+        beta_snow = (
+            beta_snow_2pct
+            * VIS_KOSCHMIEDER_CONSTANT
+            / STOELINGA_WARNER_CONTRAST_CONSTANT
+        )
+        beta_pr = beta_pr + np.where(snow < PRECIP_NOISE_THRESHOLD_MMH, 0.0, beta_snow)
 
     # 4. Combine extinctions using the Koschmieder equation
     vis_km = np.clip(3.0 / (beta_rh + beta_pr), vis_min_km, vis_max_km)

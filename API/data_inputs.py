@@ -6,13 +6,15 @@ from API.api_utils import (
     _lookup_precip_codes,
     _precip_code_table,
     calculate_apparent_temperature,
+    estimate_visibility_from_rh_pr,
     estimate_visibility_gultepe_rh_pr_numpy,
     map_canadian_precip_type_to_ptype,
     map_ensemble_precip_rates_to_ptype,
     map_wmo4677_to_ptype,
     relative_humidity_from_dewpoint_c,
+    wet_bulb_temperature_stull_c,
 )
-from API.constants.api_const import PRECIP_IDX
+from API.constants.api_const import PRECIP_IDX, WET_BULB_RAIN_SNOW_THRESHOLD_C
 from API.constants.aqi_const import AQ_LEAD_IN_HOURS
 from API.constants.model_const import (
     CFS,
@@ -648,6 +650,31 @@ def prepare_data_inputs(
         },
     )
 
+    # CFS has no categorical precipitation type, so its hours are typed rain or
+    # snow by 2 m wet-bulb temperature, which follows the observed rain/snow
+    # split much better than air temperature. A single threshold, not a mixed
+    # band: the hourly block counts sleet and mixed accumulation as ice, and
+    # freezing rain or sleet need a warm layer aloft CFS does not supply here.
+    cfs_precip_type = None
+    cfs_snow_hours = None
+    if cfs_merged is not None:
+        cfs_intensity = cfs_merged[:, CFS["intensity"]]
+        cfs_wet_bulb_c = wet_bulb_temperature_stull_c(
+            cfs_merged[:, CFS["temp"]], cfs_merged[:, CFS["humidity"]]
+        )
+        cfs_snow_hours = cfs_wet_bulb_c < WET_BULB_RAIN_SNOW_THRESHOLD_C
+        # Present exactly when its intensity is, so the type stack lines up
+        # with the intensity stack; dry hours stay "none"
+        cfs_precip_type = np.where(
+            np.isnan(cfs_intensity),
+            np.nan,
+            np.where(
+                cfs_intensity > 0,
+                np.where(cfs_snow_hours, PRECIP_IDX["snow"], PRECIP_IDX["rain"]),
+                PRECIP_IDX["none"],
+            ),
+        )
+
     # --- prcipType_inputs ---
     prcip_type_inputs, input_sources["prcipType_inputs"] = _stack_precip_with_priority(
         num_hours,
@@ -752,15 +779,7 @@ def prepare_data_inputs(
             )
             if "era5" in source_list and era5_valid
             else None,
-            # CFS has no categorical type. "none" on its hours lets the hourly
-            # block's temperature fallback (TEMP_THRESHOLD_RAIN_C/SNOW_C) type
-            # any precipitation as rain, snow or sleet. Present exactly when its
-            # intensity is, so the type stack lines up with the intensity stack.
-            "cfs": np.where(
-                np.isnan(cfs_merged[:, CFS["intensity"]]), np.nan, PRECIP_IDX["none"]
-            )
-            if cfs_merged is not None
-            else None,
+            "cfs": cfs_precip_type,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -1111,6 +1130,18 @@ def prepare_data_inputs(
                 era5_merged, var_index=ERA5, var_axis=1
             )
             if era5_valid
+            else None,
+            # CFS has no visibility field. Estimated from its 2 m humidity (%)
+            # and precipitation rate (mm/h), split into rain and snow by the
+            # same wet-bulb typing as its precipitation type above.
+            "cfs": estimate_visibility_from_rh_pr(
+                cfs_merged[:, CFS["humidity"]],
+                np.where(cfs_snow_hours, 0.0, cfs_merged[:, CFS["intensity"]]),
+                snow_mm_hr=np.where(
+                    cfs_snow_hours, cfs_merged[:, CFS["intensity"]], 0.0
+                ),
+            )
+            if cfs_merged is not None
             else None,
         },
         prioritize_ai_models=prioritize_ai_models,
