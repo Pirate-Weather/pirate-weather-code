@@ -1,4 +1,0 @@
-knowledge_base:
-  code_guidelines:
-    filePatterns:
-      - ".gemini/styleguide.md"
