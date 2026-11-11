@@ -596,7 +596,7 @@ def test_far_future_day_is_served_from_cfs_and_only_then_read():
     np.testing.assert_array_equal(inputs["prcipType_inputs"][:, -1], 4)
     # No CFS apparent field: feels-like is computed from its own conditions
     assert np.isfinite(inputs["feels_like_inputs"][:, -1]).all()
-    # No CFS visibility field either: it is estimated from humidity and the
-    # precipitation rate, so the days past GFS still report a visibility
-    # (80% and 0.5 mm/h of rain: about 5.7 km)
-    np.testing.assert_allclose(inputs["vis_inputs"][:, -1], 5736, rtol=0.01)
+    # No CFS visibility field either: it is estimated from humidity, the
+    # precipitation rate and wind, so the days past GFS still report one
+    # (80%, 0.5 mm/h of rain and 5 m/s: about 10.5 km)
+    np.testing.assert_allclose(inputs["vis_inputs"][:, -1], 10500, rtol=0.01)

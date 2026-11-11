@@ -6,7 +6,7 @@ from API.api_utils import (
     _lookup_precip_codes,
     _precip_code_table,
     calculate_apparent_temperature,
-    estimate_visibility_from_rh_pr,
+    estimate_cfs_visibility,
     estimate_visibility_gultepe_rh_pr_numpy,
     map_canadian_precip_type_to_ptype,
     map_ensemble_precip_rates_to_ptype,
@@ -1134,15 +1134,13 @@ def prepare_data_inputs(
             )
             if era5_valid
             else None,
-            # CFS has no visibility field. Estimated from its 2 m humidity (%)
-            # and precipitation rate (mm/h), split into rain and snow by the
-            # same wet-bulb typing as its precipitation type above.
-            "cfs": estimate_visibility_from_rh_pr(
+            # CFS has no visibility field: estimated from its 2 m temperature,
+            # humidity (%), precipitation rate (mm/h) and 10 m wind
+            "cfs": estimate_cfs_visibility(
+                cfs_merged[:, CFS["temp"]],
                 cfs_merged[:, CFS["humidity"]],
-                np.where(cfs_snow_hours, 0.0, cfs_merged[:, CFS["intensity"]]),
-                snow_mm_hr=np.where(
-                    cfs_snow_hours, cfs_merged[:, CFS["intensity"]], 0.0
-                ),
+                cfs_merged[:, CFS["intensity"]],
+                _wind_speed(cfs_merged[:, CFS["wind_u"]], cfs_merged[:, CFS["wind_v"]]),
             )
             if cfs_merged is not None
             else None,

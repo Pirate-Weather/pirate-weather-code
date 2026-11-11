@@ -11,6 +11,7 @@ import numpy as np
 from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
+    estimate_cfs_visibility,
     estimate_visibility_gultepe_rh_pr_numpy,
     relative_humidity_from_dewpoint_c,
 )
@@ -1448,6 +1449,19 @@ def _get_vis(
                 + model_data["ERA5_MERGED"][state.idx2, :] * state.fac2,
                 var_index=ERA5,
                 var_axis=1,
+            ),
+        ),
+        # The same estimate as CFS's hourly visibility, from the current hour's
+        # interpolated temperature, humidity (%), precipitation and wind
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: estimate_cfs_visibility(
+                _interp_scalar(model_data["CFS_Merged"], CFS["temp"], state),
+                _interp_scalar(model_data["CFS_Merged"], CFS["humidity"], state),
+                _interp_scalar(model_data["CFS_Merged"], CFS["intensity"], state),
+                _interp_uv_magnitude(
+                    model_data["CFS_Merged"], CFS["wind_u"], CFS["wind_v"], state
+                ),
             ),
         ),
     }
