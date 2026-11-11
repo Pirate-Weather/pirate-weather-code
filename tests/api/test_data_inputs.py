@@ -424,3 +424,25 @@ def test_cfs_precipitation_is_typed_and_sees_snow_by_wet_bulb():
     _, rain_vis, snow_vis, _, _ = inputs["vis_inputs"][:, -1]
     # 85% RH and 1 mm/h: about 4.6 km in rain, 0.9 km in snow
     assert snow_vis < rain_vis / 3
+
+
+def test_era5_visibility_estimate_clears_humid_air_in_wind():
+    """The ERA5 visibility estimate read humidity alone, so a 96% RH hour was
+    "Misty" (2.9 km) even in a strong wind, which mixes mist out. Wind must
+    raise it well clear of mist, while calm humid air keeps the low estimate.
+    """
+    from API.api_utils import estimate_visibility_gultepe_rh_pr_numpy
+
+    era5_rows = np.full((2, max(ERA5.values()) + 1), np.nan)
+    era5_rows[:, ERA5["2m_temperature"]] = 8.1  # C, converted by the API
+    era5_rows[:, ERA5["2m_dewpoint_temperature"]] = 7.5  # about 96% RH
+    era5_rows[:, ERA5["large_scale_rain_rate"]] = 0.0
+    era5_rows[:, ERA5["convective_rain_rate"]] = 0.0
+    era5_rows[:, ERA5["10m_u_component_of_wind"]] = [0.0, 6.0]
+    era5_rows[:, ERA5["10m_v_component_of_wind"]] = [0.0, 6.0]
+
+    calm, windy = estimate_visibility_gultepe_rh_pr_numpy(
+        era5_rows, var_index=ERA5, var_axis=1
+    )
+    assert calm < 5000  # mist
+    assert windy > 15000

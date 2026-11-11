@@ -19,6 +19,7 @@ from API.constants.api_const import (
     PRECIP_NOISE_THRESHOLD_MMH,
     PRECIP_TYPES,
     TEMP_THRESHOLD_WMO_FROZEN_C,
+    WET_BULB_RAIN_SNOW_THRESHOLD_C,
 )
 from API.constants.shared_const import MISSING_DATA
 
@@ -259,6 +260,7 @@ def estimate_visibility_gultepe_rh_pr_numpy(
         already converted ERA5's kelvin values (convert_data_to_celsius)
     Optional (rain rates in kg m-2 s-1, i.e. mm/s of water):
       - "large_scale_rain_rate", "convective_rain_rate"
+    Optional (m/s): "10m_u_component_of_wind", "10m_v_component_of_wind"
       - (Snow not parameterized in Table 2; ignored here by default.)
     """
     # ------------------- parameters -------------------
@@ -312,9 +314,16 @@ def estimate_visibility_gultepe_rh_pr_numpy(
     else:
         pr_mm_hr = None
 
+    # Wind scales the humidity extinction (see estimate_visibility_from_rh_pr):
+    # without it the humidity fit alone gives mist at 96% RH in a strong wind
+    u10 = pick("10m_u_component_of_wind")  # m/s
+    v10 = pick("10m_v_component_of_wind")  # m/s
+    wind_speed_ms = None if u10 is None or v10 is None else np.hypot(u10, v10)
+
     vis = estimate_visibility_from_rh_pr(
         RH,
         pr_mm_hr,
+        wind_speed_ms=wind_speed_ms,
         which_rh_fit=p["rh_fit"],
         rh_min=p["rh_min"],
         rh_max=p["rh_max"],
@@ -398,7 +407,8 @@ def estimate_visibility_from_rh_pr(
         # Scaling factor: approaches 0.1 (high visibility) at strong winds,
         # and 1.0 (baseline low visibility) at zero wind.
         wind_factor = 0.1 + 0.9 * np.exp(-u / u_ref)
-        beta_rh = beta_rh * wind_factor
+        # A missing wind leaves the humidity extinction unscaled, not NaN
+        beta_rh = beta_rh * np.where(np.isfinite(u), wind_factor, 1.0)
 
     # 3. Compute baseline visibility from precipitation, with the rain-type
     # thresholds of Glickman (2000) used by Gültepe & Milbrandt (2010)
@@ -444,6 +454,30 @@ def estimate_visibility_from_rh_pr(
     # 4. Combine extinctions using the Koschmieder equation
     vis_km = np.clip(3.0 / (beta_rh + beta_pr), vis_min_km, vis_max_km)
     return (vis_km * 1000.0).astype(np.float32)
+
+
+def estimate_cfs_visibility(temperature_c, rh_percent, intensity_mm_hr, wind_speed_ms):
+    """Visibility (m) for CFS, which has no visibility field, for the hourly
+    and current blocks alike.
+
+    The precipitation rate is rain or snow by the same 2 m wet-bulb split as
+    CFS's precipitation type. Wind scales the humidity extinction: the
+    humidity fit alone gives 2.9 km at 96% RH whatever the wind, but mist and
+    fog need near-calm air, and a 9 m/s wind at that humidity is clear. CFS
+    winds are a four-member mean, lower than any member's, so the scaling
+    errs towards lower visibility.
+    """
+    intensity_mm_hr = np.asarray(intensity_mm_hr, dtype=np.float64)
+    snow = (
+        wet_bulb_temperature_stull_c(temperature_c, rh_percent)
+        < WET_BULB_RAIN_SNOW_THRESHOLD_C
+    )
+    return estimate_visibility_from_rh_pr(
+        rh_percent,
+        np.where(snow, 0.0, intensity_mm_hr),
+        wind_speed_ms=wind_speed_ms,
+        snow_mm_hr=np.where(snow, intensity_mm_hr, 0.0),
+    )
 
 
 def select_daily_precip_type(

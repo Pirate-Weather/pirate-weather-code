@@ -7,6 +7,7 @@ import pytest
 
 from API.constants.forecast_const import DATA_CURRENT
 from API.constants.model_const import GDPS, GFS, HRDPS
+from API.constants.shared_const import MISSING_DATA
 from API.current.metrics import (
     InterpolationState,
     _get_ozone,
@@ -280,3 +281,8 @@ def test_future_day_currently_precipitation_is_the_requested_hourly_item(
         [currently["precipIntensity"], currently["precipProbability"]],
         [round(expected[0] * intensity_unit, 4), expected[1]],
     )
+    if requested_hour >= 13:
+        # CFS has no visibility field: `currently` must carry the same estimate
+        # as its hour rather than -999
+        assert currently["visibility"] != MISSING_DATA
+        np.testing.assert_allclose(currently["visibility"], hour_item["visibility"])
