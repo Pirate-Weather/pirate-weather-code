@@ -374,3 +374,53 @@ def test_hourly_humidity_uses_ecmwf_ahead_of_gfs():
 
     assert inputs["humidity_inputs"][:, 0].tolist() == [61.0] * num_hours
     assert 42.0 in inputs["humidity_inputs"][0]
+
+
+def test_trace_precipitation_does_not_reduce_estimated_visibility():
+    """Regression: the Gültepe light-rain fit jumps from 874 km at 0 mm/h to
+    46 km at 1e-6 mm/h, so a trace rate (common in ERA5 and CFS ensemble-mean
+    rates) cut estimated visibility by a third in clear air. Rates below the
+    precipitation noise threshold must estimate the same as a dry hour, while
+    measurable rain still lowers it.
+    """
+    from API.api_utils import estimate_visibility_from_rh_pr
+
+    dry, trace, light_rain = estimate_visibility_from_rh_pr(
+        np.full(3, 70.0), np.array([0.0, 1e-4, 0.5])
+    )
+    assert trace == dry
+    assert light_rain < dry
+
+
+def test_cfs_precipitation_is_typed_and_sees_snow_by_wet_bulb():
+    """CFS has no precipitation type, so its hours are typed by 2 m wet-bulb.
+    At +2 C in dry air (50% RH) the wet-bulb is near -2 C and the precipitation
+    falls as snow, though air temperature alone (the generic fallback) calls it
+    rain. Snow also has to reach the visibility estimate: at the same humidity
+    and liquid rate snow cuts visibility far more than rain, and treating it as
+    rain left snowy CFS days reading clear. An hour without a wet-bulb
+    (humidity missing) stays "none" for the hourly block's air-temperature
+    fallback: called rain at -2 C, it would be turned into freezing rain.
+    """
+    from API.constants.model_const import CFS
+    from tests.helpers.model_arrays import hourly_inputs, model_array
+
+    cfs = model_array(CFS, 5, intensity=1.0)
+    cfs[:, CFS["temp"]] = [2.0, 4.0, -2.0, 2.0, -2.0]
+    cfs[:, CFS["humidity"]] = [50.0, 85.0, 85.0, 50.0, np.nan]
+    cfs[3, CFS["intensity"]] = 0.0
+    inputs = hourly_inputs(lat=45.0, lon=-75.0, source_list=["cfs"], cfs=cfs)
+
+    np.testing.assert_array_equal(
+        inputs["prcipType_inputs"][:, -1],
+        [
+            PRECIP_IDX["snow"],
+            PRECIP_IDX["rain"],
+            PRECIP_IDX["snow"],
+            PRECIP_IDX["none"],
+            PRECIP_IDX["none"],
+        ],
+    )
+    _, rain_vis, snow_vis, _, _ = inputs["vis_inputs"][:, -1]
+    # 85% RH and 1 mm/h: about 4.6 km in rain, 0.9 km in snow
+    assert snow_vis < rain_vis / 3
