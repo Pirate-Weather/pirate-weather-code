@@ -664,12 +664,15 @@ def prepare_data_inputs(
         )
         cfs_snow_hours = cfs_wet_bulb_c < WET_BULB_RAIN_SNOW_THRESHOLD_C
         # Present exactly when its intensity is, so the type stack lines up
-        # with the intensity stack; dry hours stay "none"
+        # with the intensity stack. Dry hours stay "none", and so do wet hours
+        # without a wet-bulb (missing temperature or humidity): the hourly
+        # block's air-temperature fallback types those instead of them being
+        # called rain, which it would turn to freezing rain at or below -1 C.
         cfs_precip_type = np.where(
             np.isnan(cfs_intensity),
             np.nan,
             np.where(
-                cfs_intensity > 0,
+                (cfs_intensity > 0) & np.isfinite(cfs_wet_bulb_c),
                 np.where(cfs_snow_hours, PRECIP_IDX["snow"], PRECIP_IDX["rain"]),
                 PRECIP_IDX["none"],
             ),

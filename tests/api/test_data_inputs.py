@@ -398,14 +398,16 @@ def test_cfs_precipitation_is_typed_and_sees_snow_by_wet_bulb():
     falls as snow, though air temperature alone (the generic fallback) calls it
     rain. Snow also has to reach the visibility estimate: at the same humidity
     and liquid rate snow cuts visibility far more than rain, and treating it as
-    rain left snowy CFS days reading clear.
+    rain left snowy CFS days reading clear. An hour without a wet-bulb
+    (humidity missing) stays "none" for the hourly block's air-temperature
+    fallback: called rain at -2 C, it would be turned into freezing rain.
     """
     from API.constants.model_const import CFS
     from tests.helpers.model_arrays import hourly_inputs, model_array
 
-    cfs = model_array(CFS, 4, intensity=1.0)
-    cfs[:, CFS["temp"]] = [2.0, 4.0, -2.0, 2.0]
-    cfs[:, CFS["humidity"]] = [50.0, 85.0, 85.0, 50.0]
+    cfs = model_array(CFS, 5, intensity=1.0)
+    cfs[:, CFS["temp"]] = [2.0, 4.0, -2.0, 2.0, -2.0]
+    cfs[:, CFS["humidity"]] = [50.0, 85.0, 85.0, 50.0, np.nan]
     cfs[3, CFS["intensity"]] = 0.0
     inputs = hourly_inputs(lat=45.0, lon=-75.0, source_list=["cfs"], cfs=cfs)
 
@@ -416,8 +418,9 @@ def test_cfs_precipitation_is_typed_and_sees_snow_by_wet_bulb():
             PRECIP_IDX["rain"],
             PRECIP_IDX["snow"],
             PRECIP_IDX["none"],
+            PRECIP_IDX["none"],
         ],
     )
-    _, rain_vis, snow_vis, _ = inputs["vis_inputs"][:, -1]
+    _, rain_vis, snow_vis, _, _ = inputs["vis_inputs"][:, -1]
     # 85% RH and 1 mm/h: about 4.6 km in rain, 0.9 km in snow
     assert snow_vis < rain_vis / 3
