@@ -446,3 +446,43 @@ def test_era5_visibility_estimate_clears_humid_air_in_wind():
     )
     assert calm < 5000  # mist
     assert windy > 15000
+
+
+def test_cfs_uv_index_follows_the_sun_and_cloud():
+    """CFS has no UV field, so its UV index is estimated from the sun's height
+    and cloud cover. The sun-position arithmetic is easy to get subtly wrong
+    (hour angle, longitudes given as 0-360, the equation of time), which would
+    put the UV peak at the wrong hour; it must match astral, which the API
+    already uses for sunrise and sunset. A clear Sydney summer noon must give
+    a high UV index, the night none, and overcast skies much less.
+    """
+    import datetime
+
+    from astral import Observer
+    from astral.sun import elevation
+
+    from API.api_utils import cos_solar_zenith, estimate_cfs_uv_index
+
+    for lat, lon, when in (
+        (51.5, -0.1, "2027-01-15T12:00"),
+        (-33.9, 151.2, "2026-12-21T02:00"),
+        (40.7, 286.0, "2027-07-04T17:00"),  # longitude as 0-360
+        (64.8, -147.7, "2027-12-21T21:00"),
+    ):
+        moment = datetime.datetime.fromisoformat(when).replace(tzinfo=datetime.UTC)
+        expected = elevation(
+            Observer(lat, (lon + 180) % 360 - 180), moment, with_refraction=False
+        )
+        sun_height = np.degrees(
+            np.arcsin(cos_solar_zenith(lat, lon, moment.timestamp()))
+        )
+        assert abs(sun_height - expected) < 0.2
+
+    # Sydney, 21 December 2026: local noon (02 UTC) and midnight (14 UTC)
+    noon, midnight = 1797818400.0, 1797861600.0
+    clear_noon, clear_midnight, overcast_noon = estimate_cfs_uv_index(
+        -33.9, 151.2, [noon, midnight, noon], [0.0, 0.0, 1.0]
+    )
+    assert 11 < clear_noon < 13
+    assert clear_midnight == 0
+    assert overcast_noon < clear_noon / 2
