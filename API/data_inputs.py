@@ -6,6 +6,8 @@ from API.api_utils import (
     _lookup_precip_codes,
     _precip_code_table,
     calculate_apparent_temperature,
+    estimate_cfs_gust,
+    estimate_cfs_uv_index,
     estimate_cfs_visibility,
     estimate_visibility_gultepe_rh_pr_numpy,
     map_canadian_precip_type_to_ptype,
@@ -994,6 +996,13 @@ def prepare_data_inputs(
             "era5": era5_merged[:, ERA5["instantaneous_10m_wind_gust"]]
             if era5_valid
             else None,
+            # CFS has no gust field: estimated from its 10 m wind rather than
+            # the hourly block's fallback of the wind speed itself
+            "cfs": estimate_cfs_gust(
+                _wind_speed(cfs_merged[:, CFS["wind_u"]], cfs_merged[:, CFS["wind_v"]])
+            )
+            if cfs_merged is not None
+            else None,
         },
         prioritize_ai_models=prioritize_ai_models,
     )
@@ -1110,6 +1119,13 @@ def prepare_data_inputs(
                 * 0.0025
             )
             if era5_valid
+            else None,
+            # CFS has no UV field: estimated from the sun's height at each
+            # hour's valid time (column 0) and its cloud cover (%)
+            "cfs": estimate_cfs_uv_index(
+                lat, lon, cfs_merged[:, 0], cfs_merged[:, CFS["cloud"]] * 0.01
+            )
+            if cfs_merged is not None
             else None,
         },
         prioritize_ai_models=prioritize_ai_models,

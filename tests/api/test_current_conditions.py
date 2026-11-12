@@ -286,3 +286,8 @@ def test_future_day_currently_precipitation_is_the_requested_hourly_item(
         # as its hour rather than -999
         assert currently["visibility"] != MISSING_DATA
         np.testing.assert_allclose(currently["visibility"], hour_item["visibility"])
+        # Nor gust or UV fields: gusts are estimated from the wind rather than
+        # copying it, and UV from the sun's height and cloud cover
+        np.testing.assert_allclose(currently["windGust"], hour_item["windGust"])
+        assert hour_item["windGust"] > hour_item["windSpeed"]
+        assert np.isfinite(currently["uvIndex"])

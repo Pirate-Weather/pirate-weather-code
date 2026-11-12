@@ -46,7 +46,29 @@ STOELINGA_WARNER_CONTRAST_CONSTANT = 3.912
 # Koschmieder constant of the Gultepe fits used here (5% contrast threshold)
 VIS_KOSCHMIEDER_CONSTANT = 3.0
 SECONDS_PER_HOUR = 3600.0
+SECONDS_PER_DAY = 86400.0
 GRAMS_PER_KG = 1000.0
+
+# Clear-sky UV index of Allaart et al. (2004, Meteorol. Appl. 11, 59-65):
+# 12.5 with the sun overhead and 300 DU of ozone
+UV_CLEAR_SKY_OVERHEAD_INDEX = 12.5
+UV_CLEAR_SKY_ZENITH_EXPONENT = 2.42
+UV_CLEAR_SKY_OZONE_EXPONENT = -1.23
+UV_REFERENCE_OZONE_DU = 300.0
+# Total ozone for models without it: a typical global value (~260 DU in the
+# tropics, 300-450 DU at higher latitudes)
+UV_TYPICAL_OZONE_DU = 300.0
+# NWS UV Index cloud attenuation (Long et al. 1996): clear 1.0, scattered
+# 0.89, broken 0.73, overcast 0.31, placed at the middle of each class's cloud
+# fraction (scattered 3-4 oktas, broken 5-7) and interpolated between
+UV_CLOUD_COVER_POINTS = (0.0, 0.4375, 0.75, 1.0)
+UV_CLOUD_FACTORS = (1.0, 0.89, 0.73, 0.31)
+
+# Gust factor (3 s gust over the mean 10 m wind) for open, flat country
+# (WMO guidelines, Harper et al. 2010: about 1.2-1.3 at sea, 1.4-1.5 over
+# open land, higher over rough terrain). CFS's four-member mean wind is lower
+# than any member's, which this partly offsets.
+CFS_GUST_FACTOR = 1.4
 
 
 def relative_humidity_from_dewpoint_c(temperature_c, dewpoint_c):
@@ -478,6 +500,72 @@ def estimate_cfs_visibility(temperature_c, rh_percent, intensity_mm_hr, wind_spe
         wind_speed_ms=wind_speed_ms,
         snow_mm_hr=np.where(snow, intensity_mm_hr, 0.0),
     )
+
+
+def cos_solar_zenith(lat, lon, unix_times):
+    """Cosine of the solar zenith angle at each Unix time, from NOAA's general
+    solar position formulas (Spencer 1971 declination and equation of time;
+    about 0.1 degree). Negative while the sun is below the horizon.
+    """
+    times = np.asarray(unix_times, dtype=np.float64)
+    days_since_epoch = times / SECONDS_PER_DAY
+    utc_hours = (days_since_epoch % 1.0) * 24.0
+    # Fractional year (radians): its period is the 365.2422-day tropical year,
+    # counted from 2000-01-01 (day 10957 of the epoch), close to the perihelion
+    fractional_year = 2.0 * np.pi * ((days_since_epoch - 10957.0) % 365.2422) / 365.2422
+    equation_of_time_min = 229.18 * (
+        0.000075
+        + 0.001868 * np.cos(fractional_year)
+        - 0.032077 * np.sin(fractional_year)
+        - 0.014615 * np.cos(2 * fractional_year)
+        - 0.040849 * np.sin(2 * fractional_year)
+    )
+    declination = (
+        0.006918
+        - 0.399912 * np.cos(fractional_year)
+        + 0.070257 * np.sin(fractional_year)
+        - 0.006758 * np.cos(2 * fractional_year)
+        + 0.000907 * np.sin(2 * fractional_year)
+        - 0.002697 * np.cos(3 * fractional_year)
+        + 0.00148 * np.sin(3 * fractional_year)
+    )
+    # True solar time in minutes; the hour angle is zero at solar noon
+    true_solar_time_min = utc_hours * 60.0 + equation_of_time_min + 4.0 * lon
+    hour_angle = np.radians(true_solar_time_min / 4.0 - 180.0)
+    latitude = np.radians(lat)
+    return np.sin(latitude) * np.sin(declination) + np.cos(latitude) * np.cos(
+        declination
+    ) * np.cos(hour_angle)
+
+
+def estimate_cfs_uv_index(lat, lon, unix_times, cloud_fraction):
+    """UV index for CFS, which has no UV field, for the hourly and current
+    blocks alike.
+
+    Clear-sky UV index from the sun's height (Allaart et al. 2004:
+    12.5 * cos(zenith)**2.42 * (ozone / 300 DU)**-1.23) at a typical total
+    ozone, as CFS has none, reduced for cloud with the NWS UV Index cloud
+    factors. Neither elevation nor surface reflection (snow) is included, and
+    CFS cloud is a four-member mean, so it is a typical value for the hour.
+    """
+    cos_zenith = np.clip(cos_solar_zenith(lat, lon, unix_times), 0.0, None)
+    clear_sky_uv = (
+        UV_CLEAR_SKY_OVERHEAD_INDEX
+        * cos_zenith**UV_CLEAR_SKY_ZENITH_EXPONENT
+        * (UV_TYPICAL_OZONE_DU / UV_REFERENCE_OZONE_DU) ** UV_CLEAR_SKY_OZONE_EXPONENT
+    )
+    cloud_factor = np.interp(
+        np.clip(np.asarray(cloud_fraction, dtype=np.float64), 0.0, 1.0),
+        UV_CLOUD_COVER_POINTS,
+        UV_CLOUD_FACTORS,
+    )
+    return clear_sky_uv * cloud_factor
+
+
+def estimate_cfs_gust(wind_speed_ms):
+    """Wind gust (m/s) for CFS, which has no gust field: the 10 m wind times
+    a typical gust factor (see CFS_GUST_FACTOR)."""
+    return np.asarray(wind_speed_ms, dtype=np.float64) * CFS_GUST_FACTOR
 
 
 def select_daily_precip_type(

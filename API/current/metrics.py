@@ -11,6 +11,8 @@ import numpy as np
 from API.api_utils import (
     calculate_apparent_temperature,
     clipLog,
+    estimate_cfs_gust,
+    estimate_cfs_uv_index,
     estimate_cfs_visibility,
     estimate_visibility_gultepe_rh_pr_numpy,
     relative_humidity_from_dewpoint_c,
@@ -923,6 +925,15 @@ def _get_gust(
                 state,
             ),
         ),
+        # The same estimate as CFS's hourly gust, from the current wind
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: estimate_cfs_gust(
+                _interp_uv_magnitude(
+                    model_data["CFS_Merged"], CFS["wind_u"], CFS["wind_v"], state
+                )
+            ),
+        ),
     }
 
     strategies = _build_source_strategies(
@@ -1312,6 +1323,17 @@ def _get_uv(
                 / 3600
                 * 40
                 * 0.0025
+            ),
+        ),
+        # The same estimate as CFS's hourly UV, at the current time (its
+        # interpolated time column) and cloud cover
+        "cfs": (
+            lambda: model_data.get("CFS_Merged") is not None,
+            lambda: estimate_cfs_uv_index(
+                lat,
+                lon,
+                _interp_scalar(model_data["CFS_Merged"], 0, state),
+                _interp_scalar(model_data["CFS_Merged"], CFS["cloud"], state) * 0.01,
             ),
         ),
     }
