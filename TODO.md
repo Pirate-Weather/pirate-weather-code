@@ -43,6 +43,21 @@ peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
 
 ## Done
 
+### Ensemble time interpolation no longer depends on the hash seed (2026-11-12)
+GEFS (14 Gi) and AIGEFS (5 Gi) were OOM-killed on about a third of runs from 2026-11-10,
+about 40 s after the last member, and usually passed on retry. A once-a-second cgroup
+trace of a killed AIGEFS pod showed anon memory jump 1.27 -> 4.15 GiB in 2 s. The cause
+was `interp_time_take_blend`: with the `next_lead_vars` override (#818) its graph (two
+`da.take` gathers, a blend, then slicing the override variables out and concatenating
+them back) fused differently depending on `PYTHONHASHSEED`, and in the bad shape every
+gather ran before any blend. Reproduced locally by seed: AIGEFS final stage 0.67 GiB
+(seeds 1, 2) vs 5.81 GiB (4, 6); GEFS 1.1 GiB vs 13.68 GiB (seed 6). The function is now
+one `map_blocks` task per input block: AIGEFS 0.73-0.79 GiB and GEFS 1.00-1.05 GiB for
+every seed, same run time, output bit-identical to the old code in 36 cases (all
+override types and combinations, var chunks 1/2/6, float32/64, NaN, out-of-range hours).
+Every caller benefits (GEPS, REPS, ECMWF, ECMWF_AIFS, CFS, NBM, GDPS, DWD_Mosmix); give
+the long-range ones (ECMWF, CFS, NBM) one sampled run after deploying.
+
 ### Block icon ties no longer depend on the hash seed (2026-11-10)
 The hourly and daily block text and icon without summary text (always for Time
 Machine) were picked with `max(set(lst), key=lst.count)`, so a tie went to whichever

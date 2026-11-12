@@ -1915,7 +1915,7 @@ def interp_time_take_blend(
 
     The helper assumes the input has shape \(V, T, Y, X\) and that time is
     the second axis. It gathers the values for the two surrounding stored
-    times using ``da.take``, then linearly blends them using the fractional
+    times within each block, then linearly blends them using the fractional
     offset between ``stacked_timesUnix`` and ``hourly_timesUnix``. Points that
     fall outside the time range defined by ``stacked_timesUnix`` are filled with
     ``fill_value``. Optionally, a subset of variable indices may be overridden
@@ -1974,94 +1974,77 @@ def interp_time_take_blend(
     if not (len(idx1) == T_new and len(w) == T_new and len(valid) == T_new):
         raise ValueError("idx0, idx1, w, and valid must all have length T_new.")
 
-    # Ensure time axis already fits in one chunk so gather (`da.take`) stays within chunk boundaries
+    # Each block gathers its neighbours along time, so time must be one chunk
     time_chunks = arr.chunks[TAX]
     if len(time_chunks) != 1:
         raise ValueError(
             "time axis must be a single chunk; please rechunk with ``arr.rechunk({time_axis: -1})`` "
             f"before calling (got {len(time_chunks)} chunks)."
         )
-    arr_t = arr
 
-    # Gather neighbors along time
-    y0 = da.take(arr_t, idx0, axis=TAX)  # (V, T_new, Y, X)
-    y1 = da.take(arr_t, idx1, axis=TAX)
-
-    # Weighted blend
-    # In the data's dtype: float64 weights would promote every float32 value to
-    # float64, doubling the temporary memory, only to cast back afterwards.
-    w_r = da.asarray(w.astype(arr.dtype), chunks=(T_new,))[None, :, None, None]
-    out = (1 - w_r) * y0 + w_r * y1
-    out = out.astype(dtype, copy=False)
-
-    # Mask invalid new times
-    if (~valid).any():
-        valid_r = da.asarray(valid, chunks=(T_new,))[None, :, None, None]
-        out = da.where(valid_r, out, fill_value)
-
-    # Variables replaced after the blend: {variable index: (1, T_new, Y, X) array}
-    overrides = {}
-
-    if direction_vars is not None:
-        if isinstance(direction_vars, int):
-            direction_vars = [direction_vars]
-        for i in {int(i) for i in direction_vars}:
-            start = y0[i : i + 1]
-            shortest_arc = ((y1[i : i + 1] - start + 180.0) % 360.0) - 180.0
-            direction = (start + w_r * shortest_arc) % 360.0
-            if (~valid).any():
-                direction = da.where(valid_r, direction, fill_value)
-            overrides[i] = direction.astype(dtype, copy=False)
-
-    # Optional nearest-neighbor override for specified variable indices
-    if nearest_vars is not None:
-        # Precompute nearest indices once: closer of idx0 / idx1
-        nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
-
-        if isinstance(nearest_vars, int):
-            nearest_vars = [nearest_vars]
-
-        # Compute nearest only for needed variables (cheap if few vars)
-        # Shape of each nearest slice: (1, T_new, Y, X)
-        take_nn = da.take(arr_t, nearest_idx, axis=TAX)
-        for i in {int(i) for i in nearest_vars}:
-            nearest = take_nn[i : i + 1]
-            if (~valid).any():
-                nearest = da.where(valid_r, nearest, fill_value)
-            overrides[i] = nearest.astype(dtype, copy=False)
-
-    # Optional interval override: the first stored time strictly after each hour
-    if next_lead_vars is not None:
-        if isinstance(next_lead_vars, int):
-            next_lead_vars = [next_lead_vars]
-        following = np.searchsorted(x_a, x_b, side="right")
-        has_following = following < len(x_a)
-        following_idx = np.clip(following, 0, len(x_a) - 1).astype(idx0.dtype)
-        following_r = da.asarray(has_following, chunks=(T_new,))[None, :, None, None]
-        take_next = da.take(arr_t, following_idx, axis=TAX)
-        for i in {int(i) for i in next_lead_vars}:
-            overrides[i] = da.where(
-                following_r, take_next[i : i + 1], fill_value
-            ).astype(dtype, copy=False)
-
-    # Replace the overridden variables in 'out'
-    if overrides:
-        pieces = []
-        prev = 0
-        for i in sorted(overrides):
+    def index_set(var_indices) -> set[int]:
+        if var_indices is None:
+            return set()
+        if isinstance(var_indices, int):
+            var_indices = [var_indices]
+        indices = {int(i) for i in var_indices}
+        for i in indices:
             if i < 0 or i >= arr.shape[VAX]:
                 raise IndexError(
                     f"Override variable index {i} out of range for V={arr.shape[VAX]}"
                 )
-            if i > prev:
-                pieces.append(out[prev:i])  # unchanged segment
-            pieces.append(overrides[i])
-            prev = i + 1
-        if prev < arr.shape[VAX]:
-            pieces.append(out[prev:])
-        out = da.concatenate(pieces, axis=VAX)
+        return indices
 
-    return out
+    direction_set = index_set(direction_vars)
+    nearest_set = index_set(nearest_vars)
+    next_lead_set = index_set(next_lead_vars)
+
+    # In the data's dtype: float64 weights would promote every float32 value to
+    # float64, doubling the temporary memory, only to cast back afterwards.
+    w_block = w.astype(arr.dtype)[None, :, None, None]
+    invalid = ~valid
+    # Closer of the two stored times, for nearest_vars
+    nearest_idx = np.where(w < 0.5, idx0, idx1).astype(idx0.dtype)
+    # First stored time strictly after each hour, for next_lead_vars
+    following = np.searchsorted(x_a, x_b, side="right")
+    no_following = following >= len(x_a)
+    following_idx = np.clip(following, 0, len(x_a) - 1).astype(idx0.dtype)
+
+    def blend_block(block, block_info=None):
+        """Interpolate one (V, T, Y, X) block; overrides are applied in the
+        order direction, nearest, next lead, so a later one wins."""
+        var_start, var_stop = block_info[0]["array-location"][VAX]
+        y0 = block[:, idx0]
+        y1 = block[:, idx1]
+        out = ((1 - w_block) * y0 + w_block * y1).astype(dtype, copy=False)
+        out[:, invalid] = fill_value
+        for offset, var in enumerate(range(var_start, var_stop)):
+            if var in direction_set:
+                start = y0[offset]
+                shortest_arc = ((y1[offset] - start + 180.0) % 360.0) - 180.0
+                out[offset] = (start + w_block[0] * shortest_arc) % 360.0
+                out[offset, invalid] = fill_value
+            if var in nearest_set:
+                out[offset] = block[offset, nearest_idx]
+                out[offset, invalid] = fill_value
+            if var in next_lead_set:
+                out[offset] = block[offset, following_idx]
+                out[offset, no_following] = fill_value
+        return out
+
+    # One task per input block. The previous graph (two da.take gathers, a blend,
+    # then slicing out the override variables and concatenating them back) was
+    # fused differently depending on the process's string hash seed; in about
+    # a third of processes the threaded scheduler ran every gather before any
+    # blend and held both gathered copies of the blended variables at once
+    # (5.8 GiB for AIGEFS, 13.7 GiB for GEFS), which OOM-killed the ingests.
+    return da.map_blocks(
+        blend_block,
+        arr,
+        chunks=(arr.chunks[VAX], (T_new,), arr.chunks[2], arr.chunks[3]),
+        dtype=dtype,
+        meta=np.empty((0, 0, 0, 0), dtype=dtype),
+    )
 
 
 def validate_stacked_time_alignment(
