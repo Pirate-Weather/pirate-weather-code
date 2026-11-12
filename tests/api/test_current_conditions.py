@@ -290,4 +290,4 @@ def test_future_day_currently_precipitation_is_the_requested_hourly_item(
         # copying it, and UV from the sun's height and cloud cover
         np.testing.assert_allclose(currently["windGust"], hour_item["windGust"])
         assert hour_item["windGust"] > hour_item["windSpeed"]
-        assert currently["uvIndex"] != MISSING_DATA
+        assert np.isfinite(currently["uvIndex"])
