@@ -1,6 +1,6 @@
 aiohttp==3.14.5
 aiobotocore[boto3]==3.10.0
-bottleneck==1.6.0
+bottleneck==1.6.1
 cartopy==0.26.0
 cfgrib==0.9.15.1
 crc32c==2.9.post0
