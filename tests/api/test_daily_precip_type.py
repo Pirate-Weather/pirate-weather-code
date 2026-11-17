@@ -36,7 +36,7 @@ def test_daily_precip_type_follows_dominant_accumulation():
         )
 
     result = select_daily_precip_type(
-        day_sums, DATA_DAY, np.zeros(len(days), dtype=int), PRECIP_IDX, 1.0
+        day_sums, DATA_DAY, np.zeros(len(days), dtype=int), PRECIP_IDX
     )
 
     assert result.tolist() == [PRECIP_IDX[expected] for _, expected in days]
@@ -138,7 +138,7 @@ def test_daily_sleet_is_kept_apart_from_freezing_rain(
     day_sums[0, [DATA_DAY["rain"], DATA_DAY["snow"], DATA_DAY["ice"]]] = accumulation
 
     result = select_daily_precip_type(
-        day_sums, DATA_DAY, np.array([PRECIP_IDX[hourly_type]]), PRECIP_IDX, 1.0
+        day_sums, DATA_DAY, np.array([PRECIP_IDX[hourly_type]]), PRECIP_IDX
     )
 
     assert result.tolist() == [PRECIP_IDX[expected]]
@@ -171,7 +171,7 @@ def test_mixed_ensemble_hours_keep_their_precipitation():
     day_sum = np.zeros((1, max(DATA_DAY.values()) + 1))
     day_sum[0, DATA_DAY["ice"]] = InterPhour[:, DATA_HOURLY["ice"]].sum()
     daily_type = select_daily_precip_type(
-        day_sum, DATA_DAY, np.array([PRECIP_IDX["mixed"]]), PRECIP_IDX, 1.0
+        day_sum, DATA_DAY, np.array([PRECIP_IDX["mixed"]]), PRECIP_IDX
     )
     assert daily_type.tolist() == [PRECIP_IDX["mixed"]]
 
@@ -184,3 +184,64 @@ def test_mixed_ensemble_hours_keep_their_precipitation():
     )
     _, text = calculate_day_text(hour_list, True, "UTC", "day")
     assert "mixed-precipitation" in str(text)
+
+
+def _rain_and_frozen_day(rain_hours, rain_mm, frozen_type, frozen_hours, frozen_mm):
+    """24 hourly rows (one day): rain hours, then hours of a frozen type, each
+    putting down the given amount (mm), and the day's summed accumulation."""
+    InterPhour = np.zeros((24, max(DATA_HOURLY.values()) + 1))
+    rain_rows = slice(0, rain_hours)
+    frozen_rows = slice(rain_hours, rain_hours + frozen_hours)
+    InterPhour[rain_rows, DATA_HOURLY["type"]] = PRECIP_IDX["rain"]
+    InterPhour[rain_rows, DATA_HOURLY["rain"]] = rain_mm
+    InterPhour[frozen_rows, DATA_HOURLY["type"]] = PRECIP_IDX[frozen_type]
+    InterPhour[frozen_rows, DATA_HOURLY["ice"]] = frozen_mm
+
+    day_sum = np.zeros((1, max(DATA_DAY.values()) + 1))
+    day_sum[0, DATA_DAY["rain"]] = InterPhour[:, DATA_HOURLY["rain"]].sum()
+    day_sum[0, DATA_DAY["ice"]] = InterPhour[:, DATA_HOURLY["ice"]].sum()
+    return InterPhour, day_sum
+
+
+@pytest.mark.parametrize(
+    ("rain_hours", "rain_mm", "frozen_type", "frozen_hours", "frozen_mm", "expected"),
+    [
+        # Mostly rain with over 1 mm of sleet: the significant-ice override
+        # used to make this freezing rain
+        pytest.param(14, 0.4, "sleet", 6, 0.3, "sleet", id="rain-dominant-sleet"),
+        # Sleet out-accumulates rain, but rain hours are the most common type
+        pytest.param(14, 0.1, "sleet", 6, 0.6, "sleet", id="sleet-dominant-rain-hours"),
+        # The same days with freezing rain stay freezing rain
+        pytest.param(14, 0.4, "ice", 6, 0.3, "ice", id="rain-dominant-freezing-rain"),
+        pytest.param(14, 0.1, "ice", 6, 0.6, "ice", id="freezing-rain-dominant"),
+        # Under 1 mm of ice doesn't take over a rainy day
+        pytest.param(14, 0.4, "sleet", 2, 0.4, "rain", id="little-sleet-stays-rain"),
+    ],
+)
+def test_daily_frozen_type_follows_hourly_types(
+    rain_hours, rain_mm, frozen_type, frozen_hours, frozen_mm, expected
+):
+    """A day with rain and sleet hours was reported as freezing rain (and the
+    weekly summary as freezing drizzle): the ice accumulation can't tell sleet
+    from freezing rain, and the day's most common hourly type was rain. The
+    frozen type must come from the hours that put down the ice.
+    """
+    import logging
+
+    from API.daily.builder import _select_precip_type
+
+    InterPhour, day_sum = _rain_and_frozen_day(
+        rain_hours, rain_mm, frozen_type, frozen_hours, frozen_mm
+    )
+
+    result = _select_precip_type(
+        day_sum,
+        np.array([float(PRECIP_IDX["rain"])]),
+        InterPhour,
+        np.zeros(24, dtype=int),
+        1,
+        logging.getLogger(__name__),
+        "test",
+    )
+
+    assert result.tolist() == [PRECIP_IDX[expected]]
