@@ -287,12 +287,41 @@ def _raise_prob_to_member_share(max_arr, prob_column, share):
     return raised
 
 
-def _select_precip_type(window_sum, most_common_type, prepAccumUnit, logger, loc_tag):
+def _frozen_accum_by_type(InterPhour, index_array, daily_days):
+    """Each day's ice accumulation (mm) split by the hours' type, as (sleet,
+    freezing rain). Mixed hours count as sleet, as in the daily text summary."""
+    in_window = (index_array >= 0) & (index_array < daily_days)
+    days = index_array[in_window].astype(int)
+    rows = InterPhour[in_window]
+    hour_types = rows[:, DATA_HOURLY["type"]]
+    ice = np.nan_to_num(rows[:, DATA_HOURLY["ice"]])
+    is_sleet = (hour_types == PRECIP_IDX["sleet"]) | (hour_types == PRECIP_IDX["mixed"])
+    is_frzrain = hour_types == PRECIP_IDX["ice"]
+    sleet = np.bincount(
+        days, weights=np.where(is_sleet, ice, 0.0), minlength=daily_days
+    )
+    frzrain = np.bincount(
+        days, weights=np.where(is_frzrain, ice, 0.0), minlength=daily_days
+    )
+    return sleet, frzrain
+
+
+def _select_precip_type(
+    window_sum, most_common_type, InterPhour, index_array, daily_days, logger, loc_tag
+):
     """A window's precipitation type from its accumulations, falling back to its
     most common hourly type."""
     try:
+        sleet_accum, frzrain_accum = _frozen_accum_by_type(
+            InterPhour, index_array, daily_days
+        )
         return select_daily_precip_type(
-            window_sum, DATA_DAY, most_common_type, PRECIP_IDX, prepAccumUnit
+            window_sum,
+            DATA_DAY,
+            most_common_type,
+            PRECIP_IDX,
+            sleet_accum=sleet_accum,
+            frzrain_accum=frzrain_accum,
         )
     except Exception:
         logger.exception("select_daily_precip_type error %s", loc_tag)
@@ -946,7 +975,13 @@ def build_daily_section(
         ]
 
     maxPchanceDay = _select_precip_type(
-        InterPdaySum, maxPchanceDay, prepAccumUnit, logger, loc_tag
+        InterPdaySum,
+        maxPchanceDay,
+        InterPhour,
+        hourlyDayIndex,
+        daily_days,
+        logger,
+        loc_tag,
     )
 
     day_night_list = []
@@ -975,7 +1010,13 @@ def build_daily_section(
                     )
                 )
             half_type = _select_precip_type(
-                half_sum, half_type, prepAccumUnit, logger, loc_tag
+                half_sum,
+                half_type,
+                InterPhour,
+                half_index,
+                daily_days,
+                logger,
+                loc_tag,
             )
             display_mean, display_max, display_sum = _build_half_display_data(
                 half_mean,

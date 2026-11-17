@@ -573,7 +573,8 @@ def select_daily_precip_type(
     DATA_DAY: dict,
     maxPchanceDay: np.ndarray,
     PRECIP_IDX: dict,
-    prepAccumUnit: float,
+    sleet_accum: np.ndarray | None = None,
+    frzrain_accum: np.ndarray | None = None,
 ) -> np.ndarray:
     """Determines the dominant precipitation type for each day.
 
@@ -582,11 +583,15 @@ def select_daily_precip_type(
     `maxPchanceDay` (modified in-place) for convenience.
 
     Args:
-        InterPdaySum: 2D array-like (n_days, vars) with accumulated precip amounts.
+        InterPdaySum: 2D array-like (n_days, vars) with accumulated precip amounts
+            in mm (SI).
         DATA_DAY: Mapping of variable names to column indices.
         maxPchanceDay: Array-like of ints that will be updated with precip type codes.
         PRECIP_IDX: Mapping of precipitation type names to integer codes.
-        prepAccumUnit: Unit conversion multiplier for accumulation thresholds.
+        sleet_accum: Per-day ice accumulation (mm) from hours typed sleet (or
+            mixed), or None.
+        frzrain_accum: Per-day ice accumulation (mm) from hours typed freezing
+            rain, or None.
 
     Returns:
         The updated `maxPchanceDay` numpy array.
@@ -611,9 +616,20 @@ def select_daily_precip_type(
     type_map = np.array([PRECIP_IDX["rain"], PRECIP_IDX["snow"], PRECIP_IDX["ice"]])
     dominant_type = type_map[np.argmax(precip_accum, axis=1)]
 
-    # Accumulation only has one ice column, shared by sleet and freezing rain, so the
-    # hourly type (most common on the day) is what tells them apart.
+    # Accumulation only has one ice column, shared by sleet and freezing rain, so
+    # the hourly types tell them apart: whichever of the two put down more ice.
+    # Without that split (or when it ties), fall back to the day's most common
+    # hourly type, defaulting to freezing rain unless that is sleet.
     hourly_type = maxPchanceDay.copy()
+    frozen_type = np.where(
+        hourly_type == PRECIP_IDX["sleet"], PRECIP_IDX["sleet"], PRECIP_IDX["ice"]
+    )
+    if sleet_accum is not None and frzrain_accum is not None:
+        frozen_type = np.where(
+            sleet_accum > frzrain_accum,
+            PRECIP_IDX["sleet"],
+            np.where(frzrain_accum > sleet_accum, PRECIP_IDX["ice"], frozen_type),
+        )
 
     # Only update where not all types are present and some precip exists
     not_all_types = ~all_types
@@ -623,18 +639,20 @@ def select_daily_precip_type(
     already_mixed = maxPchanceDay == PRECIP_IDX["mixed"]
     update_mask = not_all_types & has_precip & ~already_mixed
     maxPchanceDay[update_mask] = dominant_type[update_mask]
-    maxPchanceDay[
-        (maxPchanceDay == PRECIP_IDX["ice"]) & (hourly_type == PRECIP_IDX["sleet"])
-    ] = PRECIP_IDX["sleet"]
+    is_ice = maxPchanceDay == PRECIP_IDX["ice"]
+    maxPchanceDay[is_ice] = frozen_type[is_ice]
 
-    # If significant ice accumulation exists and type is not already ice/sleet,
-    # default to ice (freezing rain), which is more common than sleet globally.
-    maxPchanceDay[
-        (InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit))
+    # More than 1 mm of ice is shown as the day's type even when rain or snow
+    # accumulated more, as it is the more hazardous forecast. It is the frozen
+    # type that actually fell, not always freezing rain: a rainy day with some
+    # sleet is a sleet day. The accumulation is in mm whatever the request units.
+    significant_ice = (
+        (InterPdaySum[:, DATA_DAY["ice"]] > 1)
         & (maxPchanceDay != PRECIP_IDX["ice"])
         & (maxPchanceDay != PRECIP_IDX["sleet"])
         & ~already_mixed
-    ] = PRECIP_IDX["ice"]
+    )
+    maxPchanceDay[significant_ice] = frozen_type[significant_ice]
 
     # If we have all types map the type to mixed
     maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
