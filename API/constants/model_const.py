@@ -414,6 +414,11 @@ RAQDPS = {
     "so2": 5,
 }
 
+# RDAQA (Regional Deterministic Air Quality Analysis) variable indices. The store
+# holds RAQDPS's pollutants in RAQDPS's order and units (RDAQA_Local_Ingest.py
+# zarr_vars = RAQDPS_VARIABLES), one row per analysis hour.
+RDAQA = dict(RAQDPS)
+
 # SILAM (System for Integrated modeLling of Atmospheric coMposition) variable indices.
 # Matches the stacked-zarr output order from FMI_Silam_Local_Ingest.py:
 # zarr_vars = ("time", "cnc_PM2_5", "cnc_PM10", "PM_FRP_column", "BLH",

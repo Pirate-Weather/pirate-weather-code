@@ -75,6 +75,9 @@ HISTORY_PERIODS = {
     # URMA has roughly 12 days of history, allowing 10 days of local retrievals.
     # URMA data has a 6 hour delay, so account for that in the history period to keep consistency with GFS.
     "URMA": 282,
+    # RDAQA covers the 24 h AQ lead-in before local midnight plus up to 24 h
+    # since it, so a current AQI's averaging windows never reach past the store.
+    "RDAQA": 48,
 }
 
 # First forecast lead (hours) of the forecast-only model stores. The API recovers

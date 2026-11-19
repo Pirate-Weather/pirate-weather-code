@@ -33,9 +33,17 @@ fixed correction.
 Plan if accepted:
 - Prelim only: posted ~40 min after the hour (final ~2 h), same values to 0.1 µg/m³
   in 20 of 21 hours checked, and fewer missing hours.
-- Ingest like URMA: hourly, keep `HISTORY_PERIODS["RDAQA"] = 48` (24 h AQ lead-in plus
-  up to 24 h since local midnight). Leave a missing hour as a NaN row instead of failing;
-  hours are sometimes late or missing.
+- Ingest (done, `ingest/RDAQA_Local_Ingest.py`, branch `rdaqa-ingest`): hourly at :50,
+  archives each hour like URMA and publishes `RDAQA.zarr` with the last
+  `HISTORY_PERIODS["RDAQA"] = 48` hours (24 h AQ lead-in plus up to 24 h since local
+  midnight). A late or missing hour is a NaN row, retried each run. Downloads skip
+  Herbie: its existence check reports failed requests as "not found", which stored
+  3 of 49 posted hours as NaN. Backfilling all 49 hours took 140-160 s at a 1.6 GB
+  peak; an hourly run fetches one hour in ~20 s. History stores are ~5 MB an hour and,
+  like the other history stores, are never deleted (see Remaining storage clean-up).
+- Still to do for the API: read `RDAQA.zarr` (store_reader, using the RAQDPS grid
+  pickle), an `ex_rdaqa` exclude flag, `rdaqa` in flags.sources and
+  `PUBLISH_SCHEDULE_HOURS`, and the source priority below in `prepare_aq_inputs`.
 - `currently` and past hours from RDAQA (the AQI averaging windows need the history),
   hourly forecast from RAQDPS, SILAM filling either.
 - Later, if the jump from `currently` to the first forecast hour is noticeable: fade

@@ -60,7 +60,8 @@ CHUNK_SIZES = {
     "REPS": 200,
     "GDPS": 150,
     "GEPS": 200,
-    "RDAQA": 250,
+    # RDAQA tiles split into whole 100-cell final shards
+    "RDAQA": 200,
     "RAQDPS": 250,
     "SILAM": 200,
     "URMA": 200,
@@ -101,6 +102,7 @@ FINAL_CHUNK_SIZES = {
     "GDPS": 5,
     "GEPS": 5,
     "RAQDPS": 25,
+    "RDAQA": 25,
     "SILAM": 5,
     # Same layout as the other models; with ~283 hours one chunk is 283 KB
     "URMA": 5,
@@ -135,6 +137,7 @@ FINAL_SHARD_SIZES = {
     "RTMA": 100,  # RTMA-RU, < 1
     "RTMA_HOURLY": 100,  # 21
     "RAQDPS": 100,  # 18
+    "RDAQA": 100,  # 10 (5 x 49 hours)
     "DWD": 100,  # 115
     "SILAM": 100,  # 78
     "URMA": 100,  # 113
