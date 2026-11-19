@@ -8,6 +8,41 @@ then move the entry to Done.
 
 ## Improvements
 
+### RDAQA for current air quality (awaiting a decision, asked 2026-11-14)
+ECCC's Regional Deterministic Air Quality Analysis blends RAQDPS with hourly AirNow and
+Canadian monitor observations (no satellites or low-cost sensors) on the RAQDPS 10 km
+grid, so the RAQDPS cell lookup can be reused. The Herbie template is in
+`API/rdaqa_herbie_template.py` (`analysis="prelim" | "final" | "fw"`).
+`scripts/compare_rdaqa_raqdps_point.py` prints both for one lat/lon from the Datamart.
+
+PM2.5 (µg/m³) mean absolute error against monitors, 2026-11-17/18:
+
+| Station | RDAQA Prelim | RAQDPS |
+|---|---|---|
+| Ottawa Downtown, 17-18th | 1.3 | 6.6 |
+| Ottawa Downtown, 18-19th | 0.8 | 4.1 (12Z run 7.1, 00Z run 2.3) |
+| Kingston | 2.8 | 11.4 |
+| Thunder Bay (clean air) | 1.7 | 1.8 |
+
+Agreement at a monitor's own cell is partly built in (the analysis uses that monitor).
+Away from monitors it falls back toward RAQDPS; corrected PurpleAir sensors near
+Manotick/Kemptville were within a few µg/m³ of it while RAQDPS was about half. RAQDPS's
+error changes from run to run (6-13 low through one run, within 2 the next), so no
+fixed correction.
+
+Plan if accepted:
+- Prelim only: posted ~40 min after the hour (final ~2 h), same values to 0.1 µg/m³
+  in 20 of 21 hours checked, and fewer missing hours.
+- Ingest like URMA: hourly, keep `HISTORY_PERIODS["RDAQA"] = 48` (24 h AQ lead-in plus
+  up to 24 h since local midnight). Leave a missing hour as a NaN row instead of failing;
+  hours are sometimes late or missing.
+- `currently` and past hours from RDAQA (the AQI averaging windows need the history),
+  hourly forecast from RAQDPS, SILAM filling either.
+- Later, if the jump from `currently` to the first forecast hour is noticeable: fade
+  from the last RDAQA hour into RAQDPS over the first few hours.
+- Smoke season: compare `fw` with Prelim. The standard analysis rejects PM observations
+  more than 100 µg/m³ above the forecast; FW only above 300.
+
 ## Plan (2026-11-09)
 
 Work through the open items in this order, small ones first:
