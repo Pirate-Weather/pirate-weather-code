@@ -45,17 +45,19 @@ def test_daily_precip_type_follows_dominant_accumulation():
 def test_ensemble_rates_map_to_precip_type():
     """GEPS/REPS have no categorical type, only per-type rates. A single channel
     above the threshold must map to its type (ice pellets -> sleet, freezing
-    rain -> ice), nothing above it to "none", and all-NaN to MISSING_DATA so
+    rain -> ice), noise-level rates to "none", and all-NaN to MISSING_DATA so
     missing data is not reported as dry.
 
-    Several strong channels are mixed, not any one of them.
+    Several strong channels are mixed, not any one of them. Weak hours with no
+    channel over the threshold still take the dominant channel's type, so a light
+    ensemble-mean snow is not left for the air-temperature fallback to call sleet.
     """
     nan = np.nan
     result = map_ensemble_precip_rates_to_ptype(
-        snow=np.array([4.0, 0.0, 0.0, 0.0, 0.05, nan, 2.0]),
-        ice=np.array([0.0, 3.0, 0.0, 0.0, 0.0, nan, 0.0]),
-        freezing_rain=np.array([0.0, 0.0, 1.0, 0.0, 0.0, nan, 0.0]),
-        rain=np.array([0.0, 0.0, 0.0, 2.0, 0.05, nan, 3.0]),
+        snow=np.array([4.0, 0.0, 0.0, 0.0, 0.005, nan, 2.0, 0.08, 0.01]),
+        ice=np.array([0.0, 3.0, 0.0, 0.0, 0.0, nan, 0.0, 0.02, 0.0]),
+        freezing_rain=np.array([0.0, 0.0, 1.0, 0.0, 0.0, nan, 0.0, 0.0, 0.0]),
+        rain=np.array([0.0, 0.0, 0.0, 2.0, 0.005, nan, 3.0, 0.0, 0.06]),
         threshold=0.1,
     )
 
@@ -69,6 +71,8 @@ def test_ensemble_rates_map_to_precip_type():
             PRECIP_IDX["none"],
             MISSING_DATA,
             PRECIP_IDX["mixed"],
+            PRECIP_IDX["snow"],
+            PRECIP_IDX["rain"],
         ],
     )
 
