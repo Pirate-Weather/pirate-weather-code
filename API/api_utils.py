@@ -831,7 +831,8 @@ def map_ensemble_precip_rates_to_ptype(
     """Map ensemble precipitation component rates to the internal precipitation type.
 
     GEPS and REPS do not provide a categorical type field; they provide rate fields for
-    rain, ice pellets, freezing rain, and snow. We classify by the strongest rate, but
+    rain, ice pellets, freezing rain, and snow (ensemble means, mm/h). We classify by
+    the strongest rate, even when it is under the threshold, but
     if more than one channel exceeds the threshold we fall back to mixed precipitation.
 
     The companion mapping is:
@@ -883,28 +884,27 @@ def map_ensemble_precip_rates_to_ptype(
     )
 
     strong_count = (component_matrix > threshold).sum(axis=1)
-    out = np.full(n_hours, np.nan, dtype=float)
+    out = np.full(n_hours, PRECIP_IDX["none"], dtype=float)
 
-    mixed_mask = strong_count > 1
-    out[mixed_mask] = PRECIP_IDX["mixed"]
+    # The channels are ensemble means, so a light or low-probability event can have
+    # every channel under the threshold. Those hours still take the dominant
+    # channel's type; leaving them "none" would hand them to the hourly block's
+    # air-temperature fallback, which calls anything between -1 and 1 C sleet.
+    filled = np.nan_to_num(component_matrix, nan=0.0)
+    strongest_idx = np.argmax(filled, axis=1)
+    component_types = np.array(
+        [
+            PRECIP_IDX["snow"],
+            PRECIP_IDX["sleet"],
+            PRECIP_IDX["ice"],
+            PRECIP_IDX["rain"],
+        ],
+        dtype=float,
+    )
+    typed_mask = filled.max(axis=1) > PRECIP_NOISE_THRESHOLD_MMH
+    out[typed_mask] = component_types[strongest_idx[typed_mask]]
 
-    strong_mask = strong_count == 1
-    if np.any(strong_mask):
-        strongest_idx = np.argmax(component_matrix, axis=1)
-        strongest_idx = np.where(strong_mask, strongest_idx, 0)
-        component_map = {
-            0: PRECIP_IDX["snow"],
-            1: PRECIP_IDX["sleet"],
-            2: PRECIP_IDX["ice"],
-            3: PRECIP_IDX["rain"],
-        }
-        out[strong_mask] = np.array(
-            [component_map[int(i)] for i in strongest_idx[strong_mask]]
-        )
-
-    no_precip_mask = strong_count == 0
-    if np.any(no_precip_mask):
-        out[no_precip_mask] = PRECIP_IDX["none"]
+    out[strong_count > 1] = PRECIP_IDX["mixed"]
 
     # Rows with no valid component data are missing, not precipitation-free.
     all_nan_mask = np.all(np.isnan(component_matrix), axis=1)
