@@ -221,12 +221,13 @@ Air quality data requires `version=2` (or higher) in the request. The top-level 
 
 ### Model priority
 
-1. **RAQDPS** (regional, Canada + CONUS) is preferred when available.
-2. **SILAM** (global) is used as a fallback.
-3. If both models are excluded (`exclude=raqdps,silam`) all AQ fields are absent.
+1. **RDAQA** (ECCC's hourly analysis, Canada + CONUS) is used for the past hours it has analysed, including the hours before local midnight that the AQI averages look back on. `currently` reports its newest analysis hour when that is at most 3 hours old.
+2. **RAQDPS** (regional forecast, Canada + CONUS) is used for the other hours.
+3. **SILAM** (global) is used as a fallback.
+4. If all three models are excluded (`exclude=rdaqa,raqdps,silam`) all AQ fields are absent.
 
-CO (`coConcentration`) is sourced exclusively from SILAM. RAQDPS does not publish CO.
+CO (`coConcentration`) is sourced exclusively from SILAM. RAQDPS and RDAQA do not publish CO.
 
 ### Flags
 
-When RAQDPS or SILAM supplies a returned air-quality value (or SILAM the smoke fallback), `flags.sources` and `flags.sourceTimes` include `raqdps` and/or `silam` with their model run timestamps; a model that was read but whose values were all replaced by the other is not listed.
+When RDAQA, RAQDPS or SILAM supplies a returned air-quality value (or SILAM the smoke fallback), `flags.sources` and `flags.sourceTimes` include `rdaqa`, `raqdps` and/or `silam` with their run timestamps (for RDAQA, its newest analysis hour); a model that was read but whose values were all replaced by another is not listed.

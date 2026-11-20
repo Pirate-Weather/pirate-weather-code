@@ -148,6 +148,7 @@ class InitialRequestContext:
     ex_aifs: int
     ex_raqdps: int
     ex_silam: int
+    ex_rdaqa: int
     ex_librewxr: int
     ex_hrdps: int
     ex_gdps: int
@@ -470,6 +471,7 @@ def _parse_parameters(
     ex_aifs = int("ecmwf_aifs" in exclude_params)
     ex_raqdps = int("raqdps" in exclude_params)
     ex_silam = int("silam" in exclude_params)
+    ex_rdaqa = int("rdaqa" in exclude_params)
     ex_librewxr = int("librewxr" in exclude_params)
     exclude_cmc = bool({"cmc", "cmcmodels"} & excluded)
     ex_hrdps = int(exclude_cmc or "hrdps" in excluded)
@@ -556,6 +558,7 @@ def _parse_parameters(
         ex_librewxr,
         inc_rrfs,
         ex_cfs,
+        ex_rdaqa,
     )
 
 
@@ -764,6 +767,7 @@ async def prepare_initial_request(
         ex_librewxr,
         inc_rrfs,
         ex_cfs,
+        ex_rdaqa,
     ) = _parse_parameters(
         exclude,
         include,
@@ -959,6 +963,7 @@ async def prepare_initial_request(
         ex_aifs=ex_aifs,
         ex_raqdps=ex_raqdps,
         ex_silam=ex_silam,
+        ex_rdaqa=ex_rdaqa,
         ex_hrdps=ex_hrdps,
         ex_gdps=ex_gdps,
         ex_geps=ex_geps,

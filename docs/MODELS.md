@@ -259,7 +259,23 @@ This overview provides a roadmap for integrating a new model. Be prepared for it
 
 **Exclude flag**: `exclude=raqdps`
 
-**Priority**: Preferred over SILAM when available for the requested location.
+**Priority**: Preferred over SILAM when available for the requested location. For past hours that RDAQA has analysed, RDAQA is used instead.
+
+---
+
+### RDAQA (Regional Deterministic Air Quality Analysis)
+
+**Coverage**: The RAQDPS domain (Canada and contiguous United States), on the RAQDPS grid. Past hours only: the store holds the latest 48 hourly analyses.
+
+**What it is**: ECCC's hourly objective analysis of surface pollutants, which adjusts RAQDPS towards hourly observations from AirNow and the Canadian monitoring networks (no satellite or low-cost sensor data). Pirate Weather ingests the preliminary analysis, posted about 40 minutes after each hour. Close to a monitor it follows the monitor; between monitors it falls back towards RAQDPS.
+
+**Variables provided**: The same as RAQDPS, in the same order and units (PM2.5, PM10, NO2, O3, SO2). An hour the Datamart did not post is stored as missing and filled by RAQDPS or SILAM.
+
+**Grid**: The RAQDPS grid, located with `RAQDPS.lat_lon.pickle`. The value is read from the nearest cell (RAQDPS and SILAM take the maximum of a 3 x 3 square).
+
+**Exclude flag**: `exclude=rdaqa`
+
+**Priority**: Preferred over RAQDPS and SILAM for the hours it covers: the past hours of the hourly block, the hours before local midnight that the AQI averages look back on, and `currently`, which reports the newest analysis hour when it is at most 3 hours old (otherwise the forecast around the current time, as before).
 
 ---
 
@@ -285,9 +301,9 @@ This overview provides a roadmap for integrating a new model. Be prepared for it
 
 **Exclude flag**: `exclude=silam`
 
-**Priority**: Global fallback when RAQDPS does not cover the location.
+**Priority**: Global fallback when RDAQA and RAQDPS do not cover the location or hour.
 
-**Note**: SILAM is the only source for CO (`coConcentration`). RAQDPS does not publish CO.
+**Note**: SILAM is the only source for CO (`coConcentration`). RAQDPS and RDAQA do not publish CO.
 
 ---
 
@@ -309,7 +325,8 @@ Gas concentrations stored internally in **ppb** are converted to µg/m³ before 
 
 | Parameter | Description |
 |-----------|-------------|
-| `exclude=raqdps` | Skip RAQDPS; SILAM will be used as fallback |
+| `exclude=rdaqa` | Skip RDAQA; past hours and `currently` come from RAQDPS (SILAM as fallback) |
+| `exclude=raqdps` | Skip RAQDPS; SILAM will be used as fallback (RDAQA still gives the past hours) |
 | `exclude=silam` | Skip SILAM |
-| `exclude=raqdps,silam` | Exclude all AQ models; no AQ fields in response |
+| `exclude=rdaqa,raqdps,silam` | Exclude all AQ models; no AQ fields in response |
 | `include=airqualitydetails` | Add per-pollutant concentration fields (PM2.5, PM10, O3, NO2, SO2, CO) to the response |

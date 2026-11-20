@@ -31,6 +31,7 @@ from API.constants.model_const import (
     HRRR,
     NBM,
     RAQDPS,
+    RDAQA,
     REPS,
     RRFS,
     SILAM,
@@ -1458,6 +1459,7 @@ def prepare_aq_inputs(
     hour_array_grib,
     *,
     with_hour_sources=False,
+    dataOut_rdaqa=None,
 ):
     """Prepare air-quality concentration arrays aligned to the request hour grid.
 
@@ -1469,14 +1471,19 @@ def prepare_aq_inputs(
     starts at local midnight, already in memory because the stores are read whole.
     The AQI's averaging windows need them, or they are short for most of today.
 
-    Priority: RAQDPS > SILAM per pollutant.
-    RAQDPS does not have CO; it falls back to SILAM CO unconditionally.
+    Priority per pollutant and hour: RDAQA > RAQDPS > SILAM.
+    RDAQA (ECCC's hourly analysis: RAQDPS pulled toward AirNow and Canadian
+    monitor observations) only holds past hours, up to its newest analysis, so
+    it gives the past hours and the averaging windows' lead-in, and RAQDPS the
+    forecast. Neither has CO; it comes from SILAM unconditionally.
+    ``rdaqa_hours`` marks the grid hours RDAQA supplied a pollutant for; the
+    currently block takes its newest one (see ``RDAQA_CURRENT_MAX_AGE_HOURS``).
     ``smoke_frp`` is SILAM PM_FRP_column divided by BLH to convert from the
     stored column-burden units (µg/m²) to a near-surface concentration (µg/m³).
     It is used as a lower-priority smoke source after HRRR.
 
-    With ``with_hour_sources``, ``hour_sources`` maps "raqdps" and "silam" to
-    the hours each supplied a returned concentration (flags.sources).
+    With ``with_hour_sources``, ``hour_sources`` maps "rdaqa", "raqdps" and
+    "silam" to the hours each supplied a returned concentration (flags.sources).
     """
     nan_row = np.full(num_hours, np.nan)
 
@@ -1513,6 +1520,11 @@ def prepare_aq_inputs(
         if isinstance(dataOut_silam, np.ndarray)
         else None
     )
+    rdaqa_match = (
+        _match_hours(dataOut_rdaqa, hour_array_grib)
+        if isinstance(dataOut_rdaqa, np.ndarray)
+        else None
+    )
 
     def _extract(data, match, var_idx):
         """Extract ``var_idx`` column from a zarr read result, aligned to ``hour_array_grib``."""
@@ -1532,6 +1544,12 @@ def prepare_aq_inputs(
     raqdps_no2 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["no2"])
     raqdps_o3 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["o3"])
     raqdps_so2 = _extract(dataOut_raqdps, raqdps_match, RAQDPS["so2"])
+
+    rdaqa_pm25 = _extract(dataOut_rdaqa, rdaqa_match, RDAQA["pm25"])
+    rdaqa_pm10 = _extract(dataOut_rdaqa, rdaqa_match, RDAQA["pm10"])
+    rdaqa_no2 = _extract(dataOut_rdaqa, rdaqa_match, RDAQA["no2"])
+    rdaqa_o3 = _extract(dataOut_rdaqa, rdaqa_match, RDAQA["o3"])
+    rdaqa_so2 = _extract(dataOut_rdaqa, rdaqa_match, RDAQA["so2"])
 
     silam_pm25 = _extract(dataOut_silam, silam_match, SILAM["pm25"])
     silam_pm10 = _extract(dataOut_silam, silam_match, SILAM["pm10"])
@@ -1554,6 +1572,14 @@ def prepare_aq_inputs(
         nan_mask = np.isnan(out)
         out[nan_mask] = fallback[nan_mask]
         return out
+
+    def _rdaqa_then_raqdps(rdaqa_values, raqdps_values):
+        """RDAQA where it has values, else RAQDPS; None if neither was read, so
+        the result still falls back to SILAM at its own length (the lead-in's
+        is AQ_LEAD_IN_HOURS, not num_hours)."""
+        if rdaqa_values is None and raqdps_values is None:
+            return None
+        return _prefer(rdaqa_values, raqdps_values)
 
     # Estimate near-surface smoke concentration from SILAM PM_FRP column.
     #
@@ -1617,9 +1643,10 @@ def prepare_aq_inputs(
     else:
         smoke_frp_m3 = nan_row.copy()
 
-    # The hours before the grid. RAQDPS only reaches back to its latest run, so
-    # within an averaging window earlier hours can come from SILAM, like any other
-    # hour RAQDPS doesn't have.
+    # The hours before the grid. RDAQA keeps HISTORY_PERIODS["RDAQA"] hours,
+    # which covers them; where it has none (outside its domain, or a missing
+    # hour) RAQDPS reaches back to its latest run and SILAM before that, as for
+    # any other hour.
     lead_in = {}
     if len(hour_array_grib):
         lead_in_times = (
@@ -1631,59 +1658,84 @@ def prepare_aq_inputs(
             if raqdps_match is not None
             else None
         )
+        rdaqa_lead_match = (
+            _match_hours(dataOut_rdaqa, lead_in_times)
+            if rdaqa_match is not None
+            else None
+        )
         silam_lead_match = (
             _match_hours(dataOut_silam, lead_in_times)
             if silam_match is not None
             else None
         )
         for pollutant in ("pm25", "pm10", "o3", "no2", "so2", "co"):
-            # RAQDPS has no CO; SILAM only
+            # RDAQA and RAQDPS have no CO; SILAM only
+            rdaqa_values = (
+                _extract(dataOut_rdaqa, rdaqa_lead_match, RDAQA[pollutant])
+                if pollutant != "co"
+                else None
+            )
             raqdps_values = (
                 _extract(dataOut_raqdps, raqdps_lead_match, RAQDPS[pollutant])
                 if pollutant != "co"
                 else None
             )
             silam_values = _extract(dataOut_silam, silam_lead_match, SILAM[pollutant])
-            if raqdps_values is None and silam_values is None:
+            if rdaqa_values is None and raqdps_values is None and silam_values is None:
                 lead_in[pollutant] = np.full(AQ_LEAD_IN_HOURS, np.nan)
             else:
-                lead_in[pollutant] = _prefer(raqdps_values, silam_values)
+                lead_in[pollutant] = _prefer(
+                    _rdaqa_then_raqdps(rdaqa_values, raqdps_values), silam_values
+                )
 
     aq_inputs = {
         "lead_in": lead_in,
-        "pm25": _prefer(raqdps_pm25, silam_pm25),
-        "pm10": _prefer(raqdps_pm10, silam_pm10),
-        "o3": _prefer(raqdps_o3, silam_o3),
-        "no2": _prefer(raqdps_no2, silam_no2),
-        "so2": _prefer(raqdps_so2, silam_so2),
-        "co": _prefer(None, silam_co),  # RAQDPS has no CO; SILAM only
+        "pm25": _prefer(_rdaqa_then_raqdps(rdaqa_pm25, raqdps_pm25), silam_pm25),
+        "pm10": _prefer(_rdaqa_then_raqdps(rdaqa_pm10, raqdps_pm10), silam_pm10),
+        "o3": _prefer(_rdaqa_then_raqdps(rdaqa_o3, raqdps_o3), silam_o3),
+        "no2": _prefer(_rdaqa_then_raqdps(rdaqa_no2, raqdps_no2), silam_no2),
+        "so2": _prefer(_rdaqa_then_raqdps(rdaqa_so2, raqdps_so2), silam_so2),
+        "co": _prefer(None, silam_co),  # RDAQA and RAQDPS have no CO; SILAM only
         "smoke_frp": smoke_frp_m3,
     }
 
+    # Per hour, whether RDAQA supplied any concentration, so currently can take
+    # its newest analysed hour.
+    rdaqa_hours = np.zeros(num_hours, dtype=bool)
+    for rdaqa_values in (rdaqa_pm25, rdaqa_pm10, rdaqa_o3, rdaqa_no2, rdaqa_so2):
+        if rdaqa_values is not None:
+            rdaqa_hours |= np.isfinite(rdaqa_values)
+    aq_inputs["rdaqa_hours"] = rdaqa_hours
+
     if with_hour_sources:
-        # Per hour, whether RAQDPS or SILAM supplied any returned concentration:
-        # RAQDPS wherever it has a pollutant, SILAM where it fills one RAQDPS
-        # lacks, or gives CO
+        # Per hour, whether each model supplied any returned concentration:
+        # RDAQA wherever it has a pollutant, RAQDPS where it fills one RDAQA
+        # lacks, SILAM where it fills one both lack, or gives CO
         raqdps_hours = np.zeros(num_hours, dtype=bool)
         silam_hours = (
             np.isfinite(silam_co)
             if silam_co is not None
             else np.zeros(num_hours, dtype=bool)
         )
-        for raqdps_values, silam_values in (
-            (raqdps_pm25, silam_pm25),
-            (raqdps_pm10, silam_pm10),
-            (raqdps_o3, silam_o3),
-            (raqdps_no2, silam_no2),
-            (raqdps_so2, silam_so2),
+        no_hours = np.zeros(num_hours, dtype=bool)
+        for rdaqa_values, raqdps_values, silam_values in (
+            (rdaqa_pm25, raqdps_pm25, silam_pm25),
+            (rdaqa_pm10, raqdps_pm10, silam_pm10),
+            (rdaqa_o3, raqdps_o3, silam_o3),
+            (rdaqa_no2, raqdps_no2, silam_no2),
+            (rdaqa_so2, raqdps_so2, silam_so2),
         ):
-            if raqdps_values is None:
-                raqdps_has = np.zeros(num_hours, dtype=bool)
-            else:
-                raqdps_has = np.isfinite(raqdps_values)
+            rdaqa_has = no_hours if rdaqa_values is None else np.isfinite(rdaqa_values)
+            raqdps_has = (
+                no_hours if raqdps_values is None else np.isfinite(raqdps_values)
+            ) & ~rdaqa_has
             raqdps_hours |= raqdps_has
             if silam_values is not None:
-                silam_hours |= np.isfinite(silam_values) & ~raqdps_has
-        aq_inputs["hour_sources"] = {"raqdps": raqdps_hours, "silam": silam_hours}
+                silam_hours |= np.isfinite(silam_values) & ~rdaqa_has & ~raqdps_has
+        aq_inputs["hour_sources"] = {
+            "rdaqa": rdaqa_hours.copy(),
+            "raqdps": raqdps_hours,
+            "silam": silam_hours,
+        }
 
     return aq_inputs

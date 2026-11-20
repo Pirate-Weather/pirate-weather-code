@@ -498,6 +498,7 @@ async def PW_Forecast(
     incRRFS = initial.inc_rrfs
     exRAQDPS = initial.ex_raqdps
     exSILAM = initial.ex_silam
+    exRDAQA = initial.ex_rdaqa
     exLIBREWXR = initial.ex_librewxr
     exHRDPS = initial.ex_hrdps
     exGDPS = initial.ex_gdps
@@ -574,6 +575,7 @@ async def PW_Forecast(
         ecmwf_aifs=stores.ECMWF_AIFS_Zarr,
         raqdps=stores.RAQDPS_Zarr,
         silam=stores.SILAM_Zarr,
+        rdaqa=stores.RDAQA_Zarr,
         raqdps_lat_lon=stores.RAQDPS_LatLon,
         rrfs=stores.RRFS_Zarr,
         rrfs_6h=stores.RRFS_6H_Zarr,
@@ -610,6 +612,7 @@ async def PW_Forecast(
         ex_reps=exREPS,
         ex_raqdps=exRAQDPS,
         ex_silam=exSILAM,
+        ex_rdaqa=exRDAQA,
         ex_librewxr=exLIBREWXR,
         inc_aimodels=incAIModels,
         inc_rrfs=incRRFS,
@@ -645,6 +648,7 @@ async def PW_Forecast(
     WMO_alertDat = grid_result.WMO_alertDat
     dataOut_raqdps = grid_result.dataOut_raqdps
     dataOut_silam = grid_result.dataOut_silam
+    dataOut_rdaqa = grid_result.dataOut_rdaqa
     dataOut_rrfs = grid_result.dataOut_rrfs
     dataOut_rrfs_6h = grid_result.dataOut_rrfs_6h
     dataOut_rrfs_subh = grid_result.dataOut_rrfs_subh
@@ -1025,12 +1029,13 @@ async def PW_Forecast(
     convective_inhibition_inputs = inputs["convective_inhibition_inputs"]
     k_index_inputs = inputs["k_index_inputs"]
 
-    # Prepare air-quality concentration arrays (RAQDPS / SILAM)
+    # Prepare air-quality concentration arrays (RDAQA / RAQDPS / SILAM)
     aq_inputs = prepare_aq_inputs(
         num_hours=numHours,
         dataOut_raqdps=dataOut_raqdps,
         dataOut_silam=dataOut_silam,
         hour_array_grib=hour_array_grib,
+        dataOut_rdaqa=dataOut_rdaqa,
         with_hour_sources=used_hours is not None,
     )
 
@@ -1057,7 +1062,8 @@ async def PW_Forecast(
                 for name, sources in input_sources.items()
                 if name not in _TM_BASIC_HIDDEN_INPUTS
             }
-        # Hourly air quality (version 2): RAQDPS, with SILAM filling its gaps
+        # Hourly air quality (version 2): RDAQA for the analysed past hours,
+        # RAQDPS for the rest, SILAM filling the gaps of both
         for aq_source, aq_hours in aq_inputs["hour_sources"].items():
             used_hours[: len(aq_hours), USED_SOURCE_COLUMN[aq_source]] |= aq_hours
 

@@ -41,11 +41,18 @@ Plan if accepted:
   3 of 49 posted hours as NaN. Backfilling all 49 hours took 140-160 s at a 1.6 GB
   peak; an hourly run fetches one hour in ~20 s. History stores are ~5 MB an hour and,
   like the other history stores, are never deleted (see Remaining storage clean-up).
-- Still to do for the API: read `RDAQA.zarr` (store_reader, using the RAQDPS grid
-  pickle), an `ex_rdaqa` exclude flag, `rdaqa` in flags.sources and
-  `PUBLISH_SCHEDULE_HOURS`, and the source priority below in `prepare_aq_inputs`.
-- `currently` and past hours from RDAQA (the AQI averaging windows need the history),
-  hourly forecast from RAQDPS, SILAM filling either.
+- API (done, branch `rdaqa-api-response`): `RDAQA.zarr` is read at the RAQDPS cell
+  (one point read, not the 3 x 3 maximum the forecasts use); per hour RDAQA >
+  RAQDPS > SILAM, so RDAQA gives the past hours and the AQI lead-in and RAQDPS the
+  forecast. `currently` reports the newest RDAQA hour when it is at most
+  `RDAQA_CURRENT_MAX_AGE_HOURS` (3) old: interpolating the hours around now would
+  mostly be RAQDPS, since an hour's analysis is posted ~40 min after it.
+  `exclude=rdaqa`, `rdaqa` in flags.sources/sourceTimes (its newest hour) and
+  `PUBLISH_SCHEDULE_HOURS` (estimated, check against deployed stamps). Checked on
+  real stores (downtown Ottawa, 2026-11-20 14:47 EST): currently PM2.5 6.0 from
+  the 13:00 analysis against 2.9 interpolated from RAQDPS; a full HTTP request
+  wasn't run locally (no forecast store: the Canadian ingests need wgrib2). This
+  changes v2 air quality values and adds a store read for North American requests.
 - Later, if the jump from `currently` to the first forecast hour is noticeable: fade
   from the last RDAQA hour into RAQDPS over the first few hours.
 - Smoke season: compare `fw` with Prelim. The standard analysis rejects PM observations

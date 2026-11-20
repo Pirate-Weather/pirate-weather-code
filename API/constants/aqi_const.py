@@ -52,6 +52,11 @@ NOWCAST_HOURS = 12
 # Hours before the requested series that the AQI's averages can look back on: the
 # longest averaging window is 24 h.
 AQ_LEAD_IN_HOURS = 24
+# Oldest RDAQA analysis hour (hours before now) that currently reports instead
+# of the forecast. MSC posts each preliminary analysis ~40 min after its hour
+# and the ingest runs at :50, so the newest is normally 50-110 min old; 3 h
+# also covers one late or missing hour. Older, currently falls back to RAQDPS.
+RDAQA_CURRENT_MAX_AGE_HOURS = 3
 _NOWCAST_POWERS = np.arange(NOWCAST_HOURS)
 
 

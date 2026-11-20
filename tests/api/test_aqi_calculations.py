@@ -15,7 +15,7 @@ from API.constants.aqi_const import (
     compute_aqi_with_lead_in,
     compute_daqi,
 )
-from API.constants.model_const import RAQDPS, SILAM
+from API.constants.model_const import RAQDPS, RDAQA, SILAM
 from API.data_inputs import prepare_aq_inputs
 
 # ---------------------------------------------------------------------------
@@ -279,6 +279,44 @@ def test_raqdps_wins_when_both_have_data():
     np.testing.assert_array_equal(result["pm25"], expected_pm25)
     for key, value in {"pm10": 40.0, "no2": 10.0, "o3": 20.0, "so2": 5.0}.items():
         np.testing.assert_array_equal(result[key], np.full(N_HOURS, value))
+
+
+def test_rdaqa_gives_past_hours_and_lead_in_raqdps_the_forecast():
+    """RDAQA (the analysis, pulled toward monitors) must win the hours it has,
+    including the lead-in the AQI averages look back on, and RAQDPS the
+    forecast after it, hour by hour; a missing RDAQA hour falls back to RAQDPS.
+    flags.sources must credit each hour to the model that supplied it, so a
+    RAQDPS value replaced by RDAQA does not list RAQDPS.
+    """
+    lead_and_grid = np.arange(-AQ_LEAD_IN_HOURS, N_HOURS, dtype=float) * 3600
+    # RDAQA through hour 5 of the grid, with hour 2 missing
+    rdaqa_times = lead_and_grid[lead_and_grid <= 5 * 3600]
+    rdaqa_pm25 = np.full(len(rdaqa_times), 15.0)
+    rdaqa_pm25[AQ_LEAD_IN_HOURS + 2] = np.nan
+    rdaqa = _zarr_rows(
+        RDAQA, rdaqa_times, pm25=rdaqa_pm25, pm10=20.0, no2=8.0, o3=25.0, so2=1.0
+    )
+    raqdps = _zarr_rows(
+        RAQDPS, lead_and_grid, pm25=5.0, pm10=10.0, no2=4.0, o3=30.0, so2=2.0
+    )
+    silam = _zarr_rows(SILAM, lead_and_grid, pm25=50.0, co=150.0)
+
+    result = prepare_aq_inputs(
+        N_HOURS, raqdps, silam, HOURS, with_hour_sources=True, dataOut_rdaqa=rdaqa
+    )
+
+    expected = np.full(N_HOURS, 5.0)
+    expected[[0, 1, 3, 4, 5]] = 15.0
+    np.testing.assert_array_equal(result["pm25"], expected)
+    np.testing.assert_array_equal(result["lead_in"]["pm25"], 15.0)
+    np.testing.assert_array_equal(result["co"], 150.0)
+    np.testing.assert_array_equal(result["rdaqa_hours"], np.arange(N_HOURS) <= 5)
+    sources = result["hour_sources"]
+    np.testing.assert_array_equal(sources["rdaqa"], np.arange(N_HOURS) <= 5)
+    # Hour 2: RDAQA has the gases but not PM2.5, which RAQDPS fills
+    hours = np.arange(N_HOURS)
+    np.testing.assert_array_equal(sources["raqdps"], (hours == 2) | (hours >= 6))
+    assert sources["silam"].all()  # CO
 
 
 @pytest.mark.parametrize(

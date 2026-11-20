@@ -39,6 +39,7 @@ from API.constants.model_const import (
     ERA5,
     ERA5_SOURCE_VARS,
     RAQDPS,
+    RDAQA,
     RRFS,
     RRFS_SUBH,
     SILAM,
@@ -70,6 +71,7 @@ SILAM_LON_COUNT = 1800
 LIBREWXR_LAT_START = LIBREWXR_GRID_NORTH - LIBREWXR_GRID_RESOLUTION_DEG / 2
 LIBREWXR_LON_START = LIBREWXR_GRID_WEST + LIBREWXR_GRID_RESOLUTION_DEG / 2
 RAQDPS_VALUE_COLUMNS = tuple(index for name, index in RAQDPS.items() if name != "time")
+RDAQA_VALUE_COLUMNS = tuple(index for name, index in RDAQA.items() if name != "time")
 SILAM_VALUE_COLUMNS = tuple(
     index for name, index in SILAM.items() if name not in {"time", "blh"}
 )
@@ -418,6 +420,8 @@ class ZarrSources:
     ecmwf_aifs: Any = None
     raqdps: Any = None
     silam: Any = None
+    # RDAQA is on the RAQDPS grid, so raqdps_lat_lon locates both
+    rdaqa: Any = None
     raqdps_lat_lon: Any = None
     librewxr: Any = None
     rrfs: Any = None
@@ -496,8 +500,11 @@ class GridIndexingResult:
     # Air quality model outputs
     dataOut_raqdps: np.ndarray | bool = False
     dataOut_silam: np.ndarray | bool = False
+    dataOut_rdaqa: np.ndarray | bool = False
     raqdpsRunTime: float | None = None
     silamRunTime: float | None = None
+    # RDAQA's newest analysis hour
+    rdaqaRunTime: float | None = None
     x_raqdps: float | None = None
     y_raqdps: float | None = None
     raqdps_lat: float | None = None
@@ -713,6 +720,7 @@ async def calculate_grid_indexing(
     ex_reps: int = 0,
     ex_raqdps: int = 0,
     ex_silam: int = 0,
+    ex_rdaqa: int = 0,
     ex_librewxr: int = 0,
     inc_aimodels: int = 0,
     inc_rrfs: int = 0,
@@ -1232,6 +1240,7 @@ async def calculate_grid_indexing(
     timer.log("### AQ Models Detail Start ###")
 
     readRAQDPS = False
+    readRDAQA = False
     readSILAM = False
     x_raqdps = None
     y_raqdps = None
@@ -1243,12 +1252,11 @@ async def calculate_grid_indexing(
     silam_lon_val = None
 
     # RAQDPS: Canadian regional air quality model; uses a rotated lat-lon 2D grid.
+    # RDAQA, its hourly analysis, is on the same grid, so one lookup serves both.
     # Available only when the lat/lon pickle has been loaded.
-    if (
-        ex_raqdps != 1
-        and zarr_sources.raqdps is not None
-        and zarr_sources.raqdps_lat_lon is not None
-    ):
+    want_raqdps = ex_raqdps != 1 and zarr_sources.raqdps is not None
+    want_rdaqa = ex_rdaqa != 1 and zarr_sources.rdaqa is not None
+    if (want_raqdps or want_rdaqa) and zarr_sources.raqdps_lat_lon is not None:
         try:
             (
                 x_raqdps,
@@ -1262,7 +1270,8 @@ async def calculate_grid_indexing(
                 max_distance=0.020,
                 model_name="RAQDPS",
             )
-            readRAQDPS = True
+            readRAQDPS = want_raqdps
+            readRDAQA = want_rdaqa
         except (IndexError, KeyError, ValueError, TypeError, AttributeError) as exc:
             logger.debug("RAQDPS grid lookup failed: %s", exc)
 
@@ -1415,6 +1424,13 @@ async def calculate_grid_indexing(
     if readRAQDPS:
         zarrTasks["RAQDPS"] = weather.zarr_read_max_square(
             "RAQDPS", zarr_sources.raqdps, x_raqdps, y_raqdps
+        )
+    if readRDAQA:
+        # The analysis has already been pulled toward the monitors, so its own
+        # cell is the estimate; the forecast models' 3 x 3 maximum (for plumes a
+        # forecast places a cell or two off) would bias it high. One chunk read.
+        zarrTasks["RDAQA"] = weather.zarr_read(
+            "RDAQA", zarr_sources.rdaqa, x_raqdps, y_raqdps
         )
     if readSILAM:
         zarrTasks["SILAM"] = weather.zarr_read_max_square(
@@ -1928,8 +1944,41 @@ async def calculate_grid_indexing(
     # --- AQ model results ---
     dataOut_raqdps = False
     dataOut_silam = False
+    dataOut_rdaqa = False
     raqdpsRunTime = None
     silamRunTime = None
+    rdaqaRunTime = None
+
+    if "RDAQA" in zarr_results:
+        dataOut_rdaqa = zarr_results["RDAQA"]
+        # The store holds the last HISTORY_PERIODS["RDAQA"] hours; a stalled
+        # ingest must not serve analyses older than that.
+        if isinstance(dataOut_rdaqa, np.ndarray):
+            dataOut_rdaqa = _mask_old_aq_values(
+                dataOut_rdaqa, now_time, HISTORY_PERIODS["RDAQA"]
+            )
+        if (
+            base_day_utc is not None
+            and isinstance(dataOut_rdaqa, np.ndarray)
+            and not _aq_source_covers_request(
+                dataOut_rdaqa,
+                base_day_utc,
+                num_hours,
+                RDAQA_VALUE_COLUMNS,
+            )
+        ):
+            dataOut_rdaqa = False
+        if isinstance(dataOut_rdaqa, np.ndarray):
+            # An analysis has no run to go stale: its rows are past hours, used
+            # where they exist. Its run time is the newest hour with values (the
+            # reader's time column is NaN where every variable is).
+            valid_rows = np.isfinite(dataOut_rdaqa[:, 0]) & np.isfinite(
+                dataOut_rdaqa[:, list(RDAQA_VALUE_COLUMNS)]
+            ).any(axis=1)
+            if valid_rows.any():
+                rdaqaRunTime = float(dataOut_rdaqa[valid_rows, 0].max())
+            else:
+                dataOut_rdaqa = False
 
     if "RAQDPS" in zarr_results:
         dataOut_raqdps = zarr_results["RAQDPS"]
@@ -2068,8 +2117,10 @@ async def calculate_grid_indexing(
         WMO_alertDat=WMO_alertDat,
         dataOut_raqdps=dataOut_raqdps,
         dataOut_silam=dataOut_silam,
+        dataOut_rdaqa=dataOut_rdaqa,
         raqdpsRunTime=raqdpsRunTime,
         silamRunTime=silamRunTime,
+        rdaqaRunTime=rdaqaRunTime,
         x_raqdps=x_raqdps,
         y_raqdps=y_raqdps,
         raqdps_lat=raqdps_lat_val,

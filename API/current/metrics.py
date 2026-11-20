@@ -17,7 +17,10 @@ from API.api_utils import (
     estimate_visibility_gultepe_rh_pr_numpy,
     relative_humidity_from_dewpoint_c,
 )
-from API.constants.aqi_const import compute_aqi_with_lead_in
+from API.constants.aqi_const import (
+    RDAQA_CURRENT_MAX_AGE_HOURS,
+    compute_aqi_with_lead_in,
+)
 from API.constants.clip_const import (
     CLIP_AQI,
     CLIP_CAPE,
@@ -2426,13 +2429,25 @@ def build_current_section(
     # Populate AQ concentration fields from aq_inputs. Only version 2 responses
     # return these fields or the AQI.
     if aq_inputs is not None and version >= 2:
-        # Linear interpolation between hours 0 and 1
+        # Currently is the newest RDAQA analysis hour when it is recent: it is
+        # measured air quality, where the hours around now are mostly RAQDPS's
+        # forecast (the analysis for an hour is posted ~40 min after it).
+        # Otherwise, linear interpolation between the hours around now.
+        aq_idx1, aq_idx2, aq_fac1, aq_fac2 = idx1, idx2, fac1, fac2
+        rdaqa_hours = aq_inputs.get("rdaqa_hours")
+        if rdaqa_hours is not None and rdaqa_hours[: idx2 + 1].any():
+            newest_rdaqa = int(np.flatnonzero(rdaqa_hours[: idx2 + 1])[-1])
+            rdaqa_age = minute_array_grib[0] - hour_array_grib[newest_rdaqa]
+            if rdaqa_age <= RDAQA_CURRENT_MAX_AGE_HOURS * 3600:
+                aq_idx1 = aq_idx2 = newest_rdaqa
+                aq_fac1, aq_fac2 = 1.0, 0.0
+
         def _fill_curr_aq(col_key, src_key, clip_min, clip_max):
             arr = aq_inputs.get(src_key)
             if arr is not None and len(arr) > 0:
-                i1 = min(idx1, len(arr) - 1)
-                i2 = min(idx2, len(arr) - 1)
-                val = float(arr[i1]) * fac1 + float(arr[i2]) * fac2
+                i1 = min(aq_idx1, len(arr) - 1)
+                i2 = min(aq_idx2, len(arr) - 1)
+                val = float(arr[i1]) * aq_fac1 + float(arr[i2]) * aq_fac2
                 InterPcurrent[DATA_CURRENT[col_key]] = np.clip(val, clip_min, clip_max)
 
         _fill_curr_aq("pm25", "pm25", CLIP_PM25["min"], CLIP_PM25["max"])
@@ -2443,7 +2458,7 @@ def build_current_section(
         _fill_curr_aq("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
         if used_sources is not None:
             for aq_source, aq_hours in aq_inputs.get("hour_sources", {}).items():
-                if aq_hours[[idx1, idx2]].any():
+                if aq_hours[[aq_idx1, aq_idx2]].any():
                     used_sources.add(aq_source)
 
         try:
@@ -2480,10 +2495,11 @@ def build_current_section(
                     **current_series,
                 )
             if len(aqi_arr) > 0:
-                aqi_idx1 = min(idx1, len(aqi_arr) - 1)
-                aqi_idx2 = min(idx2, len(aqi_arr) - 1)
+                aqi_idx1 = min(aq_idx1, len(aqi_arr) - 1)
+                aqi_idx2 = min(aq_idx2, len(aqi_arr) - 1)
                 aqi_val = (
-                    float(aqi_arr[aqi_idx1]) * fac1 + float(aqi_arr[aqi_idx2]) * fac2
+                    float(aqi_arr[aqi_idx1]) * aq_fac1
+                    + float(aqi_arr[aqi_idx2]) * aq_fac2
                 )
             else:
                 aqi_val = float("nan")

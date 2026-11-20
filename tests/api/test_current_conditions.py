@@ -44,6 +44,23 @@ AQ_FIELDS = ("pm25", "pm10", "o3", "no2", "so2", "co")
             np.nan,
             id="no_aq_data_reports_nan",
         ),
+        # RDAQA analysed 00:00 (30 min before the request): currently reports
+        # that hour (PM2.5 10, CAQI 68), not the blend with 01:00's forecast.
+        pytest.param(
+            {
+                "pm25": np.array([10.0, 20.0, 30.0]),
+                "pm10": np.array([20.0, 30.0, 40.0]),
+                "o3": np.array([30.0, 40.0, 50.0]),
+                "no2": np.array([40.0, 51.0, 60.0]),
+                "so2": np.array([1.0, 2.0, 3.0]),
+                "co": np.array([100.0, 200.0, 300.0]),
+                "rdaqa_hours": np.array([True, False, False]),
+            },
+            10.0,
+            68.0,
+            68,
+            id="newest_rdaqa_hour",
+        ),
     ],
 )
 def test_build_current_section_interpolates_current_aq_inputs(
@@ -51,7 +68,9 @@ def test_build_current_section_interpolates_current_aq_inputs(
 ):
     """Regression for #689: current AQ values must be interpolated to the request
     time from the surrounding hours (it used to take the next hour's value), and missing
-    AQ data must surface as NaN rather than a clean-air 0."""
+    AQ data must surface as NaN rather than a clean-air 0. Where RDAQA has analysed a
+    recent hour, currently must be that measured hour: blending in the next hour's
+    RAQDPS forecast would undo it (RAQDPS ran 6-13 ug/m3 low in Ottawa/Kingston)."""
     result = build_current_section(
         sourceList=["hrrr_0-18", "hrrr_18-48"],
         hour_array_grib=np.array([0, 3600, 7200]),
