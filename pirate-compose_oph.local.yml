@@ -80,7 +80,7 @@ services:
   # "librewxr" profile: without it the minutely block uses the models only.
   #   docker compose -f pirate-compose_oph.local.yml --profile librewxr up -d librewxr
   # Image: Docker/pirate-librewxr-dockerfile on the Pirate-Weather/LibreWXR fork
-  # (branch network-split, which adds the hooks):
+  # (branch main, which follows upstream):
   #   docker build -t librewxr-base:local <LibreWXR checkout>
   #   docker build -f Docker/pirate-librewxr-dockerfile \
   #       --build-arg LIBREWXR_IMAGE=librewxr-base:local -t pirate-librewxr:latest .

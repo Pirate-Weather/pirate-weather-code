@@ -12,11 +12,11 @@ concurrency:
 
 env:
   IMAGE_VERSION: ${{ github.event_name == 'release' && 'release' || 'dev' }}
-  # LibreWXR source the Pirate Weather LibreWXR image is built on: the fork
-  # branch carrying the hooks and snapshot sync until they are upstream, then
-  # JoshuaKimsey/LibreWXR at a release tag.
+  # LibreWXR source the Pirate Weather LibreWXR image is built on: the fork's
+  # main, which follows JoshuaKimsey/LibreWXR (hooks and snapshot sync are
+  # upstream since #55 and #56) and is what the fork's own ECR image uses.
   LIBREWXR_REPO: Pirate-Weather/LibreWXR
-  LIBREWXR_REF: network-split
+  LIBREWXR_REF: main
   RELEASE_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
 
 #################################################################

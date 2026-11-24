@@ -42,11 +42,10 @@ Work through the open items in this order, small ones first:
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done
 there (forecast/historic split, test refactor, ingest standardization) are not listed.
 
-### LibreWXR: build from the upstream release
-The hooks and snapshot sync are upstream (JoshuaKimsey/LibreWXR #55 and #56, released
-in v0.9.0), but `LIBREWXR_REF` in `build.yml` and `sanity.yml` still names the fork
-branch `network-split`. Switch both to `v0.9.0`, then move the RBX `librewxr` image
-pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
+### LibreWXR: move the RBX image pins
+`build.yml` and `sanity.yml` now build LibreWXR from the fork's `main`, which follows
+upstream. Move the RBX `librewxr` image pins (pirate-weather-ovh `values.local.yaml`)
+to the rebuilt images.
 
 ### ERA5 archive: remaining work
 - Alert if Google's ERA5T end stops moving (the daily job exits 1 after 10 days; nothing
