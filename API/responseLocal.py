@@ -1352,6 +1352,7 @@ async def PW_Forecast(
             if "librewxr" in sourceList
             and isinstance(grid_result.dataOut_librewxr, np.ndarray)
             else None,
+            librewxr_lightning_time=grid_result.librewxrLightningTime,
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,

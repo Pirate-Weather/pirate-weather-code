@@ -124,9 +124,10 @@ key pair is set, which it is on RBX since 2026-11-24) and adds `Lightning_Distan
 and `Lightning_Direction` to `LibreWXR.zarr` at T+0: the nearest strike in the last
 15 minutes of each satellite's own data, searched to 300 km. Distance is NaN outside
 coverage (great-circle angle from the sub-satellite point: 55 degrees GLM, 65 degrees LI)
-and for a feed more than 45 min behind, +inf where nothing is within 300 km.
+and for a feed too far behind (15 min GOES, 45 min Meteosat-12), +inf where nothing is
+within 300 km. The export time is the store attribute `lightning_time`.
 `currently.nearestStormDistance` / `Bearing` take it for every version, fall back to GFS
-(floored at 300 km under +inf), and ignore a store whose radar frame is over 30 min old.
+(floored at 300 km under +inf), and ignore fields computed over 20 min ago.
 In version 2 a strike within 15 km makes current precipitation a thunderstorm (existing
 text and icon, no new strings). `Lightning_Count`, the recent strikes within 15 km, is
 served as the version 2 field `currently.lightningCount` (missing outside coverage);

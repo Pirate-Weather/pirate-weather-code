@@ -1537,12 +1537,14 @@ def build_minutely_block(
         rrfsSubHInterpolation=rrfsSubHInterpolation,
         used=used_sources,
     )
-    # LibreWXR radar takes precedence over every model wherever it has coverage
-    if librewxrMinuteInterpolation is not None:
-        if (
-            used_sources is not None
-            and np.isfinite(librewxrMinuteInterpolation[:, LIBREWXR["refc"]]).any()
-        ):
+    # LibreWXR radar takes precedence over every model wherever it has coverage.
+    # A point with satellite lightning but no radar also reads LibreWXR, and must
+    # keep the model path (including its small-value filter) untouched.
+    if (
+        librewxrMinuteInterpolation is not None
+        and np.isfinite(librewxrMinuteInterpolation[:, LIBREWXR["refc"]]).any()
+    ):
+        if used_sources is not None:
             used_sources.add("librewxr")
         intensity, precipTypes = _apply_librewxr_intensity(
             intensity,

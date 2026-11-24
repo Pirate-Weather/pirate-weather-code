@@ -96,21 +96,22 @@ LIBREWXR_PIXEL_PER_DBZ = 2.0
 LIBREWXR_MAX_VALID_DBZ = 80.0
 
 # Lightning satellites: the satellite id LibreWXR stores with each flash, its name in
-# the artifact's metadata, its sub-satellite longitude, and the great-circle angle
+# the artifact's metadata, its sub-satellite longitude, the great-circle angle
 # from the sub-satellite point inside which a feed with no strikes is trusted to
-# mean no lightning. On 2026-11-24, 99.9 % of 2 h of strikes lay within 55-60
+# mean no lightning, and how far behind the clock its newest data may be before
+# the feed is treated as down (its coverage dropped, so the API keeps GFS there). On 2026-11-24, 99.9 % of 2 h of strikes lay within 55-60
 # degrees for GOES GLM and 78 degrees for Meteosat-12 LI (99 % within 58); the
 # limits stay inside those, where detection is reliable, and beyond them a strike
 # is still used but its absence says nothing.
+# GOES GLM files cover 20 s and LibreWXR fetches every 5 minutes, so its data runs
+# 1-6 minutes behind and 15 minutes (three missed fetches) is an outage.
+# Meteosat-12 LI files cover 10 minutes and reach LibreWXR 10-25 minutes after
+# their window closes; 45 minutes is three missed files.
 LIGHTNING_SATELLITES = (
-    (18, "goes18", -137.2, 55.0),
-    (19, "goes19", -75.2, 55.0),
-    (12, "meteosat12", 0.0, 65.0),
+    (18, "goes18", -137.2, 55.0, 15 * 60),
+    (19, "goes19", -75.2, 55.0, 15 * 60),
+    (12, "meteosat12", 0.0, 65.0, 45 * 60),
 )
-# A feed whose newest data is older than this is treated as down: its coverage
-# is dropped, so the API falls back to GFS there. Meteosat-12 normally runs
-# 15-25 minutes behind; three missed 10-minute files is an outage.
-LIGHTNING_MAX_FEED_LAG_SECONDS = 45 * 60
 LIGHTNING_ARTIFACT = Path("lightning") / "current.npz"
 EARTH_RADIUS_M = 6_371_000.0
 # The nearest-strike search runs per 1 degree tile (25 x 25 cells): only tiles
@@ -353,22 +354,27 @@ def read_lightning_artifact(cache_dir: Path) -> tuple[np.ndarray, dict] | None:
     ``satellite``) of every flash in LibreWXR's retention window (2 h); the
     metadata's ``satellites`` entry gives each feed's newest data end (``last_e``).
     A missing or unreadable artifact (lightning disabled, first minutes after a
-    pipeline start, a torn write) is not a reason to hold back the radar
-    nowcast, so it returns None and the lightning fields are published as NaN,
-    where the API keeps its GFS storm distance.
+    pipeline start, a torn write) returns None; see ``export_nowcast`` for why
+    that only blanks the lightning fields.
     """
     path = cache_dir / LIGHTNING_ARTIFACT
     try:
         with np.load(path, allow_pickle=False) as loaded:
             points = loaded["points"]
-            meta = json.loads(str(loaded["meta"]))
+            satellites = json.loads(str(loaded["meta"])).get("satellites", {})
     except FileNotFoundError:
         logger.warning("No LibreWXR lightning artifact at %s", path)
         return None
-    except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        AttributeError,
+        zipfile.BadZipFile,
+    ) as exc:
         logger.warning("Unreadable LibreWXR lightning artifact %s: %s", path, exc)
         return None
-    return points, meta.get("satellites", {})
+    return points, satellites
 
 
 def unit_vectors(lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
@@ -411,13 +417,13 @@ def lightning_storm_fields(
     cos_lat = np.cos(np.deg2rad(lats.astype(np.float64)))[:, np.newaxis]
 
     recent = []
-    for satellite_id, name, sub_lon, coverage_deg in LIGHTNING_SATELLITES:
+    for satellite_id, name, sub_lon, coverage_deg, max_lag in LIGHTNING_SATELLITES:
         last_e = satellites.get(name, {}).get("last_e")
         if last_e is None:
             logger.info("Lightning: no %s feed in the artifact", name)
             continue
         lag = now - float(last_e)
-        if lag > LIGHTNING_MAX_FEED_LAG_SECONDS:
+        if lag > max_lag:
             logger.warning(
                 "Lightning: %s data ends %.0f min ago; dropping its coverage",
                 name,
@@ -576,19 +582,29 @@ def export_nowcast(
     )
 
     # %% Nearest recent lightning strike, at T+0 only
+    # The artifact is LibreWXR's (an external image), and a problem with it must
+    # not hold back the radar nowcast: the lightning fields are then published as
+    # NaN without a lightning_time, so the API keeps its GFS storm distance. The
+    # handler is limited to what a changed or torn artifact layout raises.
     lightning_start = time.time()
+    lightning_attributes = {}
+    lightning_fields = None
     lightning = read_lightning_artifact(cache_dir)
-    if lightning is None:
+    if lightning is not None:
+        points, satellites = lightning
+        try:
+            lightning_fields = lightning_storm_fields(
+                points, satellites, lightning_start, lats, lons
+            )
+            lightning_attributes = {"lightning_time": int(lightning_start)}
+        except (AttributeError, KeyError, TypeError, ValueError, IndexError):
+            logger.exception("LibreWXR lightning artifact has an unexpected layout")
+        del points
+    if lightning_fields is None:
         lightning_fields = tuple(
             np.full(stacked.shape[2:], np.nan, dtype=np.float32)
             for _ in range(LIGHTNING_VARS)
         )
-    else:
-        points, satellites = lightning
-        lightning_fields = lightning_storm_fields(
-            points, satellites, time.time(), lats, lons
-        )
-        del points
     lightning_distance = lightning_fields[0]
     logger.info(
         "Lightning fields in %.1f s: %.1f%% of the globe covered, %.2f%% with a "
@@ -631,6 +647,7 @@ def export_nowcast(
         zarr_store_workers,
         zarr_vars,
         times=times,
+        extra_attributes=lightning_attributes,
     )
     del stacked_dask, stacked, lightning_fields, lightning_distance
 

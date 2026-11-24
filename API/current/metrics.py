@@ -1569,34 +1569,31 @@ def _get_ozone(
     return clipLog(val, CLIP_OZONE["min"], CLIP_OZONE["max"], "Ozone Current")
 
 
-def _get_lightning(librewxr_data, current_time):
+def _get_lightning(librewxr_data, lightning_time, current_time):
     """Nearest recent satellite lightning strike at the point, from LibreWXR's T+0 row.
 
     Returns ``(distance_m, bearing_deg, count)`` or None when the point has no lightning
-    data: outside satellite coverage (NaN distance), or a store whose radar frame
-    is more than LIGHTNING_MAX_AGE_SECONDS from the current time (the fields
-    have no forecast steps to fall back on). A distance of +inf means no recent
-    strike within LIGHTNING_SEARCH_DISTANCE_M; ``count`` is the number of recent
-    strikes within LIGHTNING_COUNT_DISTANCE_M (NaN from a store without it).
+    data: outside satellite coverage (NaN distance), or fields computed
+    (``lightning_time``, the store's attribute) more than LIGHTNING_MAX_AGE_SECONDS
+    from the current time, since they have no forecast steps to fall back on. A
+    distance of +inf means no recent strike within LIGHTNING_SEARCH_DISTANCE_M;
+    ``count`` is the number of recent strikes within LIGHTNING_COUNT_DISTANCE_M.
     """
     # A store published before the lightning export has only the radar column
-    if librewxr_data is None or librewxr_data.shape[1] <= LIBREWXR["lightning_dir"]:
+    # and no lightning_time
+    if librewxr_data is None or lightning_time is None:
         return None
-    valid_time = librewxr_data[0, 0]
+    if librewxr_data.shape[1] <= LIBREWXR["lightning_count"]:
+        return None
+    if abs(current_time - lightning_time) > LIGHTNING_MAX_AGE_SECONDS:
+        return None
     distance = librewxr_data[0, LIBREWXR["lightning_dist"]]
-    if not np.isfinite(valid_time) or np.isnan(distance):
+    if np.isnan(distance):
         return None
-    if abs(current_time - valid_time) > LIGHTNING_MAX_AGE_SECONDS:
-        return None
-    count = (
-        float(librewxr_data[0, LIBREWXR["lightning_count"]])
-        if librewxr_data.shape[1] > LIBREWXR["lightning_count"]
-        else np.nan
-    )
     return (
         float(distance),
         float(librewxr_data[0, LIBREWXR["lightning_dir"]]),
-        count,
+        float(librewxr_data[0, LIBREWXR["lightning_count"]]),
     )
 
 
@@ -2239,6 +2236,7 @@ def build_current_section(
     RRFS_Merged=None,
     CFS_Merged=None,
     librewxr_data=None,
+    librewxr_lightning_time=None,
     used_sources: set | None = None,
 ) -> CurrentSection:
     """
@@ -2430,7 +2428,9 @@ def build_current_section(
     lightning = (
         None
         if timeMachine
-        else _get_lightning(librewxr_data, float(minute_array_grib[0]))
+        else _get_lightning(
+            librewxr_data, librewxr_lightning_time, float(minute_array_grib[0])
+        )
     )
     (
         InterPcurrent[DATA_CURRENT["storm_dist"]],

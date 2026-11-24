@@ -165,6 +165,8 @@ def test_export_publishes_radar_composite_for_api(tmp_path, monkeypatch):
         "Lightning_Count",
     ]
     assert store.shape == (4, 2, LIBREWXR_GRID_HEIGHT, LIBREWXR_GRID_WIDTH)
+    # The API measures the lightning fields' age from this, not the radar frame
+    assert abs(store.attrs["lightning_time"] - time.time()) < 300
 
     y, x = _grid_cell(GUAM_LAT, GUAM_LON)
     assert store[0, 0, y, x] == pytest.approx(40.0)

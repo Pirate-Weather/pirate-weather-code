@@ -132,6 +132,9 @@ class ModelStore:
     array: Any  # tensorstore.TensorStore (variable, time, y, x)
     times: np.ndarray  # Unix seconds, one per time step
     version: str
+    # The array's other attributes (e.g. LibreWXR's lightning_time), read once
+    # when the version is opened
+    attributes: dict = field(default_factory=dict)
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -394,7 +397,12 @@ async def open_model_store(root: StoreRoot, version: str) -> ModelStore:
         raise ValueError(
             f"{version}: {times.shape} times for {array.shape[1]} time steps"
         )
-    return ModelStore(array=array, times=times, version=version)
+    return ModelStore(
+        array=array,
+        times=times,
+        version=version,
+        attributes={key: value for key, value in attributes.items() if key != "time"},
+    )
 
 
 async def open_etopo(root: StoreRoot):

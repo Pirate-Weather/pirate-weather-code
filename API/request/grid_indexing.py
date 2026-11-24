@@ -520,6 +520,8 @@ class GridIndexingResult:
     silam_lon: float | None = None
     dataOut_librewxr: np.ndarray | bool = False
     librewxrRunTime: float | None = None
+    # When the LibreWXR export computed its lightning fields (store attribute)
+    librewxrLightningTime: float | None = None
     dataOut_urma: np.ndarray | bool = False
     urmaRunTime: float | None = None
     x_urma: float | None = None
@@ -1334,6 +1336,7 @@ async def calculate_grid_indexing(
     # grid, so only the current forecast (never Time Machine) reads it.
     dataOut_librewxr = False
     librewxrRunTime = None
+    librewxrLightningTime = None
     if not time_machine and ex_librewxr != 1 and zarr_sources.librewxr is not None:
         readLibreWXR = True
         y_librewxr = _nearest_regular_grid_index(
@@ -1484,13 +1487,18 @@ async def calculate_grid_indexing(
     if readLibreWXR:
         dataOut_librewxr = zarr_results["LibreWXR"]
         # The reader blanks the time column where every variable is NaN, so a
-        # cell outside radar coverage reads as all NaN: not a source here. The
-        # run time is the radar frame the nowcast starts from (the store's
-        # first time), not the data column.
+        # cell outside radar and satellite lightning coverage reads as all NaN:
+        # not a source here. (A cell with lightning but no radar is a source; the
+        # minutely block only uses the radar where it is finite.) The run time is
+        # the radar frame the nowcast starts from (the store's first time), not
+        # the data column.
         if dataOut_librewxr is not False and np.all(np.isnan(dataOut_librewxr[:, 1:])):
             dataOut_librewxr = False
         if dataOut_librewxr is not False:
             librewxrRunTime = float(zarr_sources.librewxr.times[0])
+            lightning_time = zarr_sources.librewxr.attributes.get("lightning_time")
+            if lightning_time is not None:
+                librewxrLightningTime = float(lightning_time)
             nowcast_age = utc_time - datetime.datetime.fromtimestamp(
                 int(librewxrRunTime), datetime.UTC
             ).replace(tzinfo=None)
@@ -2090,6 +2098,7 @@ async def calculate_grid_indexing(
         aifsRunTime=aifsRunTime,
         dataOut_librewxr=dataOut_librewxr,
         librewxrRunTime=librewxrRunTime,
+        librewxrLightningTime=librewxrLightningTime,
         x_rtma=x_rtma,
         y_rtma=y_rtma,
         rtma_lat=rtma_lat,
