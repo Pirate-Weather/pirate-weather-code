@@ -5,6 +5,10 @@ on:
     branches: ['dev']
   release:
     types: [published]
+  # Sent by Pirate-Weather/LibreWXR when its main changes: rebuilds only the
+  # LibreWXR image (the dev tag), not the ingest or API images.
+  repository_dispatch:
+    types: [librewxr-main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}
@@ -14,7 +18,8 @@ env:
   IMAGE_VERSION: ${{ github.event_name == 'release' && 'release' || 'dev' }}
   # LibreWXR source the Pirate Weather LibreWXR image is built on: the fork's
   # main, which follows JoshuaKimsey/LibreWXR (hooks and snapshot sync are
-  # upstream since #55 and #56) and is what the fork's own ECR image uses.
+  # upstream since #55 and #56). The image runs the pipeline, renderers and
+  # puller alike.
   LIBREWXR_REPO: Pirate-Weather/LibreWXR
   LIBREWXR_REF: main
   RELEASE_VERSION: ${{ github.event_name == 'release' && github.event.release.tag_name || '' }}
@@ -25,6 +30,7 @@ env:
 
 jobs:
   ingest_arm:
+    if: github.event_name != 'repository_dispatch'
     name: Build Ingest Image (ARM)
     runs-on: ubuntu-24.04-arm
     steps:
@@ -60,6 +66,7 @@ jobs:
           fi
 
   ingest_x64:
+    if: github.event_name != 'repository_dispatch'
     name: Build Ingest Image (x64)
     runs-on: ubuntu-24.04
     steps:
@@ -134,6 +141,7 @@ jobs:
 #################################################################
 
   api_arm:
+    if: github.event_name != 'repository_dispatch'
     name: Build API Image (ARM)
     runs-on: ubuntu-24.04-arm
     steps:
@@ -169,6 +177,7 @@ jobs:
           fi
 
   api_x64:
+    if: github.event_name != 'repository_dispatch'
     name: Build API Image (x64)
     runs-on: ubuntu-24.04
     steps:
@@ -244,20 +253,40 @@ jobs:
 # Built on LibreWXR from LIBREWXR_REPO@LIBREWXR_REF (see env above) plus this
 # repository's code, for the LibreWXR pipeline service to run the nowcast
 # hook (Docker/pirate-librewxr-dockerfile). Not part of the API deployment
-# below: the pipeline runs on the OVH host, which pulls the new tag itself.
+# below: the cluster pins the image by digest and is moved by hand.
+# librewxr_ref resolves the LibreWXR commit once, so both architectures build the
+# same one and the manifest can be tagged with it.
+
+  librewxr_ref:
+    name: Resolve LibreWXR commit
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - id: sha
+        env:
+          DISPATCH_SHA: ${{ github.event.client_payload.sha }}
+        run: |
+          sha="$DISPATCH_SHA"
+          if [ -z "$sha" ]; then
+            sha=$(git ls-remote "https://github.com/$LIBREWXR_REPO.git" "refs/heads/$LIBREWXR_REF" | cut -f1)
+          fi
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Bad LibreWXR commit: '$sha'"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
 
   librewxr_arm:
+    needs: [librewxr_ref]
     name: Build LibreWXR Image (ARM)
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
-      - name: Checkout LibreWXR (${{ env.LIBREWXR_REPO }}@${{ env.LIBREWXR_REF }})
+      - name: Checkout LibreWXR (${{ env.LIBREWXR_REPO }}@${{ needs.librewxr_ref.outputs.sha }})
         uses: actions/checkout@v7.0.1
         with:
           repository: ${{ env.LIBREWXR_REPO }}
-          ref: ${{ env.LIBREWXR_REF }}
+          ref: ${{ needs.librewxr_ref.outputs.sha }}
           path: librewxr-src
 
       - name: Build the LibreWXR base image
@@ -293,17 +322,18 @@ jobs:
           fi
 
   librewxr_x64:
+    needs: [librewxr_ref]
     name: Build LibreWXR Image (x64)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
 
-      - name: Checkout LibreWXR (${{ env.LIBREWXR_REPO }}@${{ env.LIBREWXR_REF }})
+      - name: Checkout LibreWXR (${{ env.LIBREWXR_REPO }}@${{ needs.librewxr_ref.outputs.sha }})
         uses: actions/checkout@v7.0.1
         with:
           repository: ${{ env.LIBREWXR_REPO }}
-          ref: ${{ env.LIBREWXR_REF }}
+          ref: ${{ needs.librewxr_ref.outputs.sha }}
           path: librewxr-src
 
       - name: Build the LibreWXR base image
@@ -340,7 +370,7 @@ jobs:
 
   manifest_librewxr:
     name: Create LibreWXR MultiArch Manifest
-    needs: [librewxr_arm, librewxr_x64]
+    needs: [librewxr_ref, librewxr_arm, librewxr_x64]
     runs-on: ubuntu-24.04
     steps:
       - name: Configure AWS credentials
@@ -362,8 +392,12 @@ jobs:
           REGISTRY_ALIAS: j9v4j3c7
           REPOSITORY: pirate-librewxr
           IMAGE_TAG: ${{ env.IMAGE_VERSION }}
+          LIBREWXR_SHA: ${{ needs.librewxr_ref.outputs.sha }}
         run: |
+          # Also tag <dev|release>-<LibreWXR commit>-<this commit> so every build
+          # can be told apart and pinned or rolled back.
           docker buildx imagetools create -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG \
+            -t $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:$IMAGE_TAG-${LIBREWXR_SHA::7}-${GITHUB_SHA::7} \
             $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-amd64 \
             $REGISTRY/$REGISTRY_ALIAS/$REPOSITORY:${{ env.IMAGE_VERSION }}-arm64
 
