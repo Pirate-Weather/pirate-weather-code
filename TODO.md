@@ -57,6 +57,28 @@ Plan if accepted:
   from the last RDAQA hour into RAQDPS over the first few hours.
 - Smoke season: compare `fw` with Prelim. The standard analysis rejects PM observations
   more than 100 µg/m³ above the forecast; FW only above 300.
+### GEPS/REPS precip type follows the wettest members (needs discussion)
+GEPS and REPS have no categorical type. The ingests store the ensemble mean of each
+type's rate (`AFRAIN_Mean`, `AICEP_Mean`, `ARAIN_Mean`, `ASNOW_Mean`), and
+`map_ensemble_precip_rates_to_ptype` types an hour by the largest mean. When few
+members have precipitation, a couple of wet outliers decide the type.
+
+Example: Ottawa, GEPS, 2026-11-26 23Z to 11-27 13Z, probability 22-34%, mean
+intensity about 0.2 mm/h. The API gives snow, then 13 hours of freezing drizzle (at
+-0.65 to -1.65 C), then rain. SpotWX's GEPS chart for the same run shows median
+freezing rain of about 0 until Dec 3 but a max of about 15 mm by Nov 27, and median
+members with light snow turning to rain. Freezing drizzle at -0.65 and -0.9 C can only
+come from the GEPS freezing-rain mean, because the rain-to-freezing-rain conversion in
+`API/hourly/block.py` applies at or below -1 C.
+
+No API-only fix: once members are averaged, two members with heavy freezing rain look
+the same as most members with light freezing rain.
+
+Option: type by member vote in the ingests. Take each wet member's dominant type
+(dry members don't vote), and store the winning type or each type's share of the
+wet members as new variables. Then have the API use them, with the mean-based
+typing as a fallback until the stores are rebuilt. This changes the GEPS and REPS
+ingests and their Zarr layouts, so it needs a decision first.
 
 ## Plan (2026-11-09)
 
@@ -69,11 +91,10 @@ Work through the open items in this order, small ones first:
 From the v3 planning post (pirate-weather-code discussion #773). Goals already done
 there (forecast/historic split, test refactor, ingest standardization) are not listed.
 
-### LibreWXR: build from the upstream release
-The hooks and snapshot sync are upstream (JoshuaKimsey/LibreWXR #55 and #56, released
-in v0.9.0), but `LIBREWXR_REF` in `build.yml` and `sanity.yml` still names the fork
-branch `network-split`. Switch both to `v0.9.0`, then move the RBX `librewxr` image
-pins (pirate-weather-ovh `values.local.yaml`) to the rebuilt images.
+### LibreWXR: move the RBX image pins
+`build.yml` and `sanity.yml` now build LibreWXR from the fork's `main`, which follows
+upstream. Move the RBX `librewxr` image pins (pirate-weather-ovh `values.local.yaml`)
+to the rebuilt images.
 
 ### ERA5 archive: remaining work
 - Alert if Google's ERA5T end stops moving (the daily job exits 1 after 10 days; nothing

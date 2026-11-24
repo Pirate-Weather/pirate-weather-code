@@ -9,7 +9,7 @@ on:
 env:
   # Same LibreWXR source as build.yml
   LIBREWXR_REPO: Pirate-Weather/LibreWXR
-  LIBREWXR_REF: network-split
+  LIBREWXR_REF: main
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.run_id }}

@@ -573,7 +573,8 @@ def select_daily_precip_type(
     DATA_DAY: dict,
     maxPchanceDay: np.ndarray,
     PRECIP_IDX: dict,
-    prepAccumUnit: float,
+    sleet_accum: np.ndarray | None = None,
+    frzrain_accum: np.ndarray | None = None,
 ) -> np.ndarray:
     """Determines the dominant precipitation type for each day.
 
@@ -582,11 +583,15 @@ def select_daily_precip_type(
     `maxPchanceDay` (modified in-place) for convenience.
 
     Args:
-        InterPdaySum: 2D array-like (n_days, vars) with accumulated precip amounts.
+        InterPdaySum: 2D array-like (n_days, vars) with accumulated precip amounts
+            in mm (SI).
         DATA_DAY: Mapping of variable names to column indices.
         maxPchanceDay: Array-like of ints that will be updated with precip type codes.
         PRECIP_IDX: Mapping of precipitation type names to integer codes.
-        prepAccumUnit: Unit conversion multiplier for accumulation thresholds.
+        sleet_accum: Per-day ice accumulation (mm) from hours typed sleet (or
+            mixed), or None.
+        frzrain_accum: Per-day ice accumulation (mm) from hours typed freezing
+            rain, or None.
 
     Returns:
         The updated `maxPchanceDay` numpy array.
@@ -611,9 +616,20 @@ def select_daily_precip_type(
     type_map = np.array([PRECIP_IDX["rain"], PRECIP_IDX["snow"], PRECIP_IDX["ice"]])
     dominant_type = type_map[np.argmax(precip_accum, axis=1)]
 
-    # Accumulation only has one ice column, shared by sleet and freezing rain, so the
-    # hourly type (most common on the day) is what tells them apart.
+    # Accumulation only has one ice column, shared by sleet and freezing rain, so
+    # the hourly types tell them apart: whichever of the two put down more ice.
+    # Without that split (or when it ties), fall back to the day's most common
+    # hourly type, defaulting to freezing rain unless that is sleet.
     hourly_type = maxPchanceDay.copy()
+    frozen_type = np.where(
+        hourly_type == PRECIP_IDX["sleet"], PRECIP_IDX["sleet"], PRECIP_IDX["ice"]
+    )
+    if sleet_accum is not None and frzrain_accum is not None:
+        frozen_type = np.where(
+            sleet_accum > frzrain_accum,
+            PRECIP_IDX["sleet"],
+            np.where(frzrain_accum > sleet_accum, PRECIP_IDX["ice"], frozen_type),
+        )
 
     # Only update where not all types are present and some precip exists
     not_all_types = ~all_types
@@ -623,18 +639,20 @@ def select_daily_precip_type(
     already_mixed = maxPchanceDay == PRECIP_IDX["mixed"]
     update_mask = not_all_types & has_precip & ~already_mixed
     maxPchanceDay[update_mask] = dominant_type[update_mask]
-    maxPchanceDay[
-        (maxPchanceDay == PRECIP_IDX["ice"]) & (hourly_type == PRECIP_IDX["sleet"])
-    ] = PRECIP_IDX["sleet"]
+    is_ice = maxPchanceDay == PRECIP_IDX["ice"]
+    maxPchanceDay[is_ice] = frozen_type[is_ice]
 
-    # If significant ice accumulation exists and type is not already ice/sleet,
-    # default to ice (freezing rain), which is more common than sleet globally.
-    maxPchanceDay[
-        (InterPdaySum[:, DATA_DAY["ice"]] > (1 * prepAccumUnit))
+    # More than 1 mm of ice is shown as the day's type even when rain or snow
+    # accumulated more, as it is the more hazardous forecast. It is the frozen
+    # type that actually fell, not always freezing rain: a rainy day with some
+    # sleet is a sleet day. The accumulation is in mm whatever the request units.
+    significant_ice = (
+        (InterPdaySum[:, DATA_DAY["ice"]] > 1)
         & (maxPchanceDay != PRECIP_IDX["ice"])
         & (maxPchanceDay != PRECIP_IDX["sleet"])
         & ~already_mixed
-    ] = PRECIP_IDX["ice"]
+    )
+    maxPchanceDay[significant_ice] = frozen_type[significant_ice]
 
     # If we have all types map the type to mixed
     maxPchanceDay[all_types] = PRECIP_IDX["mixed"]
@@ -813,7 +831,8 @@ def map_ensemble_precip_rates_to_ptype(
     """Map ensemble precipitation component rates to the internal precipitation type.
 
     GEPS and REPS do not provide a categorical type field; they provide rate fields for
-    rain, ice pellets, freezing rain, and snow. We classify by the strongest rate, but
+    rain, ice pellets, freezing rain, and snow (ensemble means, mm/h). We classify by
+    the strongest rate, even when it is under the threshold, but
     if more than one channel exceeds the threshold we fall back to mixed precipitation.
 
     The companion mapping is:
@@ -865,28 +884,27 @@ def map_ensemble_precip_rates_to_ptype(
     )
 
     strong_count = (component_matrix > threshold).sum(axis=1)
-    out = np.full(n_hours, np.nan, dtype=float)
+    out = np.full(n_hours, PRECIP_IDX["none"], dtype=float)
 
-    mixed_mask = strong_count > 1
-    out[mixed_mask] = PRECIP_IDX["mixed"]
+    # The channels are ensemble means, so a light or low-probability event can have
+    # every channel under the threshold. Those hours still take the dominant
+    # channel's type; leaving them "none" would hand them to the hourly block's
+    # air-temperature fallback, which calls anything between -1 and 1 C sleet.
+    filled = np.nan_to_num(component_matrix, nan=0.0)
+    strongest_idx = np.argmax(filled, axis=1)
+    component_types = np.array(
+        [
+            PRECIP_IDX["snow"],
+            PRECIP_IDX["sleet"],
+            PRECIP_IDX["ice"],
+            PRECIP_IDX["rain"],
+        ],
+        dtype=float,
+    )
+    typed_mask = filled.max(axis=1) > PRECIP_NOISE_THRESHOLD_MMH
+    out[typed_mask] = component_types[strongest_idx[typed_mask]]
 
-    strong_mask = strong_count == 1
-    if np.any(strong_mask):
-        strongest_idx = np.argmax(component_matrix, axis=1)
-        strongest_idx = np.where(strong_mask, strongest_idx, 0)
-        component_map = {
-            0: PRECIP_IDX["snow"],
-            1: PRECIP_IDX["sleet"],
-            2: PRECIP_IDX["ice"],
-            3: PRECIP_IDX["rain"],
-        }
-        out[strong_mask] = np.array(
-            [component_map[int(i)] for i in strongest_idx[strong_mask]]
-        )
-
-    no_precip_mask = strong_count == 0
-    if np.any(no_precip_mask):
-        out[no_precip_mask] = PRECIP_IDX["none"]
+    out[strong_count > 1] = PRECIP_IDX["mixed"]
 
     # Rows with no valid component data are missing, not precipitation-free.
     all_nan_mask = np.all(np.isnan(component_matrix), axis=1)
