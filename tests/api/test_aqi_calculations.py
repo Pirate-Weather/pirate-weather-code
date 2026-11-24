@@ -310,7 +310,11 @@ def test_rdaqa_gives_past_hours_and_lead_in_raqdps_the_forecast():
     np.testing.assert_array_equal(result["pm25"], expected)
     np.testing.assert_array_equal(result["lead_in"]["pm25"], 15.0)
     np.testing.assert_array_equal(result["co"], 150.0)
-    np.testing.assert_array_equal(result["rdaqa_hours"], np.arange(N_HOURS) <= 5)
+    # The analysis times behind the lead-in, then the grid hours
+    np.testing.assert_array_equal(
+        result["rdaqa_times"],
+        np.where(lead_and_grid <= 5 * 3600, lead_and_grid, np.nan),
+    )
     sources = result["hour_sources"]
     np.testing.assert_array_equal(sources["rdaqa"], np.arange(N_HOURS) <= 5)
     # Hour 2: RDAQA has the gases but not PM2.5, which RAQDPS fills

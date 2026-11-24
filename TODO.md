@@ -39,8 +39,10 @@ Plan if accepted:
   midnight). A late or missing hour is a NaN row, retried each run. Downloads skip
   Herbie: its existence check reports failed requests as "not found", which stored
   3 of 49 posted hours as NaN. Backfilling all 49 hours took 140-160 s at a 1.6 GB
-  peak; an hourly run fetches one hour in ~20 s. History stores are ~5 MB an hour and,
-  like the other history stores, are never deleted (see Remaining storage clean-up).
+  peak; an hourly run fetches one hour in ~20 s. History stores are ~5 MB an hour;
+  the compose `prune-history` job deletes them after 96 h (48 h window + 2 days).
+  A run whose newest hour is already published still retries the missing hours and
+  republishes if one arrived.
 - API (done, branch `rdaqa-api-response`): `RDAQA.zarr` is read at the RAQDPS cell
   (one point read, not the 3 x 3 maximum the forecasts use); per hour RDAQA >
   RAQDPS > SILAM, so RDAQA gives the past hours and the AQI lead-in and RAQDPS the

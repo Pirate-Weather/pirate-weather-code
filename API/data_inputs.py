@@ -1476,8 +1476,12 @@ def prepare_aq_inputs(
     monitor observations) only holds past hours, up to its newest analysis, so
     it gives the past hours and the averaging windows' lead-in, and RAQDPS the
     forecast. Neither has CO; it comes from SILAM unconditionally.
-    ``rdaqa_hours`` marks the grid hours RDAQA supplied a pollutant for; the
-    currently block takes its newest one (see ``RDAQA_CURRENT_MAX_AGE_HOURS``).
+    ``rdaqa_times`` is the RDAQA analysis time behind each lead-in hour, then
+    each grid hour (``AQ_LEAD_IN_HOURS + num_hours`` values, NaN where RDAQA
+    supplied no pollutant). It is the analysis's own time, not the hour it was
+    matched to (they differ by 30 min at fractional UTC offsets); the currently
+    block takes the newest one at or before the requested time (see
+    ``RDAQA_CURRENT_MAX_AGE_HOURS``).
     ``smoke_frp`` is SILAM PM_FRP_column divided by BLH to convert from the
     stored column-burden units (µg/m²) to a near-surface concentration (µg/m³).
     It is used as a lower-priority smoke source after HRRR.
@@ -1648,6 +1652,8 @@ def prepare_aq_inputs(
     # hour) RAQDPS reaches back to its latest run and SILAM before that, as for
     # any other hour.
     lead_in = {}
+    rdaqa_lead = {}
+    rdaqa_lead_match = None
     if len(hour_array_grib):
         lead_in_times = (
             np.asarray(hour_array_grib, dtype=float)[0]
@@ -1681,6 +1687,7 @@ def prepare_aq_inputs(
                 else None
             )
             silam_values = _extract(dataOut_silam, silam_lead_match, SILAM[pollutant])
+            rdaqa_lead[pollutant] = rdaqa_values
             if rdaqa_values is None and raqdps_values is None and silam_values is None:
                 lead_in[pollutant] = np.full(AQ_LEAD_IN_HOURS, np.nan)
             else:
@@ -1699,13 +1706,38 @@ def prepare_aq_inputs(
         "smoke_frp": smoke_frp_m3,
     }
 
-    # Per hour, whether RDAQA supplied any concentration, so currently can take
-    # its newest analysed hour.
-    rdaqa_hours = np.zeros(num_hours, dtype=bool)
-    for rdaqa_values in (rdaqa_pm25, rdaqa_pm10, rdaqa_o3, rdaqa_no2, rdaqa_so2):
-        if rdaqa_values is not None:
-            rdaqa_hours |= np.isfinite(rdaqa_values)
-    aq_inputs["rdaqa_hours"] = rdaqa_hours
+    def _rdaqa_times(match, rdaqa_values, length):
+        """The RDAQA analysis time behind each row, NaN where it gave no pollutant."""
+        times = np.full(length, np.nan)
+        if match is None:
+            return times
+        best, matched = match
+        supplied = np.zeros(length, dtype=bool)
+        for values in rdaqa_values:
+            if values is not None:
+                supplied |= np.isfinite(values)
+        used = matched & supplied
+        times[used] = dataOut_rdaqa[best[used], 0]
+        return times
+
+    # The analysis times behind the lead-in and the grid hours, so currently can
+    # take the newest recent analysis, including one from before local midnight
+    rdaqa_grid_times = _rdaqa_times(
+        rdaqa_match,
+        (rdaqa_pm25, rdaqa_pm10, rdaqa_o3, rdaqa_no2, rdaqa_so2),
+        num_hours,
+    )
+    rdaqa_hours = np.isfinite(rdaqa_grid_times)
+    aq_inputs["rdaqa_times"] = np.concatenate(
+        (
+            _rdaqa_times(
+                rdaqa_lead_match,
+                tuple(rdaqa_lead.get(p) for p in ("pm25", "pm10", "o3", "no2", "so2")),
+                AQ_LEAD_IN_HOURS,
+            ),
+            rdaqa_grid_times,
+        )
+    )
 
     if with_hour_sources:
         # Per hour, whether each model supplied any returned concentration:

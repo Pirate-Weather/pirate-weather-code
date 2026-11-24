@@ -127,11 +127,18 @@ def raqdps_run_for(valid_time: datetime, min_lead: int) -> tuple[datetime, int]:
 
 
 def url_exists(url: str) -> bool:
+    """True if the Datamart has ``url``, False only on a 404.
+
+    Any other failure (a 503, a dropped connection) is raised: treating it as
+    missing would quietly move the comparison window to an older hour.
+    """
     try:
         with urlopen(Request(url, method="HEAD"), timeout=30) as resp:
             return resp.status == 200
-    except urllib.error.URLError:
-        return False
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return False
+        raise
 
 
 def latest_rdaqa_hour(analyses: tuple[str, ...]) -> datetime:
@@ -148,18 +155,27 @@ def latest_rdaqa_hour(analyses: tuple[str, ...]) -> datetime:
 
 
 def fetch(url: str, cache_dir: Path) -> Path | None:
-    """Download ``url`` into the cache, or return None if it is not on the Datamart."""
+    """Download ``url`` into the cache, or return None if it is not on the Datamart.
+
+    Each download writes its own temporary file and only then replaces the
+    cache file, so two runs fetching the same hour into a shared cache can't
+    remove each other's file.
+    """
     path = cache_dir / url.rsplit("/", 1)[1]
     if path.exists():
         return path
-    tmp = path.with_suffix(".part")
+    fd, tmp_name = tempfile.mkstemp(dir=cache_dir, prefix=path.name, suffix=".part")
+    os.close(fd)
     try:
-        urlretrieve(url, tmp)
+        urlretrieve(url, tmp_name)
+        os.replace(tmp_name, path)
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return None
         raise
-    tmp.rename(path)
+    finally:
+        if os.path.exists(tmp_name):
+            os.remove(tmp_name)
     return path
 
 
@@ -250,10 +266,11 @@ def main() -> None:
     reference = "final" if "final" in analyses else "prelim"
 
     if args.end:
-        end = datetime.fromisoformat(args.end).replace(
-            minute=0, second=0, microsecond=0
-        )
+        # A time without an offset is UTC. Convert before dropping the minutes,
+        # so a +05:30 time picks the UTC hour the files are named for.
+        end = datetime.fromisoformat(args.end)
         end = end.replace(tzinfo=UTC) if end.tzinfo is None else end.astimezone(UTC)
+        end = end.replace(minute=0, second=0, microsecond=0)
     else:
         end = latest_rdaqa_hour(analyses)
     hours = [end - timedelta(hours=h) for h in range(args.hours - 1, -1, -1)]

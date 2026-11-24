@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
+from API.constants.aqi_const import AQ_LEAD_IN_HOURS
 from API.constants.forecast_const import DATA_CURRENT
 from API.constants.model_const import GDPS, GFS, HRDPS
 from API.constants.shared_const import MISSING_DATA
@@ -16,6 +17,30 @@ from API.current.metrics import (
 )
 
 AQ_FIELDS = ("pm25", "pm10", "o3", "no2", "so2", "co")
+# Concentrations at 00:00, 01:00 and 02:00 of the test grid
+_AQ_HOURS = {
+    "pm25": np.array([10.0, 20.0, 30.0]),
+    "pm10": np.array([20.0, 30.0, 40.0]),
+    "o3": np.array([30.0, 40.0, 50.0]),
+    "no2": np.array([40.0, 51.0, 60.0]),
+    "so2": np.array([1.0, 2.0, 3.0]),
+    "co": np.array([100.0, 200.0, 300.0]),
+}
+
+
+def _with_rdaqa(analysis_times, *, lead_in=False):
+    """``_AQ_HOURS`` with RDAQA analysis times ({lead-in + grid row: unix s});
+    ``lead_in`` adds a lead-in at 00:00's levels but PM2.5 12."""
+    rdaqa_times = np.full(AQ_LEAD_IN_HOURS + 3, np.nan)
+    for row, analysis_time in analysis_times.items():
+        rdaqa_times[row] = analysis_time
+    inputs = {**_AQ_HOURS, "rdaqa_times": rdaqa_times}
+    if lead_in:
+        inputs["lead_in"] = {
+            field: np.full(AQ_LEAD_IN_HOURS, 12.0 if field == "pm25" else hours[0])
+            for field, hours in _AQ_HOURS.items()
+        }
+    return inputs
 
 
 @pytest.mark.parametrize(
@@ -44,22 +69,32 @@ AQ_FIELDS = ("pm25", "pm10", "o3", "no2", "so2", "co")
             np.nan,
             id="no_aq_data_reports_nan",
         ),
-        # RDAQA analysed 00:00 (30 min before the request): currently reports
-        # that hour (PM2.5 10, CAQI 68), not the blend with 01:00's forecast.
+        # RDAQA analysed 00:00 (30 min before the request) and 01:00 (after it):
+        # currently reports 00:00 (PM2.5 10, CAQI 68), not the blend with 01:00.
         pytest.param(
-            {
-                "pm25": np.array([10.0, 20.0, 30.0]),
-                "pm10": np.array([20.0, 30.0, 40.0]),
-                "o3": np.array([30.0, 40.0, 50.0]),
-                "no2": np.array([40.0, 51.0, 60.0]),
-                "so2": np.array([1.0, 2.0, 3.0]),
-                "co": np.array([100.0, 200.0, 300.0]),
-                "rdaqa_hours": np.array([True, False, False]),
-            },
+            _with_rdaqa({AQ_LEAD_IN_HOURS: 0.0, AQ_LEAD_IN_HOURS + 1: 3600.0}),
             10.0,
             68.0,
             68,
-            id="newest_rdaqa_hour",
+            id="newest_rdaqa_hour_at_or_before_request",
+        ),
+        # Only 23:00 the day before, 1.5 h old: currently reports that lead-in
+        # hour (PM2.5 12; NO2 still sets CAQI 68) instead of the forecast.
+        pytest.param(
+            _with_rdaqa({AQ_LEAD_IN_HOURS - 1: -3600.0}, lead_in=True),
+            12.0,
+            68.0,
+            68,
+            id="rdaqa_from_before_midnight",
+        ),
+        # The analysis behind 00:00 is over 3 h old by its own time, though the
+        # grid hour it was matched to is not: currently interpolates.
+        pytest.param(
+            _with_rdaqa({AQ_LEAD_IN_HOURS: 1800.0 - 3 * 3600 - 60}),
+            15.0,
+            73.0,
+            73,
+            id="rdaqa_too_old_by_analysis_time",
         ),
     ],
 )
@@ -70,7 +105,10 @@ def test_build_current_section_interpolates_current_aq_inputs(
     time from the surrounding hours (it used to take the next hour's value), and missing
     AQ data must surface as NaN rather than a clean-air 0. Where RDAQA has analysed a
     recent hour, currently must be that measured hour: blending in the next hour's
-    RAQDPS forecast would undo it (RAQDPS ran 6-13 ug/m3 low in Ottawa/Kingston)."""
+    RAQDPS forecast would undo it (RAQDPS ran 6-13 ug/m3 low in Ottawa/Kingston).
+    The analysis must be at or before the requested time, may be the previous
+    evening's just after midnight, and must be judged by its own time, not the
+    grid hour it was matched to (30 min apart at fractional UTC offsets)."""
     result = build_current_section(
         sourceList=["hrrr_0-18", "hrrr_18-48"],
         hour_array_grib=np.array([0, 3600, 7200]),

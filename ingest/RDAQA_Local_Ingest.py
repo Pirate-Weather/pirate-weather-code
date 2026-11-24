@@ -302,8 +302,12 @@ def write_hour_store(valid_time, fields, path) -> None:
     close_store(store)
 
 
-def archive_new_hours(base_time, history_remote) -> None:
-    """Archive every hour of the window that is not in the history yet."""
+def archive_new_hours(base_time, history_remote) -> int:
+    """Archive every hour of the window that is not in the history yet.
+
+    Returns how many hours were archived: new ones, and late ones that have
+    been posted since an earlier run.
+    """
     hours = window_hours(base_time)
     archived = map_history_stores(
         lambda t: history_store_exists(history_remote, hourly_store_name(t)), hours
@@ -312,9 +316,11 @@ def archive_new_hours(base_time, history_remote) -> None:
     logger.info("Fetching %d RDAQA hours not archived yet", len(to_fetch))
 
     tmp_store = os.path.join(forecast_process_dir, "RDAQA_Hist_TMP.zarr")
-    for valid_time, fields in load_hours(to_fetch).items():
+    hours_loaded = load_hours(to_fetch)
+    for valid_time, fields in hours_loaded.items():
         write_hour_store(valid_time, fields, tmp_store)
         publish_history_store(tmp_store, history_remote, hourly_store_name(valid_time))
+    return len(hours_loaded)
 
 
 def merge_history(base_time, history_remote, local_dir):
@@ -404,13 +410,20 @@ def main() -> None:
     try:
         # %% The newest hour with every pollutant posted
         base_time = get_latest_rdaqa_hour()
-        if already_processed(base_time, forecast_remote):
+        store_is_current = already_processed(base_time, forecast_remote)
+
+        # %% Archive the hours not archived yet, retrying late ones. A late hour
+        # can be posted while the next is not, so a current store is rebuilt
+        # if any arrived; without one there is nothing new to publish.
+        hours_archived = archive_new_hours(base_time, history_remote)
+        if store_is_current and not hours_archived:
             logger.info("RDAQA store already ends at %s. Exiting.", base_time)
             return
-        logger.info("Processing RDAQA through %s", base_time)
-
-        # %% Archive the hours not archived yet, retrying late ones
-        archive_new_hours(base_time, history_remote)
+        logger.info(
+            "Processing RDAQA through %s (%d hours newly archived)",
+            base_time,
+            hours_archived,
+        )
 
         # %% Stack the window, pad, and write the final store
         stacked, times_unix = merge_history(

@@ -252,7 +252,7 @@ services:
       # stores inside its HISTORY_PERIODS window (API/constants/shared_const.py),
       # so anything older than the window plus a 2-day margin is unused:
       # GFS 288 h + 48 h = 20160 min, URMA 282 h + 48 h = 19800 min,
-      # RTMA / ECMWF / SILAM 48 h + 48 h = 5760 min.
+      # RTMA / ECMWF / SILAM / RDAQA 48 h + 48 h = 5760 min.
       ofelia.job-run.prune-history.schedule: "0 50 0 * * *"
       ofelia.job-run.prune-history.image: "busybox:1.37"
       ofelia.job-run.prune-history.volume: '["${PW_HIST_ROOT}:/hist:rw"]'
@@ -262,6 +262,7 @@ services:
         find /hist/RTMA -maxdepth 1 -name "RTMA_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
         find /hist/ECMWF -maxdepth 1 -name "ECMWF_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
         find /hist/SILAM -maxdepth 1 -name "SILAM_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
+        find /hist/RDAQA -maxdepth 1 -name "RDAQA_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
         true'
       ofelia.job-run.prune-history.no-overlap: "true"
 

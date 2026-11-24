@@ -1,13 +1,16 @@
 """RDAQA ingest: Datamart URLs, download outcomes and the hourly history merge."""
 
+import json
+import pickle
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import pytest
 import requests
+import zarr
 
-from API.ingest_utils import open_remote, publish_history_store
+from API.ingest_utils import open_remote, publish_history_store, publish_ingest_run
 from API.rdaqa_herbie_template import build_rdaqa_url, rdaqa
 from ingest import RDAQA_Local_Ingest as ingest
 
@@ -128,3 +131,57 @@ def test_missing_hour_is_a_nan_row(tmp_path, monkeypatch):
     newest = HOUR + timedelta(hours=1)
     with pytest.raises(RuntimeError, match="Newest RDAQA hour"):
         ingest.merge_history(newest, remote, str(tmp_path / "local2"))
+
+
+def test_late_hour_is_published_when_newest_hour_is_unchanged(tmp_path, monkeypatch):
+    """Regression: a run whose newest complete hour was already published exited
+    before retrying the missing hours, so an hour posted late (while the next
+    one was still incomplete) stayed NaN until a newer hour came. The run must
+    archive it and republish the window under the same run time.
+    """
+    monkeypatch.setattr(ingest, "his_period", 3)
+    monkeypatch.setattr(ingest, "forecast_process_dir", str(tmp_path / "work"))
+    monkeypatch.setattr(ingest, "tmp_dir", str(tmp_path / "work" / "Downloads"))
+    monkeypatch.setattr(ingest, "forecast_path", str(tmp_path / "Prod"))
+    monkeypatch.setattr(ingest, "historic_path", str(tmp_path / "Hist"))
+    history = open_remote(str(tmp_path / "Hist"), "Download")
+    forecast = open_remote(str(tmp_path / "Prod" / ingest.ingest_version), "Download")
+    hours = ingest.window_hours(HOUR)
+    late_hour = hours[1]
+    for index, valid_time in enumerate(hours):
+        if valid_time != late_hour:
+            _archive(history, tmp_path, valid_time, float(index))
+    # The last run published through HOUR, with late_hour missing
+    (tmp_path / "work").mkdir()
+    publish_ingest_run(
+        [],
+        HOUR,
+        ingest.RDAQA_TIME_PICKLE,
+        process_dir=str(tmp_path / "work"),
+        remote=forecast,
+    )
+
+    # The Datamart: HOUR is still the newest complete hour, and late_hour is posted
+    monkeypatch.setattr(ingest, "get_latest_rdaqa_hour", lambda: HOUR)
+    late_fields = {v: np.full((3, 4), 7.0, dtype=np.float32) for v in ingest.zarr_vars}
+    monkeypatch.setattr(
+        ingest,
+        "load_hours",
+        lambda times: {t: late_fields for t in times if t == late_hour},
+    )
+    ingest.main()
+
+    pointer = json.loads(
+        (tmp_path / "Prod" / ingest.ingest_version / "RDAQA.current.json").read_text()
+    )
+    store = zarr.open_array(
+        str(tmp_path / "Prod" / ingest.ingest_version / pointer["store"]), mode="r"
+    )
+    np.testing.assert_array_equal(store[:, 1, :3, :4], 7.0)
+    assert store.attrs["time"] == [int(t.timestamp()) for t in hours]
+    run_time = pickle.loads(
+        (
+            tmp_path / "Prod" / ingest.ingest_version / ingest.RDAQA_TIME_PICKLE
+        ).read_bytes()
+    )
+    assert run_time == HOUR
