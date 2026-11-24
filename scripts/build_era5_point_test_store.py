@@ -113,6 +113,43 @@ PRECIP_PROB_THRESHOLD_M = 0.0001
 # keep encode_era5_archive_field's strict range check, so new oddities still fail.
 CAPE_MAX_J_PER_KG = 20000.0
 
+# Google's ARCO store is a copy of the Copernicus Climate Data Store's ERA5 single
+# levels, and its ERA5T now and then lacks a whole day that its metadata claims
+# (google-research/arco-era5 issues #142 to #164: 2026-06-18, 07-06, 07-25, 08-31,
+# 10-10, 10-14, 10-20..23, 11-04, 11-14, each backfilled only after a report). Those
+# hours read as NaN. Once Google has claimed such a day for COPERNICUS_AFTER_DAYS,
+# the builder fetches it from Copernicus instead; before that it fails the week as
+# before, so the next daily run picks up Google's own backfill. On 2026-11-10 the
+# two sources were bit-for-bit identical for every variable below, with the same
+# grid, NaN cells and accumulation hours, so a filled hour needs no conversion.
+CDS_URL = "https://cds.climate.copernicus.eu/api"
+CDS_DATASET = "reanalysis-era5-single-levels"
+COPERNICUS_AFTER_DAYS = 3
+# Google's variable names are the Copernicus request names; the NetCDF Copernicus
+# returns uses the GRIB short names.
+CDS_NETCDF_NAMES = {
+    "10m_u_component_of_wind": "u10",
+    "10m_v_component_of_wind": "v10",
+    "2m_dewpoint_temperature": "d2m",
+    "2m_temperature": "t2m",
+    "cloud_base_height": "cbh",
+    "convective_available_potential_energy": "cape",
+    "convective_rain_rate": "crr",
+    "convective_snowfall_rate_water_equivalent": "csfr",
+    "downward_uv_radiation_at_the_surface": "uvb",
+    "instantaneous_10m_wind_gust": "i10fg",
+    "large_scale_rain_rate": "lsrr",
+    "large_scale_snowfall_rate_water_equivalent": "lssfr",
+    "mean_sea_level_pressure": "msl",
+    "precipitation_type": "ptype",
+    "surface_pressure": "sp",
+    "surface_solar_radiation_downwards": "ssrd",
+    "total_cloud_cover": "tcc",
+    "total_column_ozone": "tco3",
+    "total_precipitation": "tp",
+    "total_sky_direct_solar_radiation_at_surface": "fdir",
+}
+
 DERIVED_VARS = ("precipitation_probability",)
 ARCHIVE_UNITS = {
     "instantaneous_10m_wind_gust": "m/s",
@@ -162,6 +199,75 @@ def precipitation_probability(total_precipitation_m: np.ndarray) -> np.ndarray:
     return np.float32(100.0) * count / cells[None, :, None]
 
 
+def days_for_copernicus(
+    empty_hours: np.ndarray, era5t_stop: np.datetime64, after_days: int
+) -> list[dt.date]:
+    """Days of ``empty_hours`` (Google hours that are NaN everywhere) to fetch from
+    Copernicus. Raises while any of them is younger than ``after_days`` past
+    Google's ERA5T end, so Google gets that long to backfill its own gap."""
+    days = sorted({hour.astype("datetime64[D]").item() for hour in empty_hours})
+    stop_day = era5t_stop.astype("datetime64[D]").item()
+    recent = [day for day in days if (stop_day - day).days < after_days]
+    if recent:
+        raise ValueError(
+            f"Google ERA5 has empty hours on {[d.isoformat() for d in recent]}; "
+            f"waiting until {after_days} days past ERA5T before using Copernicus"
+        )
+    return days
+
+
+def download_copernicus_day(
+    day: dt.date, variables: list[str], work: Path
+) -> xr.Dataset:
+    """One day of ERA5 hours from the Copernicus CDS, with Google's names and a
+    ``time`` axis. Needs CDSAPI_KEY, on an account that has accepted the ERA5
+    licence. The request waits in the CDS queue: ~2 min on 2026-11-24 for a day
+    of every variable (a 550 MB zip, ~2.4 GB unpacked in ``work``)."""
+    import zipfile
+
+    import cdsapi
+
+    key = os.getenv("CDSAPI_KEY")
+    if not key:
+        raise RuntimeError(f"Google ERA5 is missing {day}; set CDSAPI_KEY to fetch it")
+    # The store is written to --out only later, so it may not exist yet.
+    work.mkdir(parents=True, exist_ok=True)
+    target = work / f"copernicus-{day.isoformat()}.zip"
+    cdsapi.Client(url=os.getenv("CDSAPI_URL", CDS_URL), key=key).retrieve(
+        CDS_DATASET,
+        {
+            "product_type": ["reanalysis"],
+            "variable": variables,
+            "year": [f"{day.year}"],
+            "month": [f"{day.month:02d}"],
+            "day": [f"{day.day:02d}"],
+            "time": [f"{hour:02d}:00" for hour in range(24)],
+            "data_format": "netcdf",
+            "download_format": "zip",
+        },
+        str(target),
+    )
+    # Copernicus splits the NetCDF by GRIB step type: one file of instantaneous
+    # fields, one of hourly accumulations.
+    unpacked = work / f"copernicus-{day.isoformat()}"
+    with zipfile.ZipFile(target) as archive:
+        archive.extractall(unpacked)
+    target.unlink()
+    parts = [xr.open_dataset(path) for path in sorted(unpacked.glob("*.nc"))]
+    return copernicus_to_google(xr.merge(parts, compat="override"), variables)
+
+
+def copernicus_to_google(ds: xr.Dataset, variables: list[str]) -> xr.Dataset:
+    """Rename a Copernicus ERA5 NetCDF to Google's variable names and ``time``."""
+    missing = [var for var in variables if CDS_NETCDF_NAMES[var] not in ds]
+    if missing:
+        raise KeyError(f"Copernicus ERA5 is missing {missing}")
+    renamed = ds[[CDS_NETCDF_NAMES[var] for var in variables]].rename(
+        {CDS_NETCDF_NAMES[var]: var for var in variables}
+    )
+    return renamed.rename(valid_time="time")
+
+
 def open_archive_remote(upload: str):
     """The archive's bucket/prefix on S3, or a local directory (an absolute path)."""
     if os.path.isabs(upload):
@@ -180,6 +286,12 @@ def main() -> None:
         "--publish", choices=("immutable", "versioned"), default="immutable"
     )
     parser.add_argument("--write-workers", type=int, default=8)
+    parser.add_argument(
+        "--copernicus-after-days",
+        type=int,
+        default=COPERNICUS_AFTER_DAYS,
+        help="days past Google's ERA5T end before a Google gap is fetched from Copernicus",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
@@ -279,6 +391,42 @@ def main() -> None:
             encode_era5_archive_field(name, values)
         )
 
+    # Days fetched from Copernicus, downloaded once for every variable, and the
+    # hours they filled (recorded in the store's attributes).
+    copernicus_days: dict[dt.date, xr.Dataset] = {}
+    copernicus_hours: set[str] = set()
+
+    def fill_from_copernicus(var: str, buffer: np.ndarray, empty: np.ndarray) -> None:
+        for day in days_for_copernicus(
+            times[empty], era5t_stop, args.copernicus_after_days
+        ):
+            if day not in copernicus_days:
+                t_day = time.perf_counter()
+                day_ds = download_copernicus_day(day, source_vars, Path(args.out))
+                if not (
+                    np.array_equal(day_ds["latitude"].values, lats)
+                    and np.array_equal(day_ds["longitude"].values, lons)
+                ):
+                    raise ValueError(
+                        f"Copernicus ERA5 for {day} is not on Google's grid"
+                    )
+                copernicus_days[day] = day_ds
+                logger.info(
+                    "Fetched %s from Copernicus in %.0f s",
+                    day,
+                    time.perf_counter() - t_day,
+                )
+        for i in empty:
+            hour = times[i]
+            day_ds = copernicus_days[hour.astype("datetime64[D]").item()]
+            buffer[i] = (
+                day_ds[var].sel(time=hour).transpose("latitude", "longitude").values
+            )
+            copernicus_hours.add(str(hour.astype("datetime64[h]")))
+        logger.warning(
+            "Filled %d empty Google hours of %s from Copernicus", len(empty), var
+        )
+
     # da.store writes each hourly source chunk straight into its slice: loading
     # with .values first held every chunk plus a concatenated copy per variable.
     with dask.config.set(scheduler="threads", num_workers=SOURCE_READ_THREADS):
@@ -293,6 +441,10 @@ def main() -> None:
                 # An hour of a field that is NaN everywhere means the download or
                 # the source is incomplete (cloud base is NaN only where there is
                 # no cloud base; encode_era5_archive_field rejects other NaNs).
+                # Google's gaps are filled from Copernicus once old enough.
+                empty = np.flatnonzero([not np.isfinite(hour).any() for hour in buffer])
+                if empty.size:
+                    fill_from_copernicus(var, buffer, empty)
                 if not all(np.isfinite(hour).any() for hour in buffer):
                     raise ValueError(
                         f"ERA5 {var} has an empty hour; not writing the store"
@@ -342,6 +494,10 @@ def main() -> None:
             "delta_variables": list(ERA5_ARCHIVE_DELTA_VARS),
             "nan_variables": list(ERA5_ARCHIVE_NAN_VARS),
             "source": GOOGLE_ERA5_URL,
+            # Hours Google lacked and Copernicus supplied (identical data, see
+            # COPERNICUS_AFTER_DAYS); empty when the week is all Google's.
+            "copernicus_filled_hours": sorted(copernicus_hours),
+            "copernicus_dataset": CDS_DATASET if copernicus_hours else None,
             "era5t": era5t,
             "google_valid_time_stop": ds.attrs["valid_time_stop"],
             "google_valid_time_stop_era5t": ds.attrs["valid_time_stop_era5t"],

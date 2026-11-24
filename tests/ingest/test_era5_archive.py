@@ -133,3 +133,44 @@ def test_era5_archive_round_trip_matches_source_within_precision(tmp_path):
     assert prob[0, 7] == pytest.approx(100 / 6) and prob[0, 1] == pytest.approx(100 / 6)
     assert prob[1, 7] == pytest.approx(100 / 9) and prob[1, 0] == pytest.approx(100 / 9)
     assert prob[2, 0] == 0 and prob[0, 3] == 0
+
+
+def _builder():
+    spec = importlib.util.spec_from_file_location("era5_builder", BUILDER)
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    return builder
+
+
+def test_google_gap_waits_for_google_then_goes_to_copernicus():
+    """A day Google claims but lacks is left to Google's own backfill for
+    COPERNICUS_AFTER_DAYS past its ERA5T end, then fetched from Copernicus."""
+    builder = _builder()
+    gap = np.datetime64("2026-11-09T00") + np.arange(24).astype("timedelta64[h]")
+    days = builder.days_for_copernicus(gap, np.datetime64("2026-11-17T23"), 3)
+    assert [d.isoformat() for d in days] == ["2026-11-09"]
+    with pytest.raises(ValueError, match="waiting until 3 days"):
+        builder.days_for_copernicus(gap, np.datetime64("2026-11-11T23"), 3)
+
+
+def test_copernicus_netcdf_takes_google_names():
+    """Copernicus's GRIB short names and valid_time become Google's names and time,
+    and a variable Copernicus did not return fails before anything is stored."""
+    import xarray as xr
+
+    builder = _builder()
+    times = np.datetime64("2026-11-09T00") + np.arange(2).astype("timedelta64[h]")
+    dims = ("valid_time", "latitude", "longitude")
+    ds = xr.Dataset(
+        {
+            short: (dims, np.zeros((2, 3, 4), np.float32))
+            for short in builder.CDS_NETCDF_NAMES.values()
+        },
+        coords={"valid_time": times, "expver": ("valid_time", ["0005", "0005"])},
+    )
+    variables = sorted(builder.CDS_NETCDF_NAMES)
+    renamed = builder.copernicus_to_google(ds, variables)
+    assert sorted(renamed.data_vars) == variables
+    assert renamed["2m_temperature"].dims == ("time", "latitude", "longitude")
+    with pytest.raises(KeyError, match="total_precipitation"):
+        builder.copernicus_to_google(ds.drop_vars("tp"), variables)
