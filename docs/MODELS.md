@@ -330,3 +330,5 @@ Gas concentrations stored internally in **ppb** are converted to µg/m³ before 
 | `exclude=silam` | Skip SILAM |
 | `exclude=rdaqa,raqdps,silam` | Exclude all AQ models; no AQ fields in response |
 | `include=airqualitydetails` | Add per-pollutant concentration fields (PM2.5, PM10, O3, NO2, SO2, CO) to the response |
+
+> **Behaviour change (RDAQA):** before RDAQA was added, `exclude=raqdps,silam` removed every air-quality field. It now still returns RDAQA's values for past hours and `currently`. Add `rdaqa` (`exclude=rdaqa,raqdps,silam`) to remove them all.

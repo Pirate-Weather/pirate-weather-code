@@ -224,7 +224,7 @@ Air quality data requires `version=2` (or higher) in the request. The top-level 
 1. **RDAQA** (ECCC's hourly analysis, Canada + CONUS) is used for the past hours it has analysed, including the hours before local midnight that the AQI averages look back on. `currently` reports its newest analysis hour when that is at most 3 hours old.
 2. **RAQDPS** (regional forecast, Canada + CONUS) is used for the other hours.
 3. **SILAM** (global) is used as a fallback.
-4. If all three models are excluded (`exclude=rdaqa,raqdps,silam`) all AQ fields are absent.
+4. If all three models are excluded (`exclude=rdaqa,raqdps,silam`) all AQ fields are absent. This is a change: `exclude=raqdps,silam` used to remove them all, and now still returns RDAQA's past hours and `currently`.
 
 CO (`coConcentration`) is sourced exclusively from SILAM. RAQDPS and RDAQA do not publish CO.
 

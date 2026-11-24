@@ -71,7 +71,6 @@ from API.raqdps_utils import (
     herbie_naive_utc,
     normalize_utc,
 )
-from API.rdaqa_herbie_template import build_rdaqa_url
 
 warnings.filterwarnings("ignore", "This pattern is interpreted")
 warnings.filterwarnings("ignore", "In a future version")
@@ -93,6 +92,56 @@ his_period = HISTORY_PERIODS["RDAQA"]
 HOURLY_STORE_TIMESTAMP_FORMAT = "%Y%m%dT%H%M%SZ"
 RDAQA_STORE_NAME = "RDAQA.zarr"
 RDAQA_TIME_PICKLE = "RDAQA.time.pickle"
+
+# Datamart file layout, by analysis. Downloads skip Herbie: its existence
+# check reports "not found" when a request fails, which stored posted hours as
+# missing, and each file is fetched whole, so its index subsetting is unused.
+RDAQA_BASE_URL = "https://dd.weather.gc.ca"
+RDAQA_PRODUCT = "10km"
+RDAQA_LEVEL = "Sfc"
+
+_POLLUTANTS = {"PM2.5", "PM10", "NO2", "O3", "SO2", "NO"}
+
+# analysis -> (filename prefix, pollutants available for that analysis)
+_ANALYSES = {
+    "final": ("", _POLLUTANTS),
+    "prelim": ("Prelim_", _POLLUTANTS),
+    "fw": ("FW_", {"PM2.5", "PM10"}),
+}
+
+_LEVELS = {"Sfc"}
+
+
+def build_rdaqa_url(valid_time, variable, analysis, level=RDAQA_LEVEL) -> str:
+    """Datamart URL of one RDAQA analysis hour (``valid_time`` in UTC).
+
+    Raises ValueError for an analysis, variable or level MSC does not publish.
+    """
+    if analysis not in _ANALYSES:
+        raise ValueError(
+            f"Unsupported RDAQA analysis: {analysis} "
+            f"(expected one of {sorted(_ANALYSES)})"
+        )
+    prefix, allowed = _ANALYSES[analysis]
+    if variable not in allowed:
+        raise ValueError(
+            f"Unsupported RDAQA variable for '{analysis}' analysis: "
+            f"{variable} (expected one of {sorted(allowed)})"
+        )
+    if level not in _LEVELS:
+        raise ValueError(f"Unsupported RDAQA level: {level}")
+
+    # MSC uses "RDAQA-" for prefixed (Prelim_/FW_) files and "RDAQA_" otherwise.
+    sep = "-" if prefix else "_"
+    filename = (
+        f"{valid_time:%Y%m%dT%HZ}_MSC_RDAQA{sep}{prefix}{variable}"
+        f"_{level}_RLatLon0.09_PT0H.grib2"
+    )
+    return (
+        f"{RDAQA_BASE_URL}/{valid_time:%Y%m%d}/WXO-DD/model_rdaqa/"
+        f"{RDAQA_PRODUCT}/{valid_time:%H}/{filename}"
+    )
+
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -172,7 +221,11 @@ def file_is_posted(url: str) -> bool:
     """True if the Datamart has ``url`` (False only on a 404)."""
 
     def head():
-        response = requests.head(url, timeout=RDAQA_REQUEST_TIMEOUT)
+        # HEAD does not follow redirects by default, and raise_for_status
+        # passes a 3xx, which would count an unposted hour as posted
+        response = requests.head(
+            url, timeout=RDAQA_REQUEST_TIMEOUT, allow_redirects=True
+        )
         _raise_for_status(response, url)
 
     try:

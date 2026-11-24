@@ -11,8 +11,8 @@ then move the entry to Done.
 ### RDAQA for current air quality (awaiting a decision, asked 2026-11-14)
 ECCC's Regional Deterministic Air Quality Analysis blends RAQDPS with hourly AirNow and
 Canadian monitor observations (no satellites or low-cost sensors) on the RAQDPS 10 km
-grid, so the RAQDPS cell lookup can be reused. The Herbie template is in
-`API/rdaqa_herbie_template.py` (`analysis="prelim" | "final" | "fw"`).
+grid, so the RAQDPS cell lookup can be reused. The Datamart URLs are built by
+`build_rdaqa_url` in `ingest/RDAQA_Local_Ingest.py` (`analysis="prelim" | "final" | "fw"`).
 `scripts/compare_rdaqa_raqdps_point.py` prints both for one lat/lon from the Datamart.
 
 PM2.5 (µg/m³) mean absolute error against monitors, 2026-11-17/18:

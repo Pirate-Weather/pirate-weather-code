@@ -498,7 +498,9 @@ async def PW_Forecast(
     incRRFS = initial.inc_rrfs
     exRAQDPS = initial.ex_raqdps
     exSILAM = initial.ex_silam
-    exRDAQA = initial.ex_rdaqa
+    # RDAQA only feeds the version 2 air-quality fields, so version 1 requests
+    # skip its read.
+    exRDAQA = int(initial.ex_rdaqa or version < 2)
     exLIBREWXR = initial.ex_librewxr
     exHRDPS = initial.ex_hrdps
     exGDPS = initial.ex_gdps

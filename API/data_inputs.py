@@ -1487,7 +1487,8 @@ def prepare_aq_inputs(
     It is used as a lower-priority smoke source after HRRR.
 
     With ``with_hour_sources``, ``hour_sources`` maps "rdaqa", "raqdps" and
-    "silam" to the hours each supplied a returned concentration (flags.sources).
+    "silam" to the hours each supplied a returned concentration (flags.sources),
+    and ``lead_hour_sources`` does the same for the lead-in hours.
     """
     nan_row = np.full(num_hours, np.nan)
 
@@ -1653,6 +1654,8 @@ def prepare_aq_inputs(
     # any other hour.
     lead_in = {}
     rdaqa_lead = {}
+    # Each lead-in pollutant's (RDAQA, RAQDPS, SILAM) values, for flags.sources
+    lead_parts = {}
     rdaqa_lead_match = None
     if len(hour_array_grib):
         lead_in_times = (
@@ -1688,6 +1691,7 @@ def prepare_aq_inputs(
             )
             silam_values = _extract(dataOut_silam, silam_lead_match, SILAM[pollutant])
             rdaqa_lead[pollutant] = rdaqa_values
+            lead_parts[pollutant] = (rdaqa_values, raqdps_values, silam_values)
             if rdaqa_values is None and raqdps_values is None and silam_values is None:
                 lead_in[pollutant] = np.full(AQ_LEAD_IN_HOURS, np.nan)
             else:
@@ -1727,7 +1731,6 @@ def prepare_aq_inputs(
         (rdaqa_pm25, rdaqa_pm10, rdaqa_o3, rdaqa_no2, rdaqa_so2),
         num_hours,
     )
-    rdaqa_hours = np.isfinite(rdaqa_grid_times)
     aq_inputs["rdaqa_times"] = np.concatenate(
         (
             _rdaqa_times(
@@ -1740,34 +1743,50 @@ def prepare_aq_inputs(
     )
 
     if with_hour_sources:
-        # Per hour, whether each model supplied any returned concentration:
-        # RDAQA wherever it has a pollutant, RAQDPS where it fills one RDAQA
-        # lacks, SILAM where it fills one both lack, or gives CO
-        raqdps_hours = np.zeros(num_hours, dtype=bool)
-        silam_hours = (
-            np.isfinite(silam_co)
-            if silam_co is not None
-            else np.zeros(num_hours, dtype=bool)
+
+        def _source_hours(parts, silam_co_values, length):
+            """Per hour, whether each model supplied any returned concentration:
+            RDAQA wherever it has a pollutant, RAQDPS where it fills one RDAQA
+            lacks, SILAM where it fills one both lack, or gives CO."""
+            no_hours = np.zeros(length, dtype=bool)
+            rdaqa_hours = no_hours.copy()
+            raqdps_hours = no_hours.copy()
+            silam_hours = (
+                np.isfinite(silam_co_values)
+                if silam_co_values is not None
+                else no_hours.copy()
+            )
+            for rdaqa_values, raqdps_values, silam_values in parts:
+                rdaqa_has = (
+                    no_hours if rdaqa_values is None else np.isfinite(rdaqa_values)
+                )
+                raqdps_has = (
+                    no_hours if raqdps_values is None else np.isfinite(raqdps_values)
+                ) & ~rdaqa_has
+                rdaqa_hours |= rdaqa_has
+                raqdps_hours |= raqdps_has
+                if silam_values is not None:
+                    silam_hours |= np.isfinite(silam_values) & ~rdaqa_has & ~raqdps_has
+            return {"rdaqa": rdaqa_hours, "raqdps": raqdps_hours, "silam": silam_hours}
+
+        aq_inputs["hour_sources"] = _source_hours(
+            (
+                (rdaqa_pm25, raqdps_pm25, silam_pm25),
+                (rdaqa_pm10, raqdps_pm10, silam_pm10),
+                (rdaqa_o3, raqdps_o3, silam_o3),
+                (rdaqa_no2, raqdps_no2, silam_no2),
+                (rdaqa_so2, raqdps_so2, silam_so2),
+            ),
+            silam_co,
+            num_hours,
         )
-        no_hours = np.zeros(num_hours, dtype=bool)
-        for rdaqa_values, raqdps_values, silam_values in (
-            (rdaqa_pm25, raqdps_pm25, silam_pm25),
-            (rdaqa_pm10, raqdps_pm10, silam_pm10),
-            (rdaqa_o3, raqdps_o3, silam_o3),
-            (rdaqa_no2, raqdps_no2, silam_no2),
-            (rdaqa_so2, raqdps_so2, silam_so2),
-        ):
-            rdaqa_has = no_hours if rdaqa_values is None else np.isfinite(rdaqa_values)
-            raqdps_has = (
-                no_hours if raqdps_values is None else np.isfinite(raqdps_values)
-            ) & ~rdaqa_has
-            raqdps_hours |= raqdps_has
-            if silam_values is not None:
-                silam_hours |= np.isfinite(silam_values) & ~rdaqa_has & ~raqdps_has
-        aq_inputs["hour_sources"] = {
-            "rdaqa": rdaqa_hours.copy(),
-            "raqdps": raqdps_hours,
-            "silam": silam_hours,
-        }
+        # The same for the lead-in, where currently can take the previous
+        # evening's RDAQA analysis just after local midnight
+        if lead_parts:
+            aq_inputs["lead_hour_sources"] = _source_hours(
+                tuple(lead_parts[p] for p in ("pm25", "pm10", "o3", "no2", "so2")),
+                lead_parts["co"][2],
+                AQ_LEAD_IN_HOURS,
+            )
 
     return aq_inputs

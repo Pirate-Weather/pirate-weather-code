@@ -11,45 +11,29 @@ import requests
 import zarr
 
 from API.ingest_utils import open_remote, publish_history_store, publish_ingest_run
-from API.rdaqa_herbie_template import build_rdaqa_url, rdaqa
 from ingest import RDAQA_Local_Ingest as ingest
 
 HOUR = datetime(2026, 11, 19, 15, tzinfo=UTC)
 
 
-def test_build_rdaqa_url_and_template():
+def test_build_rdaqa_url():
     """Protect the Datamart filename contract: prefixed analyses (Prelim_, FW_)
     use "RDAQA-" and the final one "RDAQA_", with no grib2/ folder, so a wrong
     separator or path makes every download of that analysis 404. FW is only
-    published for PM, and the Herbie template must point at the same file.
+    published for PM.
     """
     base = "https://dd.weather.gc.ca/20261119/WXO-DD/model_rdaqa/10km/15/"
-    assert build_rdaqa_url(HOUR, "PM2.5", "prelim") == (
+    assert ingest.build_rdaqa_url(HOUR, "PM2.5", "prelim") == (
         base + "20261119T15Z_MSC_RDAQA-Prelim_PM2.5_Sfc_RLatLon0.09_PT0H.grib2"
     )
-    assert build_rdaqa_url(HOUR, "O3", "final") == (
+    assert ingest.build_rdaqa_url(HOUR, "O3", "final") == (
         base + "20261119T15Z_MSC_RDAQA_O3_Sfc_RLatLon0.09_PT0H.grib2"
     )
-    assert build_rdaqa_url(HOUR, "PM10", "fw") == (
+    assert ingest.build_rdaqa_url(HOUR, "PM10", "fw") == (
         base + "20261119T15Z_MSC_RDAQA-FW_PM10_Sfc_RLatLon0.09_PT0H.grib2"
     )
     with pytest.raises(ValueError, match="'fw' analysis"):
-        build_rdaqa_url(HOUR, "NO2", "fw")
-
-    class DummyHerbie:
-        date = HOUR
-        product = None
-        variable = "SO2"
-        analysis = "prelim"
-
-        @property
-        def get_remoteFileName(self):
-            return self.SOURCES["msc"].split("/")[-1]
-
-    dummy = DummyHerbie()
-    rdaqa.template(dummy)
-    assert dummy.SOURCES == {"msc": build_rdaqa_url(HOUR, "SO2", "prelim")}
-    assert dummy.LOCALFILE == dummy.SOURCES["msc"].split("/")[-1]
+        ingest.build_rdaqa_url(HOUR, "NO2", "fw")
 
 
 class _Response:

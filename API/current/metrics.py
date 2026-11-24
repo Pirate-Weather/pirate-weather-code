@@ -2481,12 +2481,11 @@ def build_current_section(
         _fill_curr_aq("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
         if used_sources is not None:
             if lead_row is not None:
-                # The lead-in keeps no per-source mask: an archived RDAQA hour
-                # holds every pollutant but CO, which only SILAM gives
-                used_sources.add("rdaqa")
-                lead_co = lead_in.get("co")
-                if lead_co is not None and np.isfinite(lead_co[lead_row]):
-                    used_sources.add("silam")
+                for aq_source, aq_hours in aq_inputs.get(
+                    "lead_hour_sources", {}
+                ).items():
+                    if aq_hours[lead_row]:
+                        used_sources.add(aq_source)
             else:
                 for aq_source, aq_hours in aq_inputs.get("hour_sources", {}).items():
                     if aq_hours[[aq_idx1, aq_idx2]].any():

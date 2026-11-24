@@ -14,6 +14,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 
 from API.constants.api_const import CFS_MAX_RUN_AGE_HOURS
+from API.constants.aqi_const import AQ_LEAD_IN_HOURS
 from API.constants.grid_const import (
     HRRR_X_MAX,
     HRRR_X_MIN,
@@ -347,8 +348,10 @@ def _aq_source_covers_request(
     base_day_utc: datetime.datetime,
     num_hours: int,
     value_columns: tuple[int, ...],
+    lead_in_hours: int = 0,
 ) -> bool:
-    """Return whether an AQ store has values aligned with the requested hours."""
+    """Return whether an AQ store has values aligned with the requested hours,
+    or with the ``lead_in_hours`` before them."""
     if (
         data.ndim != 2
         or not value_columns
@@ -359,7 +362,9 @@ def _aq_source_covers_request(
 
     # AQ matching allows up to one hour for float32 timestamp rounding and
     # locations with fractional UTC offsets (see prepare_aq_inputs).
-    request_times = base_day_utc.timestamp() + np.arange(num_hours) * 3600
+    request_times = (
+        base_day_utc.timestamp() + np.arange(-lead_in_hours, num_hours) * 3600
+    )
     valid_rows = np.isfinite(data[:, 0]) & np.isfinite(
         data[:, list(value_columns)]
     ).any(axis=1)
@@ -1965,6 +1970,10 @@ async def calculate_grid_indexing(
                 base_day_utc,
                 num_hours,
                 RDAQA_VALUE_COLUMNS,
+                # RDAQA only holds past hours. Just after local midnight its
+                # newest analysis is the previous evening's, which still serves
+                # currently and the AQI's lead-in.
+                lead_in_hours=AQ_LEAD_IN_HOURS,
             )
         ):
             dataOut_rdaqa = False
