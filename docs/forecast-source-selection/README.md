@@ -153,13 +153,17 @@ are copied from the first minute of the minutely block and therefore use the
 minutely rules below, except on a future day, where they are the hourly item of
 the requested hour (see Future days and CFS).
 
+In version 2, a satellite lightning strike within 15 km of a point with current
+precipitation makes the `currently` summary and icon a thunderstorm, whatever
+the models' stability indices say.
+
 Some current elements have intentionally narrower source sets:
 
 | Element | Source logic |
 | --- | --- |
 | UV index | GFS-compatible source → ERA5 |
 | Ozone | GFS-compatible source → ERA5 |
-| Nearest storm | GFS-compatible source |
+| Nearest storm | LibreWXR satellite lightning (nearest strike in the last 15 min of each satellite's data, within 300 km) → GFS-compatible source, floored at 300 km where satellites see no strike that close |
 | Smoke | HRRR → SILAM |
 | Feels-like temperature | NBM → GFS-compatible source → CFS (computed from its temperature, humidity, wind and solar radiation) |
 

@@ -5,8 +5,11 @@ LibreWXR data pipeline writes) must come out as a ``LibreWXR.zarr`` in the final
 store layout, with true dBZ inside radar coverage and NaN outside it. It protects
 the ingest/API contract for the minutely block: a wrong grid orientation, pixel
 decode or coverage test would silently put radar echoes in the wrong place or
-replace real echoes with model data. Needs the ``librewxr`` package (the sidecar
-runs beside LibreWXR), so it is skipped where that is not installed.
+replace real echoes with model data. The same export carries LibreWXR's satellite
+lightning as the nearest-strike distance and bearing at T+0, which the API serves as
+the current nearest storm: a wrong coverage or staleness rule would report "no storm"
+where a satellite cannot see one. Needs the ``librewxr`` package (the sidecar runs
+beside LibreWXR), so it is skipped where that is not installed.
 """
 
 import gzip
@@ -35,6 +38,21 @@ from ingest import LibreWXR_Local_Ingest as sidecar
 GUAM_LAT, GUAM_LON = 13.45, 144.8
 # London: far from every region, so no radar coverage
 LONDON_LAT, LONDON_LON = 51.5, -0.1
+# A GOES-19 strike at Miami; Fort Lauderdale is ~40 km north of it, and Denver is
+# inside GOES-19 coverage but over 300 km from the strike
+MIAMI_LAT, MIAMI_LON = 25.76, -80.19
+FORT_LAUDERDALE_LAT, FORT_LAUDERDALE_LON = 26.12, -80.14
+DENVER_LAT, DENVER_LON = 39.74, -104.99
+# LibreWXR's lightning point dtype (librewxr.data.lightning_store)
+LIGHTNING_POINT_DTYPE = np.dtype(
+    [
+        ("time_s", "int64"),
+        ("lat", "float32"),
+        ("lon", "float32"),
+        ("energy", "float32"),
+        ("satellite", "int8"),
+    ]
+)
 # uint8 pixel = (dBZ + 32) * 2
 PIXEL_40_DBZ = 144
 PIXEL_2_DBZ = 68
@@ -101,6 +119,25 @@ def test_export_publishes_radar_composite_for_api(tmp_path, monkeypatch):
     }
     (cache / "state.json").write_bytes(gzip.compress(json.dumps(state).encode()))
 
+    # Lightning: GOES-19 is current; Meteosat-12's newest data is 3 h old, so its
+    # coverage (Europe) is dropped rather than read as "no lightning"
+    now = int(time.time())
+    (cache / "lightning").mkdir()
+    points = np.array(
+        [(now - 120, MIAMI_LAT, MIAMI_LON, 1e-14, 19)], dtype=LIGHTNING_POINT_DTYPE
+    )
+    meta = {
+        "satellites": {
+            "goes19": {"last_e": now - 60},
+            "meteosat12": {"last_e": now - 3 * 3600},
+        }
+    }
+    np.savez_compressed(
+        cache / "lightning" / "current.npz",
+        points=points,
+        meta=np.array(json.dumps(meta)),
+    )
+
     monkeypatch.setattr(sidecar, "forecast_process_dir", str(tmp_path / "work"))
     remote = sidecar.open_remote(str(tmp_path / "prod"), "Download")
     lib = sidecar.load_librewxr()
@@ -113,15 +150,30 @@ def test_export_publishes_radar_composite_for_api(tmp_path, monkeypatch):
     pointer = json.loads((tmp_path / "prod" / "LibreWXR.current.json").read_text())
     store = zarr.open(str(tmp_path / "prod" / pointer["store"]), mode="r")
     assert store.attrs["time"] == [t0, t1]
-    assert store.attrs["variables"] == ["REFC_composite"]
-    assert store.shape == (1, 2, LIBREWXR_GRID_HEIGHT, LIBREWXR_GRID_WIDTH)
+    assert store.attrs["variables"] == [
+        "REFC_composite",
+        "Lightning_Distance",
+        "Lightning_Direction",
+    ]
+    assert store.shape == (3, 2, LIBREWXR_GRID_HEIGHT, LIBREWXR_GRID_WIDTH)
 
     y, x = _grid_cell(GUAM_LAT, GUAM_LON)
     assert store[0, 0, y, x] == pytest.approx(40.0)
     # Below REFC_THRESHOLD counts as no echo inside coverage
     assert store[0, 1, y, x] == 0.0
     y, x = _grid_cell(LONDON_LAT, LONDON_LON)
-    assert np.isnan(store[0, :, y, x]).all()
+    assert np.isnan(store[:, :, y, x]).all()
+
+    # Nearest strike: ~40 km south (a little west) of Fort Lauderdale, at T+0 only
+    y, x = _grid_cell(FORT_LAUDERDALE_LAT, FORT_LAUDERDALE_LON)
+    assert store[1, 0, y, x] == pytest.approx(40_000, rel=0.05)
+    assert store[2, 0, y, x] == pytest.approx(187, abs=5)
+    assert np.isnan(store[1:, 1, y, x]).all()
+    y, x = _grid_cell(MIAMI_LAT, MIAMI_LON)
+    assert store[1, 0, y, x] < 5_000
+    # Covered with no strike in range: lightning rules a nearer storm out
+    y, x = _grid_cell(DENVER_LAT, DENVER_LON)
+    assert np.isposinf(store[1, 0, y, x])
 
 
 def test_stale_nowcast_is_not_exported_under_new_radar_frame(tmp_path):

@@ -32,13 +32,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # Only what API/ingest_utils.py and the export import: the zarr writer and
 # publisher (dask, zarr, obstore), cartopy/xarray/requests for ingest_utils'
-# module-level imports, pandas for timestamps.
+# module-level imports, pandas for timestamps, scipy for the nearest-lightning
+# search (LibreWXR pulls it in today, but only indirectly).
 RUN pip install --no-cache-dir \
     "cartopy>=0.24" \
     "dask>=2026.1" \
     "obstore>=0.12" \
     "pandas>=2.2" \
     "requests>=2.32" \
+    "scipy>=1.11" \
     "xarray>=2024.1" \
     "zarr>=3.1"
 

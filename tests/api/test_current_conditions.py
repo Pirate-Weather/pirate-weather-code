@@ -348,3 +348,146 @@ def test_future_day_currently_precipitation_is_the_requested_hourly_item(
         np.testing.assert_allclose(currently["windGust"], hour_item["windGust"])
         assert hour_item["windGust"] > hour_item["windSpeed"]
         assert np.isfinite(currently["uvIndex"])
+
+
+def _currently_with_lightning(librewxr, version):
+    """The currently block of a wet GFS/GEFS point (GFS storm 50 km east) with
+    LibreWXR rows."""
+    from API.constants.forecast_const import DATA_MINUTELY
+    from API.constants.model_const import GEFS
+    from API.minutely.builder import build_minutely_block
+
+    num_hours = 3
+    hour_times = 1_800_000_000.0 + 3600.0 * np.arange(num_hours)
+    minute_times = hour_times[0] + 60 * np.arange(61.0)
+    source_list = ["gfs", "gefs", "librewxr"]
+    gfs = np.full((num_hours, max(GFS.values()) + 1), np.nan)
+    gefs = np.full((num_hours, max(GEFS.values()) + 1), np.nan)
+    gfs[:, 0] = gefs[:, 0] = hour_times
+    gefs[:, [GEFS["accum"], GEFS["prob"], GEFS["error"]]] = [3.0, 0.9, 0.3]
+    gefs[:, [GEFS["rain"], GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"]]] = [
+        1.0,
+        0,
+        0,
+        0,
+    ]
+    gfs[:, [GFS["temp"], GFS["dew"], GFS["humidity"]]] = [25.0, 20.0, 70.0]
+    gfs[:, [GFS["wind_u"], GFS["wind_v"], GFS["cloud"]]] = [3.0, 4.0, 90.0]
+    gfs[:, [GFS["intensity"], GFS["accum"], GFS["rain"]]] = [3.0, 3.0, 1.0]
+    gfs[:, [GFS["snow"], GFS["ice"], GFS["freezing_rain"]]] = 0
+    gfs[:, [GFS["storm_dist"], GFS["storm_dir"]]] = [50_000.0, 90.0]
+    if librewxr is not None:
+        librewxr[:, 0] += minute_times[0]
+    InterPminute, _, minuteItems, *_ = build_minutely_block(
+        minute_array_grib=minute_times,
+        source_list=source_list,
+        hrrr_subh_data=None,
+        librewxr_data=librewxr,
+        hrrr_merged=None,
+        nbm_data=None,
+        dwd_mosmix_data=None,
+        gefs_data=gefs,
+        gfs_data=gfs,
+        ecmwf_data=None,
+        era5_data=None,
+        prep_intensity_unit=1.0,
+        version=version,
+        lat=25.8,
+        lon=-80.2,
+    )
+    translation = MagicMock()
+    translation.translate.side_effect = lambda parts: parts[1]
+    return build_current_section(
+        sourceList=source_list,
+        hour_array_grib=hour_times,
+        minute_array_grib=minute_times,
+        InterPminute=InterPminute,
+        minuteItems=minuteItems,
+        minuteRainIntensity=InterPminute[:, DATA_MINUTELY["rain_intensity"]],
+        minuteSnowIntensity=InterPminute[:, DATA_MINUTELY["snow_intensity"]],
+        minuteSleetIntensity=InterPminute[:, DATA_MINUTELY["ice_intensity"]],
+        InterSday=np.zeros((1, 21)),
+        dayZeroRain=0.0,
+        dayZeroSnow=0.0,
+        dayZeroIce=0.0,
+        prepAccumUnit=1.0,
+        prepIntensityUnit=1.0,
+        windUnit=1.0,
+        visUnits=0.001,  # km
+        tempUnits=1.0,
+        humidUnit=1.0,
+        extraVars=[],
+        summaryText=True,
+        translation=translation,
+        icon="darksky",
+        unitSystem="si",
+        version=version,
+        timeMachine=False,
+        tmExtra=False,
+        lat=25.8,
+        lon_IN=-80.2,
+        tz_name="UTC",
+        tz_offset=0.0,
+        ETOPO=0.0,
+        elevUnit=1.0,
+        dataOut_rtma_ru=None,
+        hrrrSubHInterpolation=None,
+        HRRR_Merged=None,
+        NBM_Merged=None,
+        DWD_MOSMIX_Merged=None,
+        ECMWF_Merged=None,
+        GFS_Merged=gfs,
+        ERA5_MERGED=None,
+        librewxr_data=librewxr,
+        logger=MagicMock(),
+        loc_tag="test_loc",
+    ).currently
+
+
+def _librewxr_lightning(distance_m, bearing, age_s=0.0):
+    """LibreWXR rows (T+0 and one nowcast step) outside radar coverage, with the
+    nearest strike at T+0; times are offsets from the first minute."""
+    from API.constants.model_const import LIBREWXR
+
+    rows = np.full((2, max(LIBREWXR.values()) + 1), np.nan)
+    rows[:, 0] = [-age_s, 600.0 - age_s]
+    rows[0, [LIBREWXR["lightning_dist"], LIBREWXR["lightning_dir"]]] = [
+        distance_m,
+        bearing,
+    ]
+    return rows
+
+
+def test_satellite_lightning_sets_nearest_storm_and_thunderstorm_summary():
+    """Satellite lightning replaces the GFS nearest storm in `currently` for every
+    version, and in version 2 a strike within 15 km turns current rain into a
+    thunderstorm even when the models have no instability data (here, none). It
+    must not leak where it is not valid: no strike within the 300 km search only
+    floors the GFS distance, and a stalled LibreWXR store (radar frame over 30
+    minutes old) falls back to GFS entirely, so a dead feed never reads as
+    "storm overhead" or "no storm".
+    """
+    # A strike 8 km south: lightning wins, summary is a thunderstorm in v2 only
+    v2 = _currently_with_lightning(_librewxr_lightning(8_000.0, 180.0), version=2)
+    assert v2["nearestStormDistance"] == pytest.approx(8.0)
+    assert v2["nearestStormBearing"] == 180
+    assert v2["icon"] == "thunderstorm"
+    assert v2["summary"] == "thunderstorm"
+    v1 = _currently_with_lightning(_librewxr_lightning(8_000.0, 180.0), version=1)
+    assert v1["nearestStormDistance"] == pytest.approx(8.0)
+    assert v1["icon"] != "thunderstorm"
+
+    # Covered, nothing within 300 km: GFS's 50 km storm is ruled out
+    none_near = _currently_with_lightning(
+        _librewxr_lightning(np.inf, np.nan), version=2
+    )
+    assert none_near["nearestStormDistance"] == pytest.approx(300.0)
+    assert none_near["nearestStormBearing"] == 90
+    assert none_near["icon"] != "thunderstorm"
+
+    # A 40-minute-old store, or no satellite coverage (NaN): GFS as before
+    for librewxr in (_librewxr_lightning(8_000.0, 180.0, age_s=2400.0), None):
+        fallback = _currently_with_lightning(librewxr, version=2)
+        assert fallback["nearestStormDistance"] == pytest.approx(50.0)
+        assert fallback["nearestStormBearing"] == 90
+        assert fallback["icon"] != "thunderstorm"

@@ -20,6 +20,7 @@ def calculate_text(
     isDayTime,
     type,
     icon="darksky",
+    lightning_nearby=False,
 ):
     """
     Calculates the textual summary and icon for an hourly forecast period.
@@ -39,6 +40,9 @@ def calculate_text(
     - isDayTime (bool): Whether it's currently daytime
     - type (str): The type of summary being generated ("current", "hour", "hourly")
     - icon (str): Which icon set to use - "darksky" or "pirate" (default: "darksky")
+    - lightning_nearby (bool): A recent satellite lightning strike is close to the
+        point (current summaries only). Precipitation then reads as a thunderstorm
+        whatever the stability indices say.
 
     Returns:
     - tuple: A tuple containing:
@@ -137,6 +141,9 @@ def calculate_text(
             dewpoint=dewPoint,
             temperature=temp,
         )
+        # Observed lightning overrides the stability score
+        if lightning_nearby:
+            thuText = thuIcon = "thunderstorm"
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
 
     # If there is precipitation text use that and join with wind texts if they exist
