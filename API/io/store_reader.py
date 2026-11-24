@@ -82,6 +82,8 @@ FORECAST_STORES = (
     ("AIGEFS_Zarr", "AIGEFS"),
     ("ECMWF_AIFS_Zarr", "ECMWF_AIFS"),
     ("RAQDPS_Zarr", "RAQDPS"),
+    # RDAQA: hourly analyses on the RAQDPS grid, located with RAQDPS_LatLon
+    ("RDAQA_Zarr", "RDAQA"),
     ("SILAM_Zarr", "SILAM"),
     ("LibreWXR_Zarr", "LibreWXR"),
     # RRFS is read only for include=rrfs requests
@@ -294,6 +296,7 @@ class ZarrStores:
     AIGEFS_Zarr: ModelStore | None = None
     ECMWF_AIFS_Zarr: ModelStore | None = None
     RAQDPS_Zarr: ModelStore | None = None
+    RDAQA_Zarr: ModelStore | None = None
     SILAM_Zarr: ModelStore | None = None
     LibreWXR_Zarr: ModelStore | None = None
     RRFS_Zarr: ModelStore | None = None

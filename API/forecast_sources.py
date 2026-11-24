@@ -52,6 +52,7 @@ USED_SOURCE_KEYS = (
     "gfs",
     "gefs",
     "dwd_mosmix",
+    "rdaqa",
     "raqdps",
     "silam",
     "cfs",
@@ -308,6 +309,22 @@ def build_source_metadata(
 
     if isinstance(grid_result.dataOut_aifs, np.ndarray):
         metadata.add("ecmwf_aifs", run_time=_rounded_run_time(grid_result.aifsRunTime))
+
+    # RDAQA's run time is its newest analysis hour. It is on the RAQDPS grid, so
+    # its cell is RAQDPS's.
+    if isinstance(grid_result.dataOut_rdaqa, np.ndarray):
+        metadata.add("rdaqa", run_time=_rounded_run_time(grid_result.rdaqaRunTime))
+        if grid_result.x_raqdps is not None and grid_result.y_raqdps is not None:
+            metadata.source_idx["rdaqa"] = {
+                "x": int(grid_result.x_raqdps),
+                "y": int(grid_result.y_raqdps),
+                "lat": round(float(grid_result.raqdps_lat), 2)
+                if grid_result.raqdps_lat is not None
+                else None,
+                "lon": round(float(grid_result.raqdps_lon), 2)
+                if grid_result.raqdps_lon is not None
+                else None,
+            }
 
     if isinstance(grid_result.dataOut_raqdps, np.ndarray):
         metadata.add("raqdps", run_time=_rounded_run_time(grid_result.raqdpsRunTime))

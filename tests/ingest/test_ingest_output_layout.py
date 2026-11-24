@@ -281,6 +281,19 @@ LAYOUTS = [
         },
         id="raqdps",
     ),
+    pytest.param(
+        "RDAQA_Local_Ingest",
+        "RDAQA",
+        {
+            "time": "time",
+            "pm25": "PM2.5",
+            "pm10": "PM10",
+            "no2": "NO2",
+            "o3": "O3",
+            "so2": "SO2",
+        },
+        id="rdaqa",
+    ),
 ]
 
 

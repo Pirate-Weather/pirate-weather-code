@@ -231,6 +231,11 @@ services:
       ofelia.job-run.raqdps.schedule: "0 15 4,16 * * *"
       ofelia.job-run.raqdps.container: "pirate-ingest-raqdps"
       ofelia.job-run.raqdps.no-overlap: "true"
+      # RDAQA's preliminary analysis is posted ~40 min after its hour (11-14 to
+      # 11-19); a late hour is retried by every run while in the 48 h window.
+      ofelia.job-run.rdaqa.schedule: "0 50 * * * *"
+      ofelia.job-run.rdaqa.container: "pirate-ingest-rdaqa"
+      ofelia.job-run.rdaqa.no-overlap: "true"
       # Other sources
       ofelia.job-run.dwd-mosmix.schedule: "0 0 * * * *"
       ofelia.job-run.dwd-mosmix.container: "pirate-ingest-dwd-mosmix"
@@ -247,7 +252,7 @@ services:
       # stores inside its HISTORY_PERIODS window (API/constants/shared_const.py),
       # so anything older than the window plus a 2-day margin is unused:
       # GFS 288 h + 48 h = 20160 min, URMA 282 h + 48 h = 19800 min,
-      # RTMA / ECMWF / SILAM 48 h + 48 h = 5760 min.
+      # RTMA / ECMWF / SILAM / RDAQA 48 h + 48 h = 5760 min.
       ofelia.job-run.prune-history.schedule: "0 50 0 * * *"
       ofelia.job-run.prune-history.image: "busybox:1.37"
       ofelia.job-run.prune-history.volume: '["${PW_HIST_ROOT}:/hist:rw"]'
@@ -257,6 +262,7 @@ services:
         find /hist/RTMA -maxdepth 1 -name "RTMA_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
         find /hist/ECMWF -maxdepth 1 -name "ECMWF_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
         find /hist/SILAM -maxdepth 1 -name "SILAM_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
+        find /hist/RDAQA -maxdepth 1 -name "RDAQA_Hist_*.zarr" -mmin +5760 -exec rm -rf {} + ;
         true'
       ofelia.job-run.prune-history.no-overlap: "true"
 
@@ -534,6 +540,18 @@ services:
       forecast_process_dir: "/work/RAQDPS"
       zarr_store_workers: "2"
     command: ["ingest/RAQDPS_Local_Ingest.py"]
+
+  # Peak 1.6 GB backfilling all 49 hours (2026-11-19); an hourly run fetches one
+  rdaqa_ingest:
+    <<: *ingest
+    container_name: pirate-ingest-rdaqa
+    mem_limit: 3g
+    environment:
+      <<: *ingest_env
+      forecast_process_dir: "/work/RDAQA"
+      historic_path: "/data/Hist/RDAQA"
+      zarr_store_workers: "2"
+    command: ["ingest/RDAQA_Local_Ingest.py"]
 
   # Other sources
   dwd_mosmix_ingest:

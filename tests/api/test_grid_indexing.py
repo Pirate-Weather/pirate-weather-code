@@ -10,12 +10,15 @@ import pytest
 import tensorstore as ts
 import xarray as xr
 
+from API.constants.aqi_const import AQ_LEAD_IN_HOURS
 from API.constants.model_const import ERA5
 from API.request.grid_indexing import (
     HRDPS_ROTATED_GRID,
+    RDAQA_VALUE_COLUMNS,
     REPS_ROTATED_GRID,
     RRFS_NA_ROTATED_GRID,
     ZarrSources,
+    _aq_source_covers_request,
     _load_era5_slice,
     _nearest_2d_grid_coords,
     _nearest_rotated_grid_coords,
@@ -157,6 +160,23 @@ def _era5_data(hours, latitudes, longitudes, fill):
             coords={"time": times, "latitude": latitudes, "longitude": longitudes},
         ),
     }
+
+
+def test_rdaqa_before_local_midnight_still_covers_request():
+    """Regression: just after local midnight RDAQA's newest analysis is the
+    previous evening's (23:00, 3600 s before the grid starts). Checking only the
+    grid hours dropped RDAQA from the whole request for ~50 minutes, so
+    currently and the AQI lead-in fell back to RAQDPS.
+    """
+    base_day = datetime.datetime(2026, 11, 24, 5, tzinfo=datetime.UTC)
+    hours = np.arange(-AQ_LEAD_IN_HOURS, 0) * 3600.0 + base_day.timestamp()
+    rdaqa = np.full((len(hours), max(RDAQA_VALUE_COLUMNS) + 1), 1.0)
+    rdaqa[:, 0] = hours
+
+    assert not _aq_source_covers_request(rdaqa, base_day, 48, RDAQA_VALUE_COLUMNS)
+    assert _aq_source_covers_request(
+        rdaqa, base_day, 48, RDAQA_VALUE_COLUMNS, lead_in_hours=AQ_LEAD_IN_HOURS
+    )
 
 
 def test_era5_slice_length_timestamps_and_ptype_rounding():

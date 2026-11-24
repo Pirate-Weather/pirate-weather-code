@@ -17,7 +17,12 @@ from API.api_utils import (
     estimate_visibility_gultepe_rh_pr_numpy,
     relative_humidity_from_dewpoint_c,
 )
-from API.constants.aqi_const import compute_aqi_with_lead_in
+from API.constants.aqi_const import (
+    AQ_LEAD_IN_HOURS,
+    RDAQA_CURRENT_MAX_AGE_HOURS,
+    compute_aqi_array,
+    compute_aqi_with_lead_in,
+)
 from API.constants.clip_const import (
     CLIP_AQI,
     CLIP_CAPE,
@@ -2426,13 +2431,46 @@ def build_current_section(
     # Populate AQ concentration fields from aq_inputs. Only version 2 responses
     # return these fields or the AQI.
     if aq_inputs is not None and version >= 2:
-        # Linear interpolation between hours 0 and 1
+        # Currently is the newest RDAQA analysis at or before the requested time
+        # when it is at most RDAQA_CURRENT_MAX_AGE_HOURS old: it is measured air
+        # quality, where the hours around now are mostly RAQDPS's forecast (an
+        # hour's analysis is posted ~40 min after it). The age is measured from
+        # the analysis time itself (a grid hour is 30 min off it at fractional
+        # UTC offsets), and the lead-in hours are searched too, so just after
+        # local midnight the previous evening's analysis still counts.
+        # Otherwise, linear interpolation between the hours around now.
+        aq_idx1, aq_idx2, aq_fac1, aq_fac2 = idx1, idx2, fac1, fac2
+        lead_in = aq_inputs.get("lead_in") or {}
+        # An analysis hour from before the grid, as an index into the lead-in
+        lead_row = None
+        rdaqa_times = aq_inputs.get("rdaqa_times")
+        if rdaqa_times is not None:
+            request_time = minute_array_grib[0]
+            # NaN (no analysis) compares False
+            eligible = (rdaqa_times <= request_time) & (
+                request_time - rdaqa_times <= RDAQA_CURRENT_MAX_AGE_HOURS * 3600
+            )
+            if eligible.any():
+                newest_row = int(np.argmax(np.where(eligible, rdaqa_times, -np.inf)))
+                if newest_row >= AQ_LEAD_IN_HOURS:
+                    aq_idx1 = aq_idx2 = newest_row - AQ_LEAD_IN_HOURS
+                    aq_fac1, aq_fac2 = 1.0, 0.0
+                elif lead_in:
+                    lead_row = newest_row
+
         def _fill_curr_aq(col_key, src_key, clip_min, clip_max):
+            if lead_row is not None:
+                values = lead_in.get(src_key)
+                if values is not None:
+                    InterPcurrent[DATA_CURRENT[col_key]] = np.clip(
+                        float(values[lead_row]), clip_min, clip_max
+                    )
+                return
             arr = aq_inputs.get(src_key)
             if arr is not None and len(arr) > 0:
-                i1 = min(idx1, len(arr) - 1)
-                i2 = min(idx2, len(arr) - 1)
-                val = float(arr[i1]) * fac1 + float(arr[i2]) * fac2
+                i1 = min(aq_idx1, len(arr) - 1)
+                i2 = min(aq_idx2, len(arr) - 1)
+                val = float(arr[i1]) * aq_fac1 + float(arr[i2]) * aq_fac2
                 InterPcurrent[DATA_CURRENT[col_key]] = np.clip(val, clip_min, clip_max)
 
         _fill_curr_aq("pm25", "pm25", CLIP_PM25["min"], CLIP_PM25["max"])
@@ -2442,51 +2480,74 @@ def build_current_section(
         _fill_curr_aq("so2", "so2", CLIP_SO2_PPB["min"], CLIP_SO2_PPB["max"])
         _fill_curr_aq("co", "co", CLIP_CO_PPB["min"], CLIP_CO_PPB["max"])
         if used_sources is not None:
-            for aq_source, aq_hours in aq_inputs.get("hour_sources", {}).items():
-                if aq_hours[[idx1, idx2]].any():
-                    used_sources.add(aq_source)
+            if lead_row is not None:
+                for aq_source, aq_hours in aq_inputs.get(
+                    "lead_hour_sources", {}
+                ).items():
+                    if aq_hours[lead_row]:
+                        used_sources.add(aq_source)
+            else:
+                for aq_source, aq_hours in aq_inputs.get("hour_sources", {}).items():
+                    if aq_hours[[aq_idx1, aq_idx2]].any():
+                        used_sources.add(aq_source)
 
         try:
             # Compute AQI using the same averaged approach as the hourly block
             # (NowCast for EPA PM2.5/PM10, rolling means for O3/CO, etc.) so
             # that the currently AQI is consistent with the hourly AQI values.
-            # Every average looks backwards only, so the hours after the two
-            # interpolated ones can't change them; skip computing those.
-            current_hours = max(idx1, idx2) + 1
-
-            def _through_current(arr):
-                return arr[:current_hours] if arr is not None else None
-
-            current_series = {
-                pollutant: _through_current(aq_inputs.get(pollutant))
-                for pollutant in ("pm25", "pm10", "o3", "no2", "so2", "co")
-            }
-            # The hourly block computed the same averages from clipped
-            # concentrations. Where clipping changed nothing in these hours,
-            # which is nearly always, its AQI is this one and saves about 0.6 ms.
-            hourly_aqi, hourly_series = aq_inputs.get("hourly_aqi", (None, None))
-            if hourly_aqi is not None and all(
-                series is not None
-                and np.array_equal(
-                    series, hourly_series[pollutant][:current_hours], equal_nan=True
-                )
-                for pollutant, series in current_series.items()
-            ):
-                aqi_arr = hourly_aqi[:current_hours]
+            aqi_system = aqiSystem if aqiSystem is not None else unitSystem
+            if lead_row is not None:
+                # The averages over the lead-in up to the analysis hour. They
+                # start at the lead-in's first hour, 21-23 h earlier here, so
+                # only a 24 h mean is a little short.
+                lead_series = {
+                    pollutant: (
+                        lead_in[pollutant][: lead_row + 1]
+                        if pollutant in lead_in
+                        else None
+                    )
+                    for pollutant in ("pm25", "pm10", "o3", "no2", "so2", "co")
+                }
+                aqi_val = float(compute_aqi_array(aqi_system, **lead_series)[-1])
             else:
-                aqi_arr = compute_aqi_with_lead_in(
-                    aqiSystem if aqiSystem is not None else unitSystem,
-                    aq_inputs.get("lead_in"),
-                    **current_series,
-                )
-            if len(aqi_arr) > 0:
-                aqi_idx1 = min(idx1, len(aqi_arr) - 1)
-                aqi_idx2 = min(idx2, len(aqi_arr) - 1)
-                aqi_val = (
-                    float(aqi_arr[aqi_idx1]) * fac1 + float(aqi_arr[aqi_idx2]) * fac2
-                )
-            else:
-                aqi_val = float("nan")
+                # Every average looks backwards only, so the hours after the
+                # ones used can't change them; skip computing those.
+                current_hours = max(idx1, idx2, aq_idx1) + 1
+
+                def _through_current(arr):
+                    return arr[:current_hours] if arr is not None else None
+
+                current_series = {
+                    pollutant: _through_current(aq_inputs.get(pollutant))
+                    for pollutant in ("pm25", "pm10", "o3", "no2", "so2", "co")
+                }
+                # The hourly block computed the same averages from clipped
+                # concentrations. Where clipping changed nothing in these hours,
+                # which is nearly always, its AQI is this one and saves ~0.6 ms.
+                hourly_aqi, hourly_series = aq_inputs.get("hourly_aqi", (None, None))
+                if hourly_aqi is not None and all(
+                    series is not None
+                    and np.array_equal(
+                        series,
+                        hourly_series[pollutant][:current_hours],
+                        equal_nan=True,
+                    )
+                    for pollutant, series in current_series.items()
+                ):
+                    aqi_arr = hourly_aqi[:current_hours]
+                else:
+                    aqi_arr = compute_aqi_with_lead_in(
+                        aqi_system, aq_inputs.get("lead_in"), **current_series
+                    )
+                if len(aqi_arr) > 0:
+                    aqi_idx1 = min(aq_idx1, len(aqi_arr) - 1)
+                    aqi_idx2 = min(aq_idx2, len(aqi_arr) - 1)
+                    aqi_val = (
+                        float(aqi_arr[aqi_idx1]) * aq_fac1
+                        + float(aqi_arr[aqi_idx2]) * aq_fac2
+                    )
+                else:
+                    aqi_val = float("nan")
             if not np.isnan(aqi_val):
                 # Israel AQI has a scale of -400 to 100, so we need to clip it differently than the standard AQI scale of 0-500.
                 if aqiSystem == "il":

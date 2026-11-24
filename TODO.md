@@ -8,6 +8,57 @@ then move the entry to Done.
 
 ## Improvements
 
+### RDAQA for current air quality (awaiting a decision, asked 2026-11-14)
+ECCC's Regional Deterministic Air Quality Analysis blends RAQDPS with hourly AirNow and
+Canadian monitor observations (no satellites or low-cost sensors) on the RAQDPS 10 km
+grid, so the RAQDPS cell lookup can be reused. The Datamart URLs are built by
+`build_rdaqa_url` in `ingest/RDAQA_Local_Ingest.py` (`analysis="prelim" | "final" | "fw"`).
+`scripts/compare_rdaqa_raqdps_point.py` prints both for one lat/lon from the Datamart.
+
+PM2.5 (µg/m³) mean absolute error against monitors, 2026-11-17/18:
+
+| Station | RDAQA Prelim | RAQDPS |
+|---|---|---|
+| Ottawa Downtown, 17-18th | 1.3 | 6.6 |
+| Ottawa Downtown, 18-19th | 0.8 | 4.1 (12Z run 7.1, 00Z run 2.3) |
+| Kingston | 2.8 | 11.4 |
+| Thunder Bay (clean air) | 1.7 | 1.8 |
+
+Agreement at a monitor's own cell is partly built in (the analysis uses that monitor).
+Away from monitors it falls back toward RAQDPS; corrected PurpleAir sensors near
+Manotick/Kemptville were within a few µg/m³ of it while RAQDPS was about half. RAQDPS's
+error changes from run to run (6-13 low through one run, within 2 the next), so no
+fixed correction.
+
+Plan if accepted:
+- Prelim only: posted ~40 min after the hour (final ~2 h), same values to 0.1 µg/m³
+  in 20 of 21 hours checked, and fewer missing hours.
+- Ingest (done, `ingest/RDAQA_Local_Ingest.py`, branch `rdaqa-ingest`): hourly at :50,
+  archives each hour like URMA and publishes `RDAQA.zarr` with the last
+  `HISTORY_PERIODS["RDAQA"] = 48` hours (24 h AQ lead-in plus up to 24 h since local
+  midnight). A late or missing hour is a NaN row, retried each run. Downloads skip
+  Herbie: its existence check reports failed requests as "not found", which stored
+  3 of 49 posted hours as NaN. Backfilling all 49 hours took 140-160 s at a 1.6 GB
+  peak; an hourly run fetches one hour in ~20 s. History stores are ~5 MB an hour;
+  the compose `prune-history` job deletes them after 96 h (48 h window + 2 days).
+  A run whose newest hour is already published still retries the missing hours and
+  republishes if one arrived.
+- API (done, branch `rdaqa-api-response`): `RDAQA.zarr` is read at the RAQDPS cell
+  (one point read, not the 3 x 3 maximum the forecasts use); per hour RDAQA >
+  RAQDPS > SILAM, so RDAQA gives the past hours and the AQI lead-in and RAQDPS the
+  forecast. `currently` reports the newest RDAQA hour when it is at most
+  `RDAQA_CURRENT_MAX_AGE_HOURS` (3) old: interpolating the hours around now would
+  mostly be RAQDPS, since an hour's analysis is posted ~40 min after it.
+  `exclude=rdaqa`, `rdaqa` in flags.sources/sourceTimes (its newest hour) and
+  `PUBLISH_SCHEDULE_HOURS` (estimated, check against deployed stamps). Checked on
+  real stores (downtown Ottawa, 2026-11-20 14:47 EST): currently PM2.5 6.0 from
+  the 13:00 analysis against 2.9 interpolated from RAQDPS; a full HTTP request
+  wasn't run locally (no forecast store: the Canadian ingests need wgrib2). This
+  changes v2 air quality values and adds a store read for North American requests.
+- Later, if the jump from `currently` to the first forecast hour is noticeable: fade
+  from the last RDAQA hour into RAQDPS over the first few hours.
+- Smoke season: compare `fw` with Prelim. The standard analysis rejects PM observations
+  more than 100 µg/m³ above the forecast; FW only above 300.
 ### GEPS/REPS precip type follows the wettest members (needs discussion)
 GEPS and REPS have no categorical type. The ingests store the ensemble mean of each
 type's rate (`AFRAIN_Mean`, `AICEP_Mean`, `ARAIN_Mean`, `ASNOW_Mean`), and

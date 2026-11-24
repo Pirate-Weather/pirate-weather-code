@@ -75,6 +75,9 @@ HISTORY_PERIODS = {
     # URMA has roughly 12 days of history, allowing 10 days of local retrievals.
     # URMA data has a 6 hour delay, so account for that in the history period to keep consistency with GFS.
     "URMA": 282,
+    # RDAQA covers the 24 h AQ lead-in before local midnight plus up to 24 h
+    # since it, so a current AQI's averaging windows never reach past the store.
+    "RDAQA": 48,
 }
 
 # First forecast lead (hours) of the forecast-only model stores. The API recovers
@@ -150,6 +153,10 @@ PUBLISH_SCHEDULE_HOURS = {
     "gdps": (12, 5.5),
     "geps": (12, 7.25),
     "raqdps": (12, 4.5),
+    # RDAQA: MSC posts each hour's preliminary analysis ~40 min after it
+    # (11-14 to 11-19); the ingest starts at :50 and an hourly run takes ~20 s.
+    # Estimated, not yet from deployed publish stamps.
+    "rdaqa": (1, 0.9),
     # FMI posts the 00Z SILAM run near 12:55 the next day; the ingest starts at
     # 14:00 (+38 h), and at 19:00 for the days it is posted near 17:50.
     "silam": (24, 38.25),
