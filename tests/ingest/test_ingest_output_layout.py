@@ -90,6 +90,7 @@ LAYOUTS = [
             "refc": "REFC_composite",
             "lightning_dist": "Lightning_Distance",
             "lightning_dir": "Lightning_Direction",
+            "lightning_count": "Lightning_Count",
         },
         id="librewxr",
     ),

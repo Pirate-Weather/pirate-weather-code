@@ -444,38 +444,51 @@ def _currently_with_lightning(librewxr, version):
     ).currently
 
 
-def _librewxr_lightning(distance_m, bearing, age_s=0.0):
+def _librewxr_lightning(distance_m, bearing, age_s=0.0, count=0.0):
     """LibreWXR rows (T+0 and one nowcast step) outside radar coverage, with the
     nearest strike at T+0; times are offsets from the first minute."""
     from API.constants.model_const import LIBREWXR
 
     rows = np.full((2, max(LIBREWXR.values()) + 1), np.nan)
     rows[:, 0] = [-age_s, 600.0 - age_s]
-    rows[0, [LIBREWXR["lightning_dist"], LIBREWXR["lightning_dir"]]] = [
-        distance_m,
-        bearing,
-    ]
+    rows[
+        0,
+        [
+            LIBREWXR["lightning_dist"],
+            LIBREWXR["lightning_dir"],
+            LIBREWXR["lightning_count"],
+        ],
+    ] = [distance_m, bearing, count]
     return rows
 
 
 def test_satellite_lightning_sets_nearest_storm_and_thunderstorm_summary():
     """Satellite lightning replaces the GFS nearest storm in `currently` for every
     version, and in version 2 a strike within 15 km turns current rain into a
-    thunderstorm even when the models have no instability data (here, none). It
+    thunderstorm even when the models have no instability data (here, none) and
+    reports the strike count within 15 km as `lightningCount`. It
     must not leak where it is not valid: no strike within the 300 km search only
     floors the GFS distance, and a stalled LibreWXR store (radar frame over 30
     minutes old) falls back to GFS entirely, so a dead feed never reads as
     "storm overhead" or "no storm".
     """
-    # A strike 8 km south: lightning wins, summary is a thunderstorm in v2 only
-    v2 = _currently_with_lightning(_librewxr_lightning(8_000.0, 180.0), version=2)
+    from API.api_utils import remove_conditional_fields
+
+    # Three strikes, the nearest 8 km south: lightning wins, summary is a
+    # thunderstorm in v2 only, and lightningCount is a v2 field
+    strikes = _librewxr_lightning(8_000.0, 180.0, count=3.0)
+    v2 = _currently_with_lightning(strikes, version=2)
     assert v2["nearestStormDistance"] == pytest.approx(8.0)
     assert v2["nearestStormBearing"] == 180
+    assert v2["lightningCount"] == 3
     assert v2["icon"] == "thunderstorm"
     assert v2["summary"] == "thunderstorm"
     v1 = _currently_with_lightning(_librewxr_lightning(8_000.0, 180.0), version=1)
     assert v1["nearestStormDistance"] == pytest.approx(8.0)
     assert v1["icon"] != "thunderstorm"
+    assert "lightningCount" not in remove_conditional_fields(
+        dict(v1), version=1, time_machine=False, tm_extra=False
+    )
 
     # Covered, nothing within 300 km: GFS's 50 km storm is ruled out
     none_near = _currently_with_lightning(
@@ -483,6 +496,7 @@ def test_satellite_lightning_sets_nearest_storm_and_thunderstorm_summary():
     )
     assert none_near["nearestStormDistance"] == pytest.approx(300.0)
     assert none_near["nearestStormBearing"] == 90
+    assert none_near["lightningCount"] == 0
     assert none_near["icon"] != "thunderstorm"
 
     # A 40-minute-old store, or no satellite coverage (NaN): GFS as before
@@ -490,4 +504,5 @@ def test_satellite_lightning_sets_nearest_storm_and_thunderstorm_summary():
         fallback = _currently_with_lightning(librewxr, version=2)
         assert fallback["nearestStormDistance"] == pytest.approx(50.0)
         assert fallback["nearestStormBearing"] == 90
+        assert np.isnan(fallback["lightningCount"])
         assert fallback["icon"] != "thunderstorm"

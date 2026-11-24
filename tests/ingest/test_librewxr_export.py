@@ -119,15 +119,23 @@ def test_export_publishes_radar_composite_for_api(tmp_path, monkeypatch):
     }
     (cache / "state.json").write_bytes(gzip.compress(json.dumps(state).encode()))
 
-    # Lightning: GOES-19 is current; Meteosat-12's newest data is 3 h old, so its
-    # coverage (Europe) is dropped rather than read as "no lightning"
+    # Lightning: GOES-19 saw two flashes at Miami, and GOES-18 reported one of them
+    # too (the satellites overlap there), so the count must be 2, not 3. Meteosat-12's
+    # newest data is 3 h old, so its coverage (Europe) is dropped rather than read
+    # as "no lightning"
     now = int(time.time())
     (cache / "lightning").mkdir()
     points = np.array(
-        [(now - 120, MIAMI_LAT, MIAMI_LON, 1e-14, 19)], dtype=LIGHTNING_POINT_DTYPE
+        [
+            (now - 120, MIAMI_LAT, MIAMI_LON, 1e-14, 19),
+            (now - 90, MIAMI_LAT - 0.01, MIAMI_LON, 1e-14, 19),
+            (now - 120, MIAMI_LAT, MIAMI_LON, 1e-14, 18),
+        ],
+        dtype=LIGHTNING_POINT_DTYPE,
     )
     meta = {
         "satellites": {
+            "goes18": {"last_e": now - 60},
             "goes19": {"last_e": now - 60},
             "meteosat12": {"last_e": now - 3 * 3600},
         }
@@ -154,8 +162,9 @@ def test_export_publishes_radar_composite_for_api(tmp_path, monkeypatch):
         "REFC_composite",
         "Lightning_Distance",
         "Lightning_Direction",
+        "Lightning_Count",
     ]
-    assert store.shape == (3, 2, LIBREWXR_GRID_HEIGHT, LIBREWXR_GRID_WIDTH)
+    assert store.shape == (4, 2, LIBREWXR_GRID_HEIGHT, LIBREWXR_GRID_WIDTH)
 
     y, x = _grid_cell(GUAM_LAT, GUAM_LON)
     assert store[0, 0, y, x] == pytest.approx(40.0)
@@ -169,11 +178,15 @@ def test_export_publishes_radar_composite_for_api(tmp_path, monkeypatch):
     assert store[1, 0, y, x] == pytest.approx(40_000, rel=0.05)
     assert store[2, 0, y, x] == pytest.approx(187, abs=5)
     assert np.isnan(store[1:, 1, y, x]).all()
+    # Beyond 15 km, so no strikes counted
+    assert store[3, 0, y, x] == 0
     y, x = _grid_cell(MIAMI_LAT, MIAMI_LON)
     assert store[1, 0, y, x] < 5_000
+    assert store[3, 0, y, x] == 2
     # Covered with no strike in range: lightning rules a nearer storm out
     y, x = _grid_cell(DENVER_LAT, DENVER_LON)
     assert np.isposinf(store[1, 0, y, x])
+    assert store[3, 0, y, x] == 0
 
 
 def test_stale_nowcast_is_not_exported_under_new_radar_frame(tmp_path):

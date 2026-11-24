@@ -295,6 +295,7 @@ KEEPBITS = {
     # 300 km, finer than the 0.04 degree cell the distance is measured from
     "Lightning_Distance": 11,
     "Lightning_Direction": _DIRECTION_BITS,
+    "Lightning_Count": EXACT_BITS,  # integer strike count
     # SILAM boundary layer height (m), intermediate only: the smoke divisor, which
     # only varies for 667 < BLH < 2000 m. Error <= 1 m to 4000 m.
     "BLH": 10,

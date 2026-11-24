@@ -537,8 +537,11 @@ FORECAST_SOURCES = frozenset(
 # the distance (m) and bearing (degrees, from the point towards the strike) of
 # the nearest recent satellite lightning strike. Distance is NaN outside
 # satellite coverage and +inf where no strike is within LIGHTNING_SEARCH_DISTANCE_M.
+# The count is the number of recent strikes within LIGHTNING_COUNT_DISTANCE_M,
+# NaN where the distance is.
 LIBREWXR = {
     "refc": 1,
     "lightning_dist": 2,
     "lightning_dir": 3,
+    "lightning_count": 4,
 }

@@ -19,7 +19,8 @@ and reflectivity below ``REFC_THRESHOLD`` are 0 dBZ, as for HRRR.
 The same run exports LibreWXR's satellite lightning (GOES-18/19 GLM and, with EUMETSAT
 credentials, Meteosat-12 LI flashes, ``<cache>/lightning/current.npz``) as two more
 variables at T+0: the distance and bearing from each cell to the nearest recent strike,
-which the API serves as ``currently.nearestStormDistance`` / ``nearestStormBearing``.
+which the API serves as ``currently.nearestStormDistance`` / ``nearestStormBearing``, and
+the number of recent strikes within 15 km (``currently.lightningCount``).
 
 One pass per run, like the other ingests: it reads the cache the hook names
 (``LIBREWXR_CACHE_DIR``), exits early when that nowcast is already published, and
@@ -56,6 +57,7 @@ from API.constants.shared_const import (
     LIBREWXR_GRID_WEST,
     LIBREWXR_GRID_WIDTH,
     LIBREWXR_MAX_NOWCAST_AGE_SECONDS,
+    LIGHTNING_COUNT_DISTANCE_M,
     LIGHTNING_RECENT_WINDOW_SECONDS,
     LIGHTNING_SEARCH_DISTANCE_M,
     REFC_THRESHOLD,
@@ -77,8 +79,14 @@ logger = logging.getLogger(__name__)
 STORE_NAME = "LibreWXR.zarr"
 TIME_PICKLE_NAME = "LibreWXR.time.pickle"
 # The published variables; zarr_vars[i] is column i + 1 of the API's LIBREWXR map
-zarr_vars = ("REFC_composite", "Lightning_Distance", "Lightning_Direction")
+zarr_vars = (
+    "REFC_composite",
+    "Lightning_Distance",
+    "Lightning_Direction",
+    "Lightning_Count",
+)
 RADAR_VARS = 1
+LIGHTNING_VARS = 3
 
 # LibreWXR stores reflectivity as uint8 pixel = (dBZ + 32) * 2 (0 = no echo)
 LIBREWXR_PIXEL_DBZ_OFFSET = 32.0
@@ -382,15 +390,21 @@ def lightning_storm_fields(
     now: float,
     lats: np.ndarray,
     lons: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Distance (m) and bearing (degrees) from every cell to the nearest recent strike.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Distance (m) and bearing (degrees) from every cell to the nearest recent
+    strike, and the number of recent strikes within LIGHTNING_COUNT_DISTANCE_M.
 
     Each satellite feed contributes its strikes from the last
     ``LIGHTNING_RECENT_WINDOW_SECONDS`` of its own data and, while it is not
     stale, its coverage. A covered cell with no strike within
     ``LIGHTNING_SEARCH_DISTANCE_M`` is +inf (lightning rules a nearer storm out);
     an uncovered one is NaN unless a strike is in range. Bearings point from the
-    cell towards the strike, as the GFS storm direction does.
+    cell towards the strike, as the GFS storm direction does. The count is 0
+    wherever the distance is known and NaN where it is not.
+
+    Where two satellites overlap (GOES-East and -West over the Americas, GOES-East
+    and Meteosat-12 over the Atlantic) each reports the same flashes, so a cell's
+    count is the largest single satellite's, never their sum.
     """
     distance = np.full((lats.size, lons.size), np.nan, dtype=np.float32)
     direction = np.full((lats.size, lons.size), np.nan, dtype=np.float32)
@@ -431,7 +445,8 @@ def lightning_storm_fields(
 
     strikes = np.concatenate(recent) if recent else points[:0]
     if strikes.size == 0:
-        return distance, direction
+        count = np.where(np.isnan(distance), np.nan, 0.0).astype(np.float32)
+        return distance, direction, count
 
     tree = cKDTree(unit_vectors(strikes["lat"], strikes["lon"]))
     search_chord = chord_for_distance(LIGHTNING_SEARCH_DISTANCE_M)
@@ -474,7 +489,30 @@ def lightning_storm_fields(
     direction[rows, cols] = _bearing_deg(
         cell_lats, cell_lons, strikes["lat"][nearest], strikes["lon"][nearest]
     )
-    return distance, direction
+
+    # Strike counts, only for cells whose nearest strike is close enough to count
+    count = np.where(np.isnan(distance), np.nan, 0.0).astype(np.float32)
+    close = distance[rows, cols] <= LIGHTNING_COUNT_DISTANCE_M
+    rows, cols = rows[close], cols[close]
+    close_cells = unit_vectors(cell_lats[close], cell_lons[close])
+    close_count = np.zeros(rows.size, dtype=np.int64)
+    for satellite_strikes in recent:
+        if satellite_strikes.size == 0:
+            continue
+        satellite_tree = cKDTree(
+            unit_vectors(satellite_strikes["lat"], satellite_strikes["lon"])
+        )
+        close_count = np.maximum(
+            close_count,
+            satellite_tree.query_ball_point(
+                close_cells,
+                r=chord_for_distance(LIGHTNING_COUNT_DISTANCE_M),
+                return_length=True,
+                workers=-1,
+            ),
+        )
+    count[rows, cols] = close_count
+    return distance, direction, count
 
 
 # %% Export
@@ -541,14 +579,17 @@ def export_nowcast(
     lightning_start = time.time()
     lightning = read_lightning_artifact(cache_dir)
     if lightning is None:
-        lightning_distance = np.full(stacked.shape[2:], np.nan, dtype=np.float32)
-        lightning_direction = np.full(stacked.shape[2:], np.nan, dtype=np.float32)
+        lightning_fields = tuple(
+            np.full(stacked.shape[2:], np.nan, dtype=np.float32)
+            for _ in range(LIGHTNING_VARS)
+        )
     else:
         points, satellites = lightning
-        lightning_distance, lightning_direction = lightning_storm_fields(
+        lightning_fields = lightning_storm_fields(
             points, satellites, time.time(), lats, lons
         )
         del points
+    lightning_distance = lightning_fields[0]
     logger.info(
         "Lightning fields in %.1f s: %.1f%% of the globe covered, %.2f%% with a "
         "strike within %.0f km",
@@ -570,14 +611,14 @@ def export_nowcast(
     lightning_t0 = da.stack(
         [
             da.from_array(field[np.newaxis], chunks=(1,) + spatial_chunks)
-            for field in (lightning_distance, lightning_direction)
+            for field in lightning_fields
         ]
     )
     lightning_steps = da.full(
-        (2, len(steps) - 1) + stacked.shape[2:],
+        (LIGHTNING_VARS, len(steps) - 1) + stacked.shape[2:],
         np.nan,
         dtype=np.float32,
-        chunks=(2, len(steps) - 1) + spatial_chunks,
+        chunks=(LIGHTNING_VARS, len(steps) - 1) + spatial_chunks,
     )
     stacked_dask = da.concatenate(
         (radar_dask, da.concatenate((lightning_t0, lightning_steps), axis=1)), axis=0
@@ -591,7 +632,7 @@ def export_nowcast(
         zarr_vars,
         times=times,
     )
-    del stacked_dask, stacked, lightning_distance, lightning_direction
+    del stacked_dask, stacked, lightning_fields, lightning_distance
 
     # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(

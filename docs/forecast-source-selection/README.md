@@ -155,7 +155,9 @@ the requested hour (see Future days and CFS).
 
 In version 2, a satellite lightning strike within 15 km of a point with current
 precipitation makes the `currently` summary and icon a thunderstorm, whatever
-the models' stability indices say.
+the models' stability indices say. `currently.lightningCount` (version 2) is the
+number of those recent strikes within 15 km, and is missing outside satellite
+coverage.
 
 Some current elements have intentionally narrower source sets:
 

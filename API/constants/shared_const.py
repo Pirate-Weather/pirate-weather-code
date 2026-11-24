@@ -36,6 +36,9 @@ LIGHTNING_SEARCH_DISTANCE_M = 300_000.0
 # A recent strike within this distance (m) of a point with precipitation makes
 # the version 2 currently summary a thunderstorm.
 LIGHTNING_THUNDERSTORM_DISTANCE_M = 15_000.0
+# currently.lightningCount counts the recent strikes within this distance (m)
+# of the point, the same radius that makes a thunderstorm.
+LIGHTNING_COUNT_DISTANCE_M = LIGHTNING_THUNDERSTORM_DISTANCE_M
 # The API uses the lightning fields only from a store whose radar frame is at
 # most this old: unlike the radar nowcast, they have no forecast steps.
 LIGHTNING_MAX_AGE_SECONDS = 30 * 60

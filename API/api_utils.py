@@ -923,6 +923,7 @@ def zero_small_values(
 
 # Precomputed constants – built once at import time, not every call
 _FIELDS_V_LT_2 = (
+    "lightningCount",
     "airQualityIndex",
     "airQualityIndexMax",
     "airQualityIndexMaxTime",
@@ -996,6 +997,7 @@ _FIELDS_AQ_DETAILS = (
 _FIELDS_TM_BASIC = (
     "nearestStormDistance",
     "nearestStormBearing",
+    "lightningCount",
     "precipProbability",
     "humidity",
     "visibility",

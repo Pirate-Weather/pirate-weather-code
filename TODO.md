@@ -128,8 +128,11 @@ and for a feed more than 45 min behind, +inf where nothing is within 300 km.
 `currently.nearestStormDistance` / `Bearing` take it for every version, fall back to GFS
 (floored at 300 km under +inf), and ignore a store whose radar frame is over 30 min old.
 In version 2 a strike within 15 km makes current precipitation a thunderstorm (existing
-text and icon, no new strings).
-- Cost: 2.6 s and ~0.9 GB per export against the 2026-11-24 artifact (374k strikes in
+text and icon, no new strings). `Lightning_Count`, the recent strikes within 15 km, is
+served as the version 2 field `currently.lightningCount` (missing outside coverage);
+where satellites overlap a cell takes the largest single satellite's count, since each
+reports the same flashes.
+- Cost: 2.9 s and ~1.1 GB per export with the count (2.6 s and ~0.9 GB without) against the 2026-11-24 artifact (374k strikes in
   2 h; 6 % of the globe within 300 km of a recent strike); point read 182-213 us before,
   205-211 us after; store ~19 % larger over an active storm region.
 - Meteosat-12 runs 15-25 min behind (10-minute files), so its strikes are older than GOES's.

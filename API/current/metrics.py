@@ -1572,11 +1572,12 @@ def _get_ozone(
 def _get_lightning(librewxr_data, current_time):
     """Nearest recent satellite lightning strike at the point, from LibreWXR's T+0 row.
 
-    Returns ``(distance_m, bearing_deg)`` or None when the point has no lightning
+    Returns ``(distance_m, bearing_deg, count)`` or None when the point has no lightning
     data: outside satellite coverage (NaN distance), or a store whose radar frame
     is more than LIGHTNING_MAX_AGE_SECONDS from the current time (the fields
     have no forecast steps to fall back on). A distance of +inf means no recent
-    strike within LIGHTNING_SEARCH_DISTANCE_M.
+    strike within LIGHTNING_SEARCH_DISTANCE_M; ``count`` is the number of recent
+    strikes within LIGHTNING_COUNT_DISTANCE_M (NaN from a store without it).
     """
     # A store published before the lightning export has only the radar column
     if librewxr_data is None or librewxr_data.shape[1] <= LIBREWXR["lightning_dir"]:
@@ -1587,7 +1588,16 @@ def _get_lightning(librewxr_data, current_time):
         return None
     if abs(current_time - valid_time) > LIGHTNING_MAX_AGE_SECONDS:
         return None
-    return float(distance), float(librewxr_data[0, LIBREWXR["lightning_dir"]])
+    count = (
+        float(librewxr_data[0, LIBREWXR["lightning_count"]])
+        if librewxr_data.shape[1] > LIBREWXR["lightning_count"]
+        else np.nan
+    )
+    return (
+        float(distance),
+        float(librewxr_data[0, LIBREWXR["lightning_dir"]]),
+        count,
+    )
 
 
 def _get_storm(sourceList, model_data, state: InterpolationState, lightning=None):
@@ -1604,7 +1614,7 @@ def _get_storm(sourceList, model_data, state: InterpolationState, lightning=None
         sourceList: List of available sources.
         model_data: Dictionary of model data.
         state: Interpolation state.
-        lightning: ``(distance_m, bearing_deg)`` of the nearest recent strike, or None.
+        lightning: ``_get_lightning``'s ``(distance_m, bearing_deg, count)``, or None.
 
     Returns:
         Tuple of (storm distance, storm bearing).
@@ -1613,7 +1623,7 @@ def _get_storm(sourceList, model_data, state: InterpolationState, lightning=None
     if lightning is not None and np.isfinite(lightning[0]):
         if used is not None:
             used.add("librewxr")
-        return lightning
+        return lightning[0], lightning[1]
 
     if "gfs" in sourceList:
         dist = np.maximum(
@@ -2727,6 +2737,12 @@ def build_current_section(
     currently["nearestStormBearing"] = (
         int(InterPcurrent[DATA_CURRENT["storm_dir"]])
         if not np.isnan(InterPcurrent[DATA_CURRENT["storm_dir"]])
+        else np.nan
+    )
+    # Recent satellite strikes within 15 km; missing outside satellite coverage
+    currently["lightningCount"] = (
+        int(lightning[2])
+        if lightning is not None and np.isfinite(lightning[2])
         else np.nan
     )
     currently["precipIntensity"] = minuteItems[0]["precipIntensity"]
