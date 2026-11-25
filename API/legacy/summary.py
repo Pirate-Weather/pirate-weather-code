@@ -58,20 +58,27 @@ def build_hourly_summary(
     hour_columns: HourColumns | None = None,
 ) -> tuple[str, str]:
     """Compute hourly summary/icon text. ``hour_columns`` (the forecast's
-    HourColumns, the same hours as ``hour_list_si``) saves building them."""
-    # The block text and icon are the most common hourly ones. most_common
-    # counts with a Counter, so a tie goes to the value of the earliest hour
-    # carrying a tied value; picking from a set made the winner depend on the
-    # process's string hash seed, so pods disagreed on the same request.
-    if time_machine:
-        return (
-            most_common(hour_text_list),
-            most_common(hour_icon_list),
-        )
-
+    HourColumns, the same hours as ``hour_list_si``) saves building them.
+    ``time_machine`` is a single-day (Time Machine or future-date) request."""
+    # Without summary text the block text and icon are the most common hourly
+    # ones. most_common counts with a Counter, so a tie goes to the value of
+    # the earliest hour carrying a tied value; picking from a set made the
+    # winner depend on the process's string hash seed, so pods disagreed on
+    # the same request.
     try:
         if summary_text:
-            next_24_hours = slice(base_time_offset_int, base_time_offset_int + 24)
+            if time_machine:
+                # A requested date is summarised as the forecast's next 24 hours
+                # are (#711), over the first 24 hours from its local midnight.
+                # Its periods are named as a daily summary's ("overnight", "in
+                # the morning"): the next-24-hours names ("tonight", "this
+                # morning") are relative to now, wrong for any other date.
+                first_hour = 0
+                period_mode = "day"
+            else:
+                first_hour = base_time_offset_int
+                period_mode = "hour"
+            next_24_hours = slice(first_hour, first_hour + 24)
             if hour_columns is not None:
                 next_24_hours = hour_columns.window(
                     next_24_hours.start, min(next_24_hours.stop, len(hour_columns))
@@ -82,7 +89,7 @@ def build_hourly_summary(
                 next_24_hours,
                 not is_all_night,
                 str(tz_name),
-                "hour",
+                period_mode,
                 icon,
                 unit_system,
             )
@@ -113,18 +120,22 @@ def build_daily_summary(
     logger: logging.Logger,
     loc_tag: str,
 ) -> tuple[str, str]:
-    """Compute daily summary/icon text."""
+    """Compute daily summary/icon text. ``time_machine`` is a single-day (Time
+    Machine or future-date) request."""
     # As for the hourly block, a tie goes to the earliest day's value.
-    if time_machine:
-        return (
-            most_common(day_text_list),
-            most_common(day_icon_list),
-        )
-
     try:
         if summary_text:
+            if time_machine and len(day_list_si) == 1:
+                # One requested day: the block summary is that day's summary.
+                return day_text_list[0], day_icon_list[0]
+            # Days of a requested range are named by weekday ("on Monday"), not
+            # relative to now ("today", "tomorrow") as a forecast's are.
             weekText, weekIcon = calculate_weekly_text(
-                day_list_si, str(tz_name), unit_system, icon
+                day_list_si,
+                str(tz_name),
+                unit_system,
+                icon,
+                relative_day_names=not time_machine,
             )
             return translation.translate(["sentence", weekText]), weekIcon
         return (

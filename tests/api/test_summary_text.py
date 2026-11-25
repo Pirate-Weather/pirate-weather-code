@@ -3,14 +3,19 @@
 import math
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
+from pirateweather_translations.dynamic_loader import load_translation
+from pirateweather_translations.translation import Translation
 
+from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
+from API.daily.builder import build_daily_section
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
     build_minutely_summary,
 )
-from API.PirateDailyText import calculate_day_text
+from API.PirateDailyText import HourColumns, calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateWeeklyText import calculate_weekly_text
 from tests.helpers.text import BASE_TIME, HOUR, make_hours
@@ -126,8 +131,8 @@ def test_minutely_summary_falls_back_when_text_fails():
 
 @pytest.mark.parametrize("first, second", [("rain", "wind"), ("wind", "rain")])
 def test_block_summary_ties_go_to_the_earliest_entry(first, second):
-    """Without summary text (and always for Time Machine) the hourly and daily
-    block text and icon are the most common entries. Picking them from a set
+    """Without summary text the hourly and daily block text and icon are the
+    most common entries. Picking them from a set
     let a tie be won by whichever value the process's string hash seed put
     first, so API pods returned different block icons for the same request.
     A tie must go to the earliest hour/day; both orders are checked so a
@@ -574,3 +579,121 @@ def test_rest_of_today_is_not_throughout_the_day(start_hour):
 
     # ["sentence", ["for-rest-of-day", <rain text>]]
     assert text[1][0] == "for-rest-of-day"
+
+
+SNOW = {
+    "precipType": "snow",
+    "snowIntensity": 1.5,
+    "snowAccumulation": 4.5,
+    "precipProbability": 0.9,
+    "cloudCover": 1.0,
+    "temperature": -3.0,
+    "dewPoint": -5.0,
+    "visibility": 3000,
+}
+
+
+def test_single_day_daily_summary_runs_midnight_to_midnight():
+    """A Time Machine or future-date day (#711) has its totals from midnight to
+    midnight, but its text and icon came from the forecast's 6am-6am window:
+    snow from midnight to 6am was in the day's snowAccumulation while the
+    summary read "Mostly cloudy". The window must also stop at midnight, not
+    describe the next day's 00:00 grid row (rain here).
+    """
+    times = np.arange(25) * HOUR
+    InterPhour = np.zeros((len(times), max(DATA_HOURLY.values()) + 1))
+    InterPhour[:, DATA_HOURLY["time"]] = times
+    InterPhour[:, DATA_HOURLY["cloud"]] = 0.8
+    InterPhour[:, DATA_HOURLY["prob"]] = 0.05
+    InterPhour[:, DATA_HOURLY["vis"]] = 16000
+    InterPhour[:, DATA_HOURLY["temp"]] = -3.0
+    InterPhour[:, DATA_HOURLY["dew"]] = -5.0
+    snow = slice(0, 6)
+    InterPhour[snow, DATA_HOURLY["type"]] = 1
+    InterPhour[snow, DATA_HOURLY["snow_intensity"]] = 1.5
+    InterPhour[snow, DATA_HOURLY["intensity"]] = 1.5
+    InterPhour[snow, DATA_HOURLY["snow"]] = 4.5
+    InterPhour[snow, DATA_HOURLY["prob"]] = 0.9
+    InterPhour[snow, DATA_HOURLY["cloud"]] = 1.0
+    InterPhour[24, DATA_HOURLY["type"]] = 4
+    InterPhour[24, DATA_HOURLY["rain_intensity"]] = 4.0
+    InterPhour[24, DATA_HOURLY["rain"]] = 4.0
+    InterPhour[24, DATA_HOURLY["prob"]] = 0.9
+    precip_types = ["snow"] * 6 + ["none"] * 18 + ["rain"]
+    # The grid's last row is the next day's (calculate_time_indexing)
+    day_index = (times >= 24 * HOUR).astype(int)
+
+    result = build_daily_section(
+        InterPhour=InterPhour,
+        hourlyDayIndex=day_index,
+        hourlyDay6amIndex=day_index,
+        hourlyHalfDayIndex=day_index,
+        hourlyHalfNightIndex=day_index,
+        hourlyHighIndex=day_index,
+        hourlyLowIndex=day_index,
+        daily_days=1,
+        prepAccumUnit=1.0,
+        prepIntensityUnit=1.0,
+        windUnit=1.0,
+        visUnits=1.0,
+        tempUnits=1.0,
+        extraVars=[],
+        summaryText=True,
+        translation=Translation(load_translation("en")),
+        is_all_night=False,
+        is_all_day=False,
+        tz_name="UTC",
+        icon="darksky",
+        unitSystem="si",
+        version=2,
+        timeMachine=True,
+        tmExtra=False,
+        day_array_grib=np.array([0, 24 * HOUR]),
+        day_array_6am_grib=np.array([6 * HOUR, 30 * HOUR]),
+        day_array_6pm_grib=np.array([18 * HOUR]),
+        InterSday=np.zeros((2, max(DATA_DAY.values()) + 1)),
+        hourList_si=[{"time": int(time)} for time in times],
+        pTypeMap=np.array(["none", "snow", "ice", "sleet", "rain", "mixed"]),
+        pTextMap=np.array(["None", "Snow", "Ice", "Sleet", "Rain", "Mixed"]),
+        logger=MagicMock(),
+        loc_tag="test",
+        include_day_night=False,
+        hour_columns=HourColumns.from_interphour(InterPhour, times, precip_types),
+        singleDay=True,
+    )
+
+    day = result.day_list[0]
+    assert day["summary"].startswith("Light snow overnight.")
+    assert "rain" not in day["summary"].lower()
+    assert day["icon"] == "snow"
+
+
+def test_single_day_hourly_summary_is_the_forecast_sentence():
+    """A Time Machine or future-date hourly.summary (#711) was the most common
+    hourly title ("Mostly Cloudy"), leaving out a night of snow. It must be the
+    forecast's 24-hour summary sentence, over the requested day from local
+    midnight (not from the requested hour), and without the next-24-hours
+    names relative to now: "tonight" is wrong for a date last year.
+    """
+    hours = make_hours(25, BASE_TIME, cloudCover=0.8, temperature=-3.0)
+    for hour in hours[:6]:
+        hour.update(SNOW)
+
+    text, icon = build_hourly_summary(
+        summary_text=True,
+        translation=Translation(load_translation("en")),
+        hour_list_si=hours,
+        is_all_night=False,
+        tz_name="UTC",
+        icon="darksky",
+        unit_system="si",
+        hour_text_list=["Mostly Cloudy"] * len(hours),
+        hour_icon_list=["partly-cloudy-day"] * len(hours),
+        time_machine=True,
+        base_time_offset_int=12,
+        logger=MagicMock(),
+        loc_tag="test",
+    )
+
+    assert text.startswith("Light snow overnight.")
+    assert icon == "snow"

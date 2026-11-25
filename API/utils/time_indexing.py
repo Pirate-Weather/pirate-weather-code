@@ -22,7 +22,8 @@ class TimeIndexing:
     day_array_6pm_grib: np.ndarray
     # Midnight to midnight days (daily accumulations and means)
     hourly_day_index: np.ndarray
-    # 6am to 6am days (daily summary, icon and precipitation type)
+    # 6am to 6am days (daily summary, icon and precipitation type); midnight to
+    # midnight for Time Machine and future-date requests
     hourly_day_6am_index: np.ndarray
     hourly_high_index: np.ndarray
     hourly_low_index: np.ndarray
@@ -151,6 +152,13 @@ def calculate_time_indexing(
         hourly_day_index[missing_day] = hourly_day_index[idx[missing_day]]
         # If there are still missing days (at the beginning), use the first day.
         hourly_day_index[hourly_day_index == NO_DAY_INDEX] = 0
+
+    if time_machine:
+        # A multi-day Time Machine or future-date request describes each local
+        # day midnight to midnight (its daily summary text), so the daily icon
+        # and precipitation type use that window too. The grid ends an hour
+        # after the last day's midnight, so that day has no 6am-6am window.
+        hourly_day_6am_index = hourly_day_index.copy()
 
     return TimeIndexing(
         day_array_grib=day_array_grib,

@@ -595,12 +595,20 @@ def _calculate_prob(
 
 
 def _process_ecmwf_ptype(ecmwfMinuteInterpolation, InterTminute):
-    """Process ECMWF precipitation type data."""
+    """Process ECMWF precipitation type data (GRIB table 4.201 codes, grouped as
+    GRIB_PTYPE_TABLE in data_inputs: 8 ice pellets -> sleet, 3 freezing rain
+    -> ice)."""
     ptype_ecmwf = ecmwfMinuteInterpolation[:, ECMWF["ptype"]]
-    InterTminute[:, 1] = np.where(np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0)
-    InterTminute[:, 2] = np.where(np.isin(ptype_ecmwf, [4, 8, 10]), 1, 0)
-    InterTminute[:, 3] = np.where(np.isin(ptype_ecmwf, [3, 12]), 1, 0)
-    InterTminute[:, 4] = np.where(np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0)
+    InterTminute[:, PRECIP_IDX["snow"]] = np.where(
+        np.isin(ptype_ecmwf, [5, 6, 9]), 1, 0
+    )
+    InterTminute[:, PRECIP_IDX["sleet"]] = np.where(
+        np.isin(ptype_ecmwf, [4, 8, 10]), 1, 0
+    )
+    InterTminute[:, PRECIP_IDX["ice"]] = np.where(np.isin(ptype_ecmwf, [3, 12]), 1, 0)
+    InterTminute[:, PRECIP_IDX["rain"]] = np.where(
+        np.isin(ptype_ecmwf, [1, 2, 7, 11]), 1, 0
+    )
 
 
 def _process_dwd_mosmix_ptype(dwd_mosmix_MinuteInterpolation, InterTminute):
@@ -608,22 +616,30 @@ def _process_dwd_mosmix_ptype(dwd_mosmix_MinuteInterpolation, InterTminute):
     ptype_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]]
     temp_dwd = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]]
     mapped = map_wmo4677_to_ptype(np.round(ptype_dwd), temperature_c=temp_dwd)
-    InterTminute[:, 1] = (mapped == 1).astype(int)
-    InterTminute[:, 2] = (mapped == 2).astype(int)
-    InterTminute[:, 3] = (mapped == 3).astype(int)
-    InterTminute[:, 4] = (mapped == 4).astype(int)
+    _set_ptype_categories(mapped, InterTminute)
+
+
+def _process_component_ptype(minuteInterpolation, index_map, InterTminute):
+    """Precipitation type columns from a model's categorical components (GFS,
+    GEFS, HRRR, RRFS: CSNOW, CICEP, CFRZR, CRAIN; NBM: type probabilities).
+    The "ice" component is ice pellets, shown as sleet; freezing rain goes to
+    PRECIP_IDX["ice"] (Freezing Rain), as in the Canadian mappings."""
+    InterTminute[:, PRECIP_IDX["snow"]] = minuteInterpolation[:, index_map["snow"]]
+    InterTminute[:, PRECIP_IDX["sleet"]] = minuteInterpolation[:, index_map["ice"]]
+    InterTminute[:, PRECIP_IDX["ice"]] = minuteInterpolation[
+        :, index_map["freezing_rain"]
+    ]
+    InterTminute[:, PRECIP_IDX["rain"]] = minuteInterpolation[:, index_map["rain"]]
 
 
 def _process_gfs_ptype(gfsMinuteInterpolation, InterTminute):
     """Process GFS precipitation type data."""
-    for i in [GFS["snow"], GFS["ice"], GFS["freezing_rain"], GFS["rain"]]:
-        InterTminute[:, i - 11] = gfsMinuteInterpolation[:, i]
+    _process_component_ptype(gfsMinuteInterpolation, GFS, InterTminute)
 
 
 def _process_gefs_ptype(gefsMinuteInterpolation, InterTminute):
     """Process GEFS precipitation type data."""
-    for i in [GEFS["snow"], GEFS["ice"], GEFS["freezing_rain"], GEFS["rain"]]:
-        InterTminute[:, i - 3] = gefsMinuteInterpolation[:, i]
+    _process_component_ptype(gefsMinuteInterpolation, GEFS, InterTminute)
 
 
 def _set_ptype_categories(mapped_ptype, InterTminute):
@@ -644,26 +660,44 @@ def _process_gdps_ptype(gdpsMinuteInterpolation, InterTminute):
     _set_ptype_categories(mapped, InterTminute)
 
 
+def _process_canadian_ensemble_ptype(minuteInterpolation, index_map, InterTminute):
+    """GEPS or REPS precipitation type from the members' type votes, each
+    type's share of the members, used like GEFS's categorical shares (the most
+    votes wins). Minutes without votes (NaN, from a store before them, or no
+    wet member) take the type of the largest type mean."""
+    InterTminute[:, PRECIP_IDX["snow"]] = minuteInterpolation[
+        :, index_map["snow_votes"]
+    ]
+    InterTminute[:, PRECIP_IDX["sleet"]] = minuteInterpolation[
+        :, index_map["ice_votes"]
+    ]
+    InterTminute[:, PRECIP_IDX["ice"]] = minuteInterpolation[
+        :, index_map["freezing_rain_votes"]
+    ]
+    InterTminute[:, PRECIP_IDX["rain"]] = minuteInterpolation[
+        :, index_map["rain_votes"]
+    ]
+    no_votes = ~(InterTminute[:, 1:5].sum(axis=1) > 0)
+    if no_votes.any():
+        mapped = map_ensemble_precip_rates_to_ptype(
+            rain=minuteInterpolation[no_votes, index_map["rain"]],
+            ice=minuteInterpolation[no_votes, index_map["ice"]],
+            freezing_rain=minuteInterpolation[no_votes, index_map["freezing_rain"]],
+            snow=minuteInterpolation[no_votes, index_map["snow"]],
+        )
+        fallback = np.zeros((int(no_votes.sum()), InterTminute.shape[1]))
+        _set_ptype_categories(mapped, fallback)
+        InterTminute[no_votes] = fallback
+
+
 def _process_geps_ptype(gepsMinuteInterpolation, InterTminute):
     """Process GEPS ensemble precipitation component data."""
-    mapped = map_ensemble_precip_rates_to_ptype(
-        rain=gepsMinuteInterpolation[:, GEPS["rain"]],
-        ice=gepsMinuteInterpolation[:, GEPS["ice"]],
-        freezing_rain=gepsMinuteInterpolation[:, GEPS["freezing_rain"]],
-        snow=gepsMinuteInterpolation[:, GEPS["snow"]],
-    )
-    _set_ptype_categories(mapped, InterTminute)
+    _process_canadian_ensemble_ptype(gepsMinuteInterpolation, GEPS, InterTminute)
 
 
 def _process_reps_ptype(repsMinuteInterpolation, InterTminute):
     """Process REPS ensemble precipitation component data."""
-    mapped = map_ensemble_precip_rates_to_ptype(
-        rain=repsMinuteInterpolation[:, REPS["rain"]],
-        ice=repsMinuteInterpolation[:, REPS["ice"]],
-        freezing_rain=repsMinuteInterpolation[:, REPS["freezing_rain"]],
-        snow=repsMinuteInterpolation[:, REPS["snow"]],
-    )
-    _set_ptype_categories(mapped, InterTminute)
+    _process_canadian_ensemble_ptype(repsMinuteInterpolation, REPS, InterTminute)
 
 
 def _process_aigefs_ptype_with_temperature(
@@ -681,9 +715,13 @@ def _process_aigefs_ptype_with_temperature(
     precip_mask |= (
         np.nan_to_num(aigefsMinuteInterpolation[:, GEFS["prob"]], nan=0.0) > 0
     )
-    InterTminute[:, 1] = (precip_mask & (temp <= TEMP_THRESHOLD_SNOW_C)).astype(int)
-    InterTminute[:, 4] = (precip_mask & (temp >= TEMP_THRESHOLD_RAIN_C)).astype(int)
-    InterTminute[:, 3] = (
+    InterTminute[:, PRECIP_IDX["snow"]] = (
+        precip_mask & (temp <= TEMP_THRESHOLD_SNOW_C)
+    ).astype(int)
+    InterTminute[:, PRECIP_IDX["rain"]] = (
+        precip_mask & (temp >= TEMP_THRESHOLD_RAIN_C)
+    ).astype(int)
+    InterTminute[:, PRECIP_IDX["sleet"]] = (
         precip_mask & (temp > TEMP_THRESHOLD_SNOW_C) & (temp < TEMP_THRESHOLD_RAIN_C)
     ).astype(int)
 
@@ -709,10 +747,14 @@ def _era5_covers_minutes(era5_MinuteInterpolation):
 def _process_era5_ptype(era5_MinuteInterpolation, InterTminute):
     """Process ERA5 precipitation type data."""
     ptype_era5 = era5_MinuteInterpolation[:, ERA5["precipitation_type"]]
-    InterTminute[:, 1] = np.where(np.isin(ptype_era5, [5, 6, 9]), 1, 0)
-    InterTminute[:, 2] = np.where(np.isin(ptype_era5, [4, 8, 10]), 1, 0)
-    InterTminute[:, 3] = np.where(np.isin(ptype_era5, [3, 12]), 1, 0)
-    InterTminute[:, 4] = np.where(np.isin(ptype_era5, [1, 2, 7, 11]), 1, 0)
+    InterTminute[:, PRECIP_IDX["snow"]] = np.where(np.isin(ptype_era5, [5, 6, 9]), 1, 0)
+    InterTminute[:, PRECIP_IDX["sleet"]] = np.where(
+        np.isin(ptype_era5, [4, 8, 10]), 1, 0
+    )
+    InterTminute[:, PRECIP_IDX["ice"]] = np.where(np.isin(ptype_era5, [3, 12]), 1, 0)
+    InterTminute[:, PRECIP_IDX["rain"]] = np.where(
+        np.isin(ptype_era5, [1, 2, 7, 11]), 1, 0
+    )
 
 
 def _calculate_precip_type_probs(
@@ -763,13 +805,7 @@ def _calculate_precip_type_probs(
     if rrfsSubHInterpolation is not None and not np.all(
         np.isnan(rrfsSubHInterpolation[:, RRFS_SUBH["rain"]])
     ):
-        for i in [
-            RRFS_SUBH["snow"],
-            RRFS_SUBH["ice"],
-            RRFS_SUBH["freezing_rain"],
-            RRFS_SUBH["rain"],
-        ]:
-            InterTminute[:, i - 7] = rrfsSubHInterpolation[:, i]
+        _process_component_ptype(rrfsSubHInterpolation, RRFS_SUBH, InterTminute)
         used.add("rrfssubh")
         return InterTminute
 
@@ -818,21 +854,12 @@ def _calculate_precip_type_probs(
     # Process high-priority conventional sources next (same for all regions).
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         used.add("hrrrsubh")
-        for i in [
-            HRRR_SUBH["snow"],
-            HRRR_SUBH["ice"],
-            HRRR_SUBH["freezing_rain"],
-            HRRR_SUBH["rain"],
-        ]:
-            InterTminute[:, i - 7] = hrrrSubHInterpolation[:, i]
+        _process_component_ptype(hrrrSubHInterpolation, HRRR_SUBH, InterTminute)
         return InterTminute
 
     if "nbm" in source_list and nbmMinuteInterpolation is not None:
         used.add("nbm")
-        InterTminute[:, 1] = nbmMinuteInterpolation[:, NBM["snow"]]
-        InterTminute[:, 2] = nbmMinuteInterpolation[:, NBM["ice"]]
-        InterTminute[:, 3] = nbmMinuteInterpolation[:, NBM["freezing_rain"]]
-        InterTminute[:, 4] = nbmMinuteInterpolation[:, NBM["rain"]]
+        _process_component_ptype(nbmMinuteInterpolation, NBM, InterTminute)
         return InterTminute
 
     # Try each source in priority order
@@ -1468,12 +1495,12 @@ def build_minutely_block(
         gefsMinuteInterpolation,
         gfsMinuteInterpolation,
         gdpsMinuteInterpolation,
-        gepsMinuteInterpolation,
-        repsMinuteInterpolation,
-        era5_MinuteInterpolation,
-        lat,
-        lon,
-        prioritize_ai_models,
+        repsMinuteInterpolation=repsMinuteInterpolation,
+        gepsMinuteInterpolation=gepsMinuteInterpolation,
+        era5_MinuteInterpolation=era5_MinuteInterpolation,
+        lat=lat,
+        lon=lon,
+        prioritize_ai_models=prioritize_ai_models,
         rrfsSubHInterpolation=rrfsSubHInterpolation,
         used=used_sources,
     )

@@ -571,6 +571,7 @@ class HourColumns:
         "k_index",
         "lifted_index",
         "liquid",
+        "mixed_freezing_rain",
         "pop",
         "precip_accum",
         "precip_type",
@@ -611,6 +612,7 @@ class HourColumns:
         cin,
         vertical_velocity,
         k_index,
+        mixed_freezing_rain=None,
     ):
         as_float = np.asarray
         wind = as_float(wind, dtype=float)
@@ -642,6 +644,13 @@ class HourColumns:
         self.liquid = liquid.tolist()
         self.snow = snow.tolist()
         self.ice = ice.tolist()
+        # The freezing-rain part of a mixed GEPS/REPS hour's ice (the rest is
+        # sleet); none without it (hour dicts)
+        self.mixed_freezing_rain = (
+            [0.0] * len(self.time)
+            if mixed_freezing_rain is None
+            else as_float(mixed_freezing_rain, dtype=float).tolist()
+        )
         self.precip_type = list(precip_type)
         self.vis = vis.tolist()
         self.smoke = smoke.tolist()
@@ -737,6 +746,7 @@ class HourColumns:
             cin=col("convective_inhibition"),
             vertical_velocity=col("vertical_velocity"),
             k_index=col("k_index"),
+            mixed_freezing_rain=col("mixed_freezing_rain"),
         )
 
     def __len__(self):
@@ -1039,11 +1049,19 @@ def _window_accumulation(window):
             kind, error_mm = hour_error
             errors[kind] += error_mm
             has_error_data[kind] = True
+    # A mixed hour's ice is sleet apart from its freezing-rain part (mixed
+    # GEPS/REPS hours)
     frzrain_accum = _sequential_sum(
-        cols.ice[row] for row in rows if cols.precip_type[row] == PRECIP_TYPES["ice"]
+        cols.ice[row]
+        if cols.precip_type[row] == PRECIP_TYPES["ice"]
+        else cols.mixed_freezing_rain[row]
+        for row in rows
+        if cols.precip_type[row] in (PRECIP_TYPES["ice"], PRECIP_TYPES["mixed"])
     )
     sleet_accum = _sequential_sum(
-        cols.ice[row]
+        cols.ice[row] - cols.mixed_freezing_rain[row]
+        if cols.precip_type[row] == PRECIP_TYPES["mixed"]
+        else cols.ice[row]
         for row in rows
         if cols.precip_type[row] in (PRECIP_TYPES["sleet"], PRECIP_TYPES["mixed"])
     )

@@ -540,7 +540,9 @@ def calculate_temp_summary(highTemp, lowTemp, weekArr, unitSystem="si"):
         ]
 
 
-def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
+def calculate_weekly_text(
+    weekArr, timeZone, unitSystem="si", icon="darksky", relative_day_names=True
+):
     """
     Calculates the weekly summary given an array of weekdays.
     All inputs are expected in SI units (mm/h for intensity, Celsius for temperature).
@@ -551,6 +553,9 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
     - timeZone (string): The timezone for the current location
     - unitSystem (str): Unit system for display ("us", "si", "ca", "uk")
     - icon (str): Which icon set to use - Dark Sky or Pirate Weather
+    - relative_day_names (bool): Name the days from today ("today", "tomorrow",
+      "next Monday"), as a forecast starting today does. False names each day
+      by its weekday, for a requested range of dates (Time Machine, future dates).
 
     Returns:
     - c_text (arr): The precipitation and temperature summary for the week.
@@ -583,8 +588,13 @@ def calculate_weekly_text(weekArr, timeZone, unitSystem="si", icon="darksky"):
         if np.isnan(day["precipProbability"]):
             day["precipProbability"] = DEFAULT_POP
 
+        if not relative_day_names:
+            # A range of up to eight days can only repeat its first weekday, on
+            # its last day, which is then "next Monday" as in a forecast's week.
+            if idx > 0 and weekday == week_days[0][1]:
+                weekday = "next-" + weekday
         # First index is always today, second index is always tomorrow and the last index has the next- text at the start
-        if idx == 0:
+        elif idx == 0:
             weekday = "today"
         elif idx == 1:
             weekday = "tomorrow"

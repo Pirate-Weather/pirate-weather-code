@@ -100,6 +100,9 @@ ALERT_COLUMNS = [
     "geocode_name",
     "geocode_value",
 ]
+# Fields of a grid-cell alert entry that API/alerts.py reads (event through URL);
+# the geocode fields after them are written but not served.
+WMO_ALERT_API_FIELDS = 7
 
 # The alert data files live with the API package, one level up from ingest/
 DATA_DIR = os.path.join(
@@ -858,8 +861,22 @@ def main() -> None:
         + points_in_polygons["geocode_value"].astype(str)
     )
 
-    # Combine the formatted strings using "~" as a spacer, since it doesn't seem to be used in CAP messages
-    df = points_in_polygons.groupby("INDEX").agg({"string": "~".join}).reset_index()
+    # Combine the formatted strings using "~" as a spacer, since it doesn't seem to be used in CAP messages.
+    # Keep one entry per alert as the API shows it: it reads only the first
+    # WMO_ALERT_API_FIELDS fields, so entries differing only in their geocodes
+    # (e.g. one CAP area per MeteoAlarm region) would be shown as duplicates.
+    def join_unique_alerts(values: pd.Series) -> str:
+        unique_alerts = {}
+        for value in values:
+            api_fields = "}{".join(value.split("}{")[:WMO_ALERT_API_FIELDS])
+            unique_alerts.setdefault(api_fields, value)
+        return "~".join(unique_alerts.values())
+
+    df = (
+        points_in_polygons.groupby("INDEX")
+        .agg({"string": join_unique_alerts})
+        .reset_index()
+    )
 
     # Merge back into primary geodataframe
     gridPointsSeries = gridPointsSeries.merge(df, on="INDEX", how="left")

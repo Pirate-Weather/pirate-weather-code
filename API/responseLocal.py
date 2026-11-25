@@ -463,9 +463,10 @@ async def PW_Forecast(
     timeMachine = initial.time_machine
     futureDay = initial.future_day
     # Time Machine and future requests (#689) return one local day: hourly from
-    # local midnight, a single daily point, time-machine style summaries. A future
-    # day is still a forecast, so the grid reads, sources, hourly and current
-    # fields stay those of a forecast (timeMachine).
+    # local midnight, a single daily point, and summaries of the requested
+    # day(s) midnight to midnight (#711). A future day is still a forecast, so
+    # the grid reads, sources, hourly and current fields stay those of a
+    # forecast (timeMachine).
     singleDay = timeMachine or futureDay
     loc_tag = initial.loc_tag
     timing_tracker = initial.timing_tracker
@@ -1070,8 +1071,9 @@ async def PW_Forecast(
             used_hours[: len(aq_hours), USED_SOURCE_COLUMN[aq_source]] |= aq_hours
 
     # The hourly response objects and their text are only needed for the hours
-    # returned. Time Machine and the legacy summaries (no summary text) take the
-    # most common text over every hour, so those build them all.
+    # returned. The legacy summaries (no summary text) take the most common text
+    # over every hour, and a single-day request returns the grid from its first
+    # hour, so those build them all.
     if singleDay or not summaryText:
         hourly_display_hours = None
     elif exHourly == 1:
@@ -1167,6 +1169,7 @@ async def PW_Forecast(
             display_hours=hourly_display_hours,
             input_sources=input_sources,
             used_hours=used_hours,
+            ensemble_precip_rates=inputs["ensemble_precip_rates"],
         )
 
     pTypeMap = np.array(
@@ -1245,6 +1248,7 @@ async def PW_Forecast(
             else int(hour_array_grib[int(baseTimeOffset)]),
             precip_member_masks=inputs["precip_member_masks"],
             used_sources=daily_used,
+            singleDay=singleDay,
         )
     dayList = daily_section.day_list
     dayList_si = daily_section.day_list_si

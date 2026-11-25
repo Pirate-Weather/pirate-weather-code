@@ -489,6 +489,12 @@ REPS = {
     "rain": 6,
     "snow": 7,
     "member_mask_0": 8,
+    # Share of all members whose dominant type this is (wet members only);
+    # NaN in stores from before the votes, which then type by the means
+    "freezing_rain_votes": 9,
+    "ice_votes": 10,
+    "rain_votes": 11,
+    "snow_votes": 12,
 }
 
 GEPS = {
@@ -500,6 +506,12 @@ GEPS = {
     "rain": 6,
     "snow": 7,
     "member_mask_0": 8,
+    # Share of all members whose dominant type this is (wet members only);
+    # NaN in stores from before the votes, which then type by the means
+    "freezing_rain_votes": 9,
+    "ice_votes": 10,
+    "rain_votes": 11,
+    "snow_votes": 12,
 }
 
 # Sources that can satisfy a forecast or Time Machine request, excluding

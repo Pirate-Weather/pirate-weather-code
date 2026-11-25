@@ -30,8 +30,10 @@ CAP_XML = """
 """
 
 
-def _mock_downloads(monkeypatch, feed_xml=None, current=True, extra_feeds=None):
-    """Serve a one-agency WMO catalog whose feed(s) point at CAP_XML, offline."""
+def _mock_downloads(
+    monkeypatch, feed_xml=None, current=True, extra_feeds=None, cap_xml=CAP_XML
+):
+    """Serve a one-agency WMO catalog whose feed(s) point at cap_xml, offline."""
     calls = []
     feed_url = "https://agency.example/feed"
     cap_url = "https://agency.example/alert.xml"
@@ -60,7 +62,7 @@ def _mock_downloads(monkeypatch, feed_xml=None, current=True, extra_feeds=None):
     async def fetch_text(session, url, timeout):
         calls.append(url)
         assert url in {*feeds, cap_url}
-        return feeds.get(url, CAP_XML)
+        return feeds.get(url, cap_xml)
 
     monkeypatch.setattr(wmo, "_fetch_json", fetch_json)
     monkeypatch.setattr(wmo, "_fetch_text", fetch_text)
@@ -169,25 +171,34 @@ def test_empty_ingest_keeps_alert_columns(monkeypatch):
     assert set(result.columns) == {*wmo.ALERT_COLUMNS, "geometry"}
 
 
+CAP_AREA = CAP_XML[CAP_XML.index("    <area>") : CAP_XML.index("  </info>")]
+INSIDE_CELL = (
+    "Wind warning}{Strong winds expected.}{Test region}"
+    "{2026-10-14T10:00:00+00:00}{2026-10-15T10:00:00+00:00}{Severe}"
+    "{https://agency.example/alert.xml}{}{"
+)
+
+
 @pytest.mark.parametrize(
-    ("current", "inside_cell"),
+    ("current", "cap_xml", "inside_cell"),
     [
-        pytest.param(False, "", id="no-alerts-blank-grid"),
+        pytest.param(False, CAP_XML, "", id="no-alerts-blank-grid"),
+        pytest.param(True, CAP_XML, INSIDE_CELL, id="alert-written-inside-polygon"),
         pytest.param(
             True,
-            "Wind warning}{Strong winds expected.}{Test region}"
-            "{2026-10-14T10:00:00+00:00}{2026-10-15T10:00:00+00:00}{Severe}"
-            "{https://agency.example/alert.xml}{}{",
-            id="alert-written-inside-polygon",
+            CAP_XML.replace(CAP_AREA, CAP_AREA + CAP_AREA),
+            INSIDE_CELL,
+            id="repeated-area-written-once",
         ),
     ],
 )
-def test_main_writes_alert_grid(tmp_path, monkeypatch, current, inside_cell):
+def test_main_writes_alert_grid(tmp_path, monkeypatch, current, cap_xml, inside_cell):
     """Protect the WMO_Alerts.zarr contract the API reads: each grid cell holds
-    the "}{"-delimited fields of every alert whose polygon contains it, and
+    the "}{"-delimited fields of every alert whose polygon contains it, once
+    even when a CAP repeats an area (else the API shows duplicate alerts), and
     cells outside all alerts (or every cell when nothing is active) are "".
     """
-    _mock_downloads(monkeypatch, RSS_FEED, current=current)
+    _mock_downloads(monkeypatch, RSS_FEED, current=current, cap_xml=cap_xml)
     process_dir = tmp_path / "process"
     forecast_dir = tmp_path / "forecast"
     monkeypatch.setattr(wmo, "forecast_process_dir", str(process_dir))

@@ -48,6 +48,15 @@ LIGHTNING_MAX_AGE_SECONDS = 20 * 60
 # GEPS, REPS) when its hourly precipitation rate exceeds this (mm/h).
 ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H = 0.1
 
+# GEPS and REPS have no categorical precipitation type. Their ingests give each
+# member above ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H one vote for its dominant type
+# (AFRAIN_Prob, AICEP_Prob, ARAIN_Prob, ASNOW_Prob: each type's share of all
+# members). The API calls an hour mixed when the runner-up type has at least this
+# share of the wet members' votes: the leading type then has at most twice its
+# votes, so the members disagree too much for either type alone to describe the
+# hour, while a lone dissenting member among four or more wet ones does not count.
+ENSEMBLE_MIXED_RUNNER_UP_VOTE_SHARE = 1 / 3
+
 # Per-hour ensemble member bitmasks (Precipitation_Member_Mask_<word>): bit m of
 # word w is set when member 24 w + m exceeds ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H.
 # The words are float32 integers, exact below 2^24, so 24 members per word. The

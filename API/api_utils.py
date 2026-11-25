@@ -21,7 +21,10 @@ from API.constants.api_const import (
     TEMP_THRESHOLD_WMO_FROZEN_C,
     WET_BULB_RAIN_SNOW_THRESHOLD_C,
 )
-from API.constants.shared_const import MISSING_DATA
+from API.constants.shared_const import (
+    ENSEMBLE_MIXED_RUNNER_UP_VOTE_SHARE,
+    MISSING_DATA,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -678,13 +681,14 @@ def _lookup_precip_codes(codes: np.ndarray, table: np.ndarray) -> np.ndarray:
 
 
 # WMO 4677 present-weather codes (50-99) grouped as documented in
-# map_wmo4677_to_ptype: 1 snow, 2 ice, 3 freezing, 4 rain.
+# map_wmo4677_to_ptype. As everywhere internally (PRECIP_IDX), "ice" is freezing
+# rain (shown as Freezing Rain) and "sleet" is ice pellets (shown as Sleet).
 WMO4677_PTYPE_TABLE = _precip_code_table(
     {
-        1: list(range(70, 76)) + [83, 84, 85, 86, 93, 94],
-        2: list(range(76, 80)) + [87, 88, 89, 90, 96, 99],
-        3: [56, 57, 66, 67],
-        4: (
+        PRECIP_IDX["snow"]: list(range(70, 76)) + [83, 84, 85, 86, 93, 94],
+        PRECIP_IDX["sleet"]: list(range(76, 80)) + [87, 88, 89, 90, 96, 99],
+        PRECIP_IDX["ice"]: [56, 57, 66, 67],
+        PRECIP_IDX["rain"]: (
             list(range(50, 56))
             + list(range(58, 65))
             + [68, 69]
@@ -712,16 +716,16 @@ def map_wmo4677_to_ptype(
     """
     Map WMO 4677 present-weather codes (50-99) to internal precip type categories.
 
-    Returns an integer array with the following mapping:
+    Returns an integer array with the following mapping (PRECIP_IDX):
         0 -> none/other
         1 -> snow
-        2 -> ice (pellets, hail)
-        3 -> freezing rain/drizzle
+        2 -> ice (freezing rain/drizzle)
+        3 -> sleet (ice pellets, hail)
         4 -> rain
 
     The mapping follows the WMO code ranges and uses conservative grouping:
-        - Freezing drizzle/rain codes (56,57,66,67) -> freezing (3)
-        - Ice pellets / snow grains / hail-related codes (76-79, 87-90, 96-99) -> ice (2)
+        - Freezing drizzle/rain codes (56,57,66,67) -> ice (2)
+        - Ice pellets / snow grains / hail-related codes (76-79, 87-90, 96, 99) -> sleet (3)
         - Snow and snow showers (70-75, 83-86, 93-94) -> snow (1)
         - Rain and drizzle ranges, plus mixed codes -> rain (4)
 
@@ -758,10 +762,12 @@ def map_wmo4677_to_ptype(
             try:
                 # This will raise ValueError if shapes are incompatible for broadcasting
                 warm_mask = temp_arr > TEMP_THRESHOLD_WMO_FROZEN_C
-                # Override snow (1), ice (2), and freezing (3) to rain (4) when warm
-                frozen_precip_mask = np.isin(out, [1, 2, 3])
+                # Override snow, freezing rain and sleet to rain when warm
+                frozen_precip_mask = np.isin(
+                    out, [PRECIP_IDX["snow"], PRECIP_IDX["ice"], PRECIP_IDX["sleet"]]
+                )
                 override_mask = warm_mask & frozen_precip_mask
-                out[override_mask] = 4
+                out[override_mask] = PRECIP_IDX["rain"]
             except ValueError as e:
                 # Shapes incompatible for broadcasting - skip temperature validation
                 # This is expected when temperature data is unavailable or mismatched
@@ -818,6 +824,16 @@ def map_canadian_precip_type_to_ptype(
     out[nan_mask] = MISSING_DATA
 
     return out
+
+
+# Internal type of each GEPS/REPS precipitation component, in the column order
+# the ensemble mappings and the hourly mixed split use: snow (ASNOW), ice pellets
+# (AICEP, shown as sleet), freezing rain (AFRAIN, shown as freezing rain) and rain
+# (ARAIN).
+ENSEMBLE_COMPONENT_TYPES = np.array(
+    [PRECIP_IDX["snow"], PRECIP_IDX["sleet"], PRECIP_IDX["ice"], PRECIP_IDX["rain"]],
+    dtype=float,
+)
 
 
 def map_ensemble_precip_rates_to_ptype(
@@ -892,17 +908,8 @@ def map_ensemble_precip_rates_to_ptype(
     # air-temperature fallback, which calls anything between -1 and 1 C sleet.
     filled = np.nan_to_num(component_matrix, nan=0.0)
     strongest_idx = np.argmax(filled, axis=1)
-    component_types = np.array(
-        [
-            PRECIP_IDX["snow"],
-            PRECIP_IDX["sleet"],
-            PRECIP_IDX["ice"],
-            PRECIP_IDX["rain"],
-        ],
-        dtype=float,
-    )
     typed_mask = filled.max(axis=1) > PRECIP_NOISE_THRESHOLD_MMH
-    out[typed_mask] = component_types[strongest_idx[typed_mask]]
+    out[typed_mask] = ENSEMBLE_COMPONENT_TYPES[strongest_idx[typed_mask]]
 
     out[strong_count > 1] = PRECIP_IDX["mixed"]
 
@@ -910,6 +917,62 @@ def map_ensemble_precip_rates_to_ptype(
     all_nan_mask = np.all(np.isnan(component_matrix), axis=1)
     out[all_nan_mask] = MISSING_DATA
 
+    return out
+
+
+def map_ensemble_member_votes_to_ptype(
+    rain: np.ndarray,
+    ice: np.ndarray,
+    freezing_rain: np.ndarray,
+    snow: np.ndarray,
+    *,
+    rain_votes: np.ndarray,
+    ice_votes: np.ndarray,
+    freezing_rain_votes: np.ndarray,
+    snow_votes: np.ndarray,
+    member_count: int,
+) -> np.ndarray:
+    """GEPS and REPS precipitation type by member vote.
+
+    The ingests give every wet member one vote for its dominant type and store
+    each type's share of all members (``*_votes``); the rates are the type means
+    (mm/h). The type with the most votes wins, a tie going to the larger mean. The
+    hour is mixed when the runner-up type has at least
+    ``ENSEMBLE_MIXED_RUNNER_UP_VOTE_SHARE`` of the votes. A mean alone lets two
+    members with heavy freezing rain outweigh ten with light snow.
+
+    Hours without votes take the mean-based type
+    (``map_ensemble_precip_rates_to_ptype``, which also calls an hour mixed when
+    more than one mean is strong): NaN votes (a store from before the votes, or
+    the hour after the last lead) and hours where no member is wet.
+    """
+    out = map_ensemble_precip_rates_to_ptype(
+        rain=rain, ice=ice, freezing_rain=freezing_rain, snow=snow
+    )
+    # Same column order as ENSEMBLE_COMPONENT_TYPES. The shares are k /
+    # member_count, bitrounded in the store, so round them back to member counts.
+    counts = np.rint(
+        np.column_stack((snow_votes, ice_votes, freezing_rain_votes, rain_votes))
+        * member_count
+    )
+    total = counts.sum(axis=1)
+    voted = total > 0  # False for NaN votes
+    if not voted.any():
+        return out
+    counts = np.where(voted[:, np.newaxis], counts, 0.0)
+    rates = np.nan_to_num(
+        np.column_stack((snow, ice, freezing_rain, rain)).astype(float), nan=0.0
+    )
+    # Among the types with the most votes, the one with the largest mean
+    most_votes = counts == counts.max(axis=1, keepdims=True)
+    winner = np.argmax(np.where(most_votes, rates, -np.inf), axis=1)
+    out[voted] = ENSEMBLE_COMPONENT_TYPES[winner[voted]]
+
+    # Counts are whole members; the tolerance keeps a runner-up with exactly the
+    # threshold share (3 of 9 votes) from losing to float rounding
+    runner_up = np.sort(counts, axis=1)[:, -2]
+    mixed = voted & (runner_up >= ENSEMBLE_MIXED_RUNNER_UP_VOTE_SHARE * total - 1e-9)
+    out[mixed] = PRECIP_IDX["mixed"]
     return out
 
 

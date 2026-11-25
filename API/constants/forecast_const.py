@@ -105,6 +105,10 @@ DATA_HOURLY = {
     "vertical_velocity": 40,
     "convective_inhibition": 41,
     "k_index": 42,
+    # Internal only: the freezing-rain part (mm) of a mixed GEPS/REPS hour's ice
+    # accumulation, the rest being ice pellets, for the daily sleet / freezing
+    # rain split (other hours are all one or the other by their type)
+    "mixed_freezing_rain": 43,
 }
 
 # Daily column indexes
