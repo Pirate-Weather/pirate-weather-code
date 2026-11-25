@@ -428,17 +428,25 @@ jobs:
           aws ecs update-service --cluster PirateBackEc2 --service PirateDev --force-new-deployment
 
   restart_ovh_dev:
-    name: Restart dev on OVH
+    name: Restart dev on OVH (${{ matrix.stack }})
     # dev pushes only: a release publishes the release tag, which dev doesn't run.
     if: github.event_name == 'push'
     needs: [manifest_api]
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false # one stack failing shouldn't stop the other's restart
+      matrix:
+        include:
+          - stack: RBX
+            kubeconfig: OVH_RBX_DEV_KUBECONFIG
+          - stack: BHS
+            kubeconfig: OVH_BHS_DEV_KUBECONFIG
     steps:
       # The dev Deployment uses the :dev tag with imagePullPolicy Always, so a restart
-      # pulls the manifest just published. This credential can restart only that Deployment.
+      # pulls the manifest just published. Each credential can restart only that Deployment.
       - name: Restart the dev Deployment
         env:
-          KUBECONFIG_DATA: ${{ secrets.OVH_RBX_DEV_KUBECONFIG }}
+          KUBECONFIG_DATA: ${{ secrets[matrix.kubeconfig] }}
         run: |
           umask 077
           export KUBECONFIG="$RUNNER_TEMP/kubeconfig"
