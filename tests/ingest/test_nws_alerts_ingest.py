@@ -8,6 +8,7 @@ import tarfile
 
 import geopandas as gp
 import numpy as np
+import pytest
 import zarr
 from shapely.geometry import box
 
@@ -21,14 +22,18 @@ ORIGINAL_ID = "urn:oid:2.49.0.1.840.0.original.001.1"
 RESENT_ID = "urn:oid:2.49.0.1.840.0.resent.001.1"
 CORRECTION_ID = "urn:oid:2.49.0.1.840.0.correction.001.1"
 EXPIRATION = "2026-10-22T13:15:00-04:00"
+ORIGINAL_SENT = "2026-10-22T01:02:00-04:00"
 CORRECTION_EFFECTIVE = "2026-10-22T01:28:00-04:00"
 
-# A 2x2 grid; only (34.1, -84.5) is inside the zone polygons below.
+# A 2x2 grid: ZONE covers only cell [0, 0] (34.1, -84.5), OTHER_ZONE only
+# cell [1, 1] (35.0, -84.0).
 GRID_LONS = np.array([-84.5, -84.0])
 GRID_LATS = np.array([34.1, 35.0])
+ZONE = box(-84.7, 34.0, -84.3, 34.3)
+OTHER_ZONE = box(-84.2, 34.8, -83.8, 35.2)
 
 
-def _active_alert(cap_id, sent, references):
+def _active_alert(cap_id, sent, references, message_type="Alert"):
     """One JSON-LD record from api.weather.gov/alerts/active."""
     return {
         "id": cap_id,
@@ -38,6 +43,7 @@ def _active_alert(cap_id, sent, references):
         "description": "Relative humidities of 28 percent or less are expected.",
         "areaDesc": "Cherokee; Forsyth; Cobb",
         "severity": "Moderate",
+        "messageType": message_type,
         "sent": sent,
         "effective": sent,
         "expires": EXPIRATION,
@@ -53,30 +59,97 @@ def _empty_tar_gz():
     return buffer.getvalue()
 
 
-def test_resent_and_corrected_alert_written_once(tmp_path, monkeypatch):
-    """Protect the ingest/API alert contract against issue 698: NWS can keep an
-    alert, a RESENT copy and its correction active together (each its own CAP
-    message), and one alert can be listed on overlapping zone polygons. The
-    API must see exactly one alert in the cell, with the correction's time.
+@pytest.mark.parametrize(
+    ("shapefile_polygons", "active_alerts", "cell_times", "other_cell_times"),
+    [
+        # Issue 698: original, RESENT copy and correction all active, and the
+        # correction listed on overlapping polygons; one alert must remain.
+        pytest.param(
+            [
+                (ORIGINAL_ID, ZONE),
+                (RESENT_ID, ZONE),
+                (CORRECTION_ID, ZONE),
+                (CORRECTION_ID, box(-84.6, 34.05, -84.4, 34.2)),
+            ],
+            [
+                _active_alert(ORIGINAL_ID, ORIGINAL_SENT, []),
+                _active_alert(RESENT_ID, ORIGINAL_SENT, []),
+                _active_alert(
+                    CORRECTION_ID, CORRECTION_EFFECTIVE, [ORIGINAL_ID], "Update"
+                ),
+            ],
+            [CORRECTION_EFFECTIVE],
+            [],
+            id="resent-and-corrected",
+        ),
+        # Race between the two downloads: the update is active but has no
+        # shapefile polygons yet, so the original must keep covering its area.
+        pytest.param(
+            [(ORIGINAL_ID, ZONE)],
+            [
+                _active_alert(ORIGINAL_ID, ORIGINAL_SENT, []),
+                _active_alert(
+                    CORRECTION_ID, CORRECTION_EFFECTIVE, [ORIGINAL_ID], "Update"
+                ),
+            ],
+            [ORIGINAL_SENT],
+            [],
+            id="update-without-polygons-yet",
+        ),
+        # A cancellation needs no polygons of its own to remove the coverage.
+        pytest.param(
+            [(ORIGINAL_ID, ZONE)],
+            [
+                _active_alert(ORIGINAL_ID, ORIGINAL_SENT, []),
+                _active_alert(
+                    CORRECTION_ID, CORRECTION_EFFECTIVE, [ORIGINAL_ID], "Cancel"
+                ),
+            ],
+            [],
+            [],
+            id="cancelled",
+        ),
+        # A newer message with the same text on other polygons must not take
+        # the older message's alert away from cells only the older one covers.
+        pytest.param(
+            [(ORIGINAL_ID, ZONE), (CORRECTION_ID, OTHER_ZONE)],
+            [
+                _active_alert(ORIGINAL_ID, ORIGINAL_SENT, []),
+                _active_alert(CORRECTION_ID, CORRECTION_EFFECTIVE, []),
+            ],
+            [ORIGINAL_SENT],
+            [CORRECTION_EFFECTIVE],
+            id="same-text-other-polygons",
+        ),
+    ],
+)
+def test_nws_alert_duplicates_and_superseded_messages(
+    shapefile_polygons,
+    active_alerts,
+    cell_times,
+    other_cell_times,
+    tmp_path,
+    monkeypatch,
+):
+    """Protect the ingest/API alert contract against issue 698 and its fix:
+    NWS can keep an alert, a RESENT copy and its correction active together
+    (each its own CAP message), and one alert can be listed on overlapping zone
+    polygons. The API must see each alert once per cell, with the newest
+    message's time, without the duplicate handling removing real coverage.
     """
-    zone = box(-84.7, 34.0, -84.3, 34.3)
+    cap_ids, polygons = zip(*shapefile_polygons, strict=True)
     shapefile_rows = gp.GeoDataFrame(
         {
-            "CAP_ID": [ORIGINAL_ID, RESENT_ID, CORRECTION_ID, CORRECTION_ID],
+            "CAP_ID": list(cap_ids),
             "URL": "https://api.weather.gov/alerts/example",
             "EXPIRATION": EXPIRATION,
             "PROD_TYPE": "Special Weather Statement",
             "WFO": "KFFC",
             "SIG": "",
         },
-        geometry=[zone, zone, zone, box(-84.6, 34.05, -84.4, 34.2)],
+        geometry=list(polygons),
         crs="EPSG:4326",
     )
-    active_alerts = [
-        _active_alert(ORIGINAL_ID, "2026-10-22T01:02:00-04:00", []),
-        _active_alert(RESENT_ID, "2026-10-22T01:02:00-04:00", []),
-        _active_alert(CORRECTION_ID, CORRECTION_EFFECTIVE, [ORIGINAL_ID]),
-    ]
 
     class FakeWxAPI:
         def __init__(self, useragent_id):
@@ -128,16 +201,20 @@ def test_resent_and_corrected_alert_written_once(tmp_path, monkeypatch):
     published = forecast_dir / nws.ingestVersion
     version = json.loads((published / "NWS_Alerts.current.json").read_text())["store"]
     alert_grid = zarr.open_array(str(published / version), mode="r")
-    cell_alerts = alerts._read_nws_alerts(
-        lat=34.1,
-        az_lon=-84.5,
-        alerts_zarr=alert_grid,
-        now_utc=datetime.datetime(2026, 10, 22, 12, 0, tzinfo=datetime.UTC),
-        logger=logging.getLogger(__name__),
-        loc_tag="test",
-    )
 
-    assert len(cell_alerts) == 1
-    correction_time = datetime.datetime.fromisoformat(CORRECTION_EFFECTIVE)
-    assert cell_alerts[0]["time"] == int(correction_time.timestamp())
-    assert alert_grid[1, 1] == ""
+    def cell_alert_times(lat, lon):
+        cell_alerts = alerts._read_nws_alerts(
+            lat=lat,
+            az_lon=lon,
+            alerts_zarr=alert_grid,
+            now_utc=datetime.datetime(2026, 10, 22, 12, 0, tzinfo=datetime.UTC),
+            logger=logging.getLogger(__name__),
+            loc_tag="test",
+        )
+        return [alert["time"] for alert in cell_alerts]
+
+    def timestamps(times):
+        return [int(datetime.datetime.fromisoformat(t).timestamp()) for t in times]
+
+    assert cell_alert_times(34.1, -84.5) == timestamps(cell_times)
+    assert cell_alert_times(35.0, -84.0) == timestamps(other_cell_times)

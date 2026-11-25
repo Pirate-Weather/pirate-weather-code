@@ -166,16 +166,39 @@ def main() -> None:
     # each would otherwise be shown as its own alert (issue 698). Shapefile rows
     # for a superseded CAP_ID must go too, or the .cap fallback below would
     # fetch the old message and add it back.
-    superseded_cap_ids = {
-        reference["identifier"]
-        for references in nws_alert_df["references"]
-        if isinstance(references, list)
-        for reference in references
-    }
+    #
+    # The shapefile is fetched before the active list and is regenerated on its
+    # own cadence, so a new update can be listed as active before it has any
+    # shapefile polygons. Dropping the old message then would leave its area
+    # without an alert until the next run, so it is only dropped once a message
+    # replacing it has polygons, or when that message is a cancellation (which
+    # should remove the coverage).
+    shapefile_cap_ids = set(nws_alert_gdf["CAP_ID"])
+    superseded_cap_ids = set()
+    awaiting_geometry_cap_ids = set()
+    for cap_id, message_type, references in zip(
+        nws_alert_df["CAP_ID"],
+        nws_alert_df["messageType"],
+        nws_alert_df["references"],
+        strict=True,
+    ):
+        if not isinstance(references, list):
+            continue
+        referenced_cap_ids = {reference["identifier"] for reference in references}
+        if cap_id in shapefile_cap_ids or message_type == "Cancel":
+            superseded_cap_ids |= referenced_cap_ids
+        else:
+            awaiting_geometry_cap_ids |= referenced_cap_ids
+    kept_for_now = (awaiting_geometry_cap_ids - superseded_cap_ids) & shapefile_cap_ids
     n_superseded = nws_alert_df["CAP_ID"].isin(superseded_cap_ids).sum()
     nws_alert_df = nws_alert_df[~nws_alert_df["CAP_ID"].isin(superseded_cap_ids)]
     nws_alert_gdf = nws_alert_gdf[~nws_alert_gdf["CAP_ID"].isin(superseded_cap_ids)]
-    logger.info("NWS alerts: dropped %d superseded messages", n_superseded)
+    logger.info(
+        "NWS alerts: dropped %d superseded messages; kept %d whose update has no "
+        "shapefile polygons yet",
+        n_superseded,
+        len(kept_for_now),
+    )
 
     # Merge where available
     nws_alert_merged = nws_alert_gdf.merge(nws_alert_df, how="left", on="CAP_ID")
@@ -208,6 +231,15 @@ def main() -> None:
                 nws_alert_merged.loc[row, "severity"] = root.find(
                     ".//ns:info/ns:severity", namespaces=ns
                 ).text
+                # The times rank this message against others with the same text
+                # below, and "effective" is the onset the API shows. CAP makes
+                # <effective> optional; without it a message is effective when sent.
+                sent = root.find("ns:sent", namespaces=ns).text
+                effective_element = root.find(".//ns:info/ns:effective", namespaces=ns)
+                nws_alert_merged.loc[row, "sent"] = sent
+                nws_alert_merged.loc[row, "effective"] = (
+                    sent if effective_element is None else effective_element.text
+                )
 
             except (requests.RequestException, ET.ParseError, AttributeError):
                 nws_alert_merged.loc[row, "headline"] = nws_alert_merged.loc[
@@ -221,29 +253,25 @@ def main() -> None:
                 ]
                 nws_alert_merged.loc[row, "areaDesc"] = nws_alert_merged.loc[row, "WFO"]
                 nws_alert_merged.loc[row, "severity"] = nws_alert_merged.loc[row, "SIG"]
+                # The shapefile's issuance time stands in for both CAP times.
+                nws_alert_merged.loc[row, "sent"] = nws_alert_merged.loc[
+                    row, "ISSUANCE"
+                ]
+                nws_alert_merged.loc[row, "effective"] = nws_alert_merged.loc[
+                    row, "ISSUANCE"
+                ]
 
-    # Collapse messages that look the same to a user. Offices resend products
-    # ("RESENT", a new CAP_ID with the same text), and separate VTEC events can
-    # carry identical text; either way the API would show the same alert twice.
-    # Keep the most recently sent message (then the latest effective time), so a
-    # correction wins over the message it corrects. This works per CAP_ID, since
-    # one alert has a shapefile row per zone polygon and all of them are kept.
-    alerts_by_cap = nws_alert_merged.drop_duplicates(subset="CAP_ID").copy()
+    # Prepare the per-cell collapse of messages that look the same to a user
+    # (done after the spatial join below). Times are parsed and the display text
+    # numbered here, per shapefile row, so the collapse over the much larger
+    # joined table sorts and compares integers rather than long descriptions.
     for time_column in ("sent", "effective"):
-        alerts_by_cap[time_column + "_utc"] = pd.to_datetime(
-            alerts_by_cap[time_column], utc=True, errors="coerce", format="ISO8601"
+        nws_alert_merged[time_column + "_utc"] = pd.to_datetime(
+            nws_alert_merged[time_column], utc=True, errors="coerce", format="ISO8601"
         )
-    newest_first = alerts_by_cap.sort_values(
-        ["sent_utc", "effective_utc"], ascending=False, na_position="last"
-    )
-    kept_cap_ids = newest_first.drop_duplicates(subset=NWS_ALERT_DISPLAY_KEY)["CAP_ID"]
-    logger.info(
-        "NWS alerts: collapsed %d messages that repeat another alert's text; "
-        "%d alerts kept",
-        len(alerts_by_cap) - len(kept_cap_ids),
-        len(kept_cap_ids),
-    )
-    nws_alert_merged = nws_alert_merged[nws_alert_merged["CAP_ID"].isin(kept_cap_ids)]
+    nws_alert_merged["display_id"] = nws_alert_merged.groupby(
+        NWS_ALERT_DISPLAY_KEY, dropna=False, sort=False
+    ).ngroup()
 
     # Convert to geodataframe
     nws_alert_merged_gdf = gp.GeoDataFrame(nws_alert_merged, geometry="geometry_x")
@@ -261,6 +289,30 @@ def main() -> None:
     gridPointsSeries["INDEX"] = gridPointsSeries.index
     points_in_polygons = gp.sjoin(
         gridPointsSeries, nws_alert_merged_gdf, predicate="within", how="inner"
+    )
+
+    # Collapse messages that look the same to a user. Offices resend products
+    # ("RESENT", a new CAP_ID with the same text), and separate VTEC events can
+    # carry identical text; either way the API would show the same alert twice.
+    # In each grid cell keep the most recently sent message (then the latest
+    # effective time), so a correction wins over the message it corrects. This
+    # is per cell, not per message: a newer message with the same text can cover
+    # different polygons, and cells only the older one covers keep its alert.
+    # Only the key columns are sorted, so the join (millions of rows with every
+    # alert field) is not copied a second time.
+    points_in_polygons = points_in_polygons.reset_index(drop=True)
+    newest_first = points_in_polygons[
+        ["INDEX", "display_id", "sent_utc", "effective_utc"]
+    ].sort_values(["sent_utc", "effective_utc"], ascending=False, na_position="last")
+    repeated_in_cell = newest_first.duplicated(subset=["INDEX", "display_id"])
+    n_joined = len(points_in_polygons)
+    # sort_index restores the join order, which the cell strings below keep.
+    points_in_polygons = points_in_polygons[~repeated_in_cell.sort_index().to_numpy()]
+    logger.info(
+        "NWS alerts: collapsed %d of %d grid-cell entries that repeat another "
+        "alert's text",
+        n_joined - len(points_in_polygons),
+        n_joined,
     )
 
     # Create a formatted string to save all relevant fields in the zarr array.

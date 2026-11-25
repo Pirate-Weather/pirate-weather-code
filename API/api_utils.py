@@ -920,6 +920,17 @@ def map_ensemble_precip_rates_to_ptype(
     return out
 
 
+def ensemble_vote_winner(votes: np.ndarray, rates: np.ndarray) -> np.ndarray:
+    """The type (PRECIP_IDX) with the most GEPS/REPS member votes, a tie going to
+    the larger type mean. ``votes`` (counts or shares) and ``rates`` (mm/h) are
+    (rows, 4) in ENSEMBLE_COMPONENT_TYPES order; a NaN mean counts as zero.
+    Shared by the hourly and minutely types so both break ties the same way."""
+    rates = np.nan_to_num(np.asarray(rates, dtype=float), nan=0.0)
+    most_votes = votes == votes.max(axis=1, keepdims=True)
+    winner = np.argmax(np.where(most_votes, rates, -np.inf), axis=1)
+    return ENSEMBLE_COMPONENT_TYPES[winner]
+
+
 def map_ensemble_member_votes_to_ptype(
     rain: np.ndarray,
     ice: np.ndarray,
@@ -960,13 +971,8 @@ def map_ensemble_member_votes_to_ptype(
     if not voted.any():
         return out
     counts = np.where(voted[:, np.newaxis], counts, 0.0)
-    rates = np.nan_to_num(
-        np.column_stack((snow, ice, freezing_rain, rain)).astype(float), nan=0.0
-    )
-    # Among the types with the most votes, the one with the largest mean
-    most_votes = counts == counts.max(axis=1, keepdims=True)
-    winner = np.argmax(np.where(most_votes, rates, -np.inf), axis=1)
-    out[voted] = ENSEMBLE_COMPONENT_TYPES[winner[voted]]
+    rates = np.column_stack((snow, ice, freezing_rain, rain))
+    out[voted] = ensemble_vote_winner(counts[voted], rates[voted])
 
     # Counts are whole members; the tolerance keeps a runner-up with exactly the
     # threshold share (3 of 9 votes) from losing to float rounding

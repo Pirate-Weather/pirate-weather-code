@@ -560,11 +560,17 @@ def _calculate_derived_metrics(
     if mixed_rows.size > 0:
         mixed_accum = InterPhour[mixed_rows, DATA_HOURLY["accum"]]
         InterPhour[mixed_rows, DATA_HOURLY["rain"]] = mixed_accum * mixed_shares["rain"]
-        InterPhour[mixed_rows, DATA_HOURLY["snow"]] = estimate_snow_height(
-            mixed_accum * mixed_shares["snow"],
-            InterPhour[mixed_rows, DATA_HOURLY["temp"]],
-            InterPhour[mixed_rows, DATA_HOURLY["wind"]],
-        )
+        # Only rows with a snow share get a snow depth: the density estimate is
+        # NaN when temperature or wind is missing, which would turn a zero share
+        # into NaN snow in the hourly and daily totals.
+        has_snow = mixed_shares["snow"] > 0
+        if np.any(has_snow):
+            snow_rows = mixed_rows[has_snow]
+            InterPhour[snow_rows, DATA_HOURLY["snow"]] = estimate_snow_height(
+                mixed_accum[has_snow] * mixed_shares["snow"][has_snow],
+                InterPhour[snow_rows, DATA_HOURLY["temp"]],
+                InterPhour[snow_rows, DATA_HOURLY["wind"]],
+            )
         InterPhour[mixed_rows, DATA_HOURLY["ice"]] = mixed_accum * mixed_shares["ice"]
         InterPhour[mixed_rows, DATA_HOURLY["mixed_freezing_rain"]] = (
             mixed_accum * mixed_shares["freezing_rain"]

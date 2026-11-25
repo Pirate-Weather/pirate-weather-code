@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 
 from API.api_utils import (
+    ensemble_vote_winner,
     fast_nearest_interp,
     map_canadian_precip_type_to_ptype,
     map_ensemble_precip_rates_to_ptype,
@@ -661,33 +662,36 @@ def _process_gdps_ptype(gdpsMinuteInterpolation, InterTminute):
 
 
 def _process_canadian_ensemble_ptype(minuteInterpolation, index_map, InterTminute):
-    """GEPS or REPS precipitation type from the members' type votes, each
-    type's share of the members, used like GEFS's categorical shares (the most
-    votes wins). Minutes without votes (NaN, from a store before them, or no
-    wet member) take the type of the largest type mean."""
-    InterTminute[:, PRECIP_IDX["snow"]] = minuteInterpolation[
-        :, index_map["snow_votes"]
-    ]
-    InterTminute[:, PRECIP_IDX["sleet"]] = minuteInterpolation[
-        :, index_map["ice_votes"]
-    ]
-    InterTminute[:, PRECIP_IDX["ice"]] = minuteInterpolation[
-        :, index_map["freezing_rain_votes"]
-    ]
-    InterTminute[:, PRECIP_IDX["rain"]] = minuteInterpolation[
-        :, index_map["rain_votes"]
-    ]
-    no_votes = ~(InterTminute[:, 1:5].sum(axis=1) > 0)
+    """GEPS or REPS precipitation type from the members' type votes: the type
+    with the most votes wins, a tie going to the larger type mean, as in the
+    hourly type (ensemble_vote_winner). Minutes without votes (NaN, from a store
+    before them, or no wet member) take the type of the largest type mean. The
+    minutely columns have no mixed category, so a split vote keeps its winner."""
+    # ENSEMBLE_COMPONENT_TYPES order: snow, ice pellets, freezing rain, rain
+    votes = np.column_stack(
+        [
+            minuteInterpolation[:, index_map[f"{component}_votes"]]
+            for component in ("snow", "ice", "freezing_rain", "rain")
+        ]
+    )
+    no_votes = ~(votes.sum(axis=1) > 0)
+    mapped = np.zeros(len(votes))
+    if not no_votes.all():
+        rates = np.column_stack(
+            [
+                minuteInterpolation[~no_votes, index_map[component]]
+                for component in ("snow", "ice", "freezing_rain", "rain")
+            ]
+        )
+        mapped[~no_votes] = ensemble_vote_winner(votes[~no_votes], rates)
     if no_votes.any():
-        mapped = map_ensemble_precip_rates_to_ptype(
+        mapped[no_votes] = map_ensemble_precip_rates_to_ptype(
             rain=minuteInterpolation[no_votes, index_map["rain"]],
             ice=minuteInterpolation[no_votes, index_map["ice"]],
             freezing_rain=minuteInterpolation[no_votes, index_map["freezing_rain"]],
             snow=minuteInterpolation[no_votes, index_map["snow"]],
         )
-        fallback = np.zeros((int(no_votes.sum()), InterTminute.shape[1]))
-        _set_ptype_categories(mapped, fallback)
-        InterTminute[no_votes] = fallback
+    _set_ptype_categories(mapped, InterTminute)
 
 
 def _process_geps_ptype(gepsMinuteInterpolation, InterTminute):

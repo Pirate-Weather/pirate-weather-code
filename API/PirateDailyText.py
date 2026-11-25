@@ -837,13 +837,15 @@ def _aggregate_periods(window, zone, mode, min_pop):
     liquid = cols.liquid
     snow = cols.snow
     ice = cols.ice
+    mixed_freezing_rain = cols.mixed_freezing_rain
     pop = cols.pop
     precip_type = cols.precip_type
     temp = cols.temp
     dew = cols.dew
     light_wind = WIND_THRESHOLDS["light"]
     sleet_type = PRECIP_TYPES["sleet"]
-    # A mixed hour's accumulation is stored as ice (see the hourly block)
+    # A mixed hour's accumulation is stored as ice (see the hourly block); a
+    # mixed GEPS/REPS hour's ice is sleet apart from its freezing-rain part
     mixed_type = PRECIP_TYPES["mixed"]
     freezing_rain_type = PRECIP_TYPES["ice"]
 
@@ -898,10 +900,16 @@ def _aggregate_periods(window, zone, mode, min_pop):
         data["num_hours_precip"] = sum(pick_precip(cols.wet))
 
         data["frzrain_accum"] = _sequential_sum(
-            ice[row] for row in precip_rows if precip_type[row] == freezing_rain_type
+            ice[row]
+            if precip_type[row] == freezing_rain_type
+            else mixed_freezing_rain[row]
+            for row in precip_rows
+            if precip_type[row] in (freezing_rain_type, mixed_type)
         )
         data["sleet_accum"] = _sequential_sum(
-            ice[row]
+            ice[row] - mixed_freezing_rain[row]
+            if precip_type[row] == mixed_type
+            else ice[row]
             for row in precip_rows
             if precip_type[row] in (sleet_type, mixed_type)
         )

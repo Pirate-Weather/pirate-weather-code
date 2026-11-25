@@ -134,8 +134,11 @@ probVars = (
 )
 MEMBER_MASK_INDICES = [probVars.index(v) for v in MEMBER_MASK_VARS]
 # Per-lead statistics that take the lead whose accumulation interval contains
-# each hour instead of a blend of two leads (interp_time_take_blend)
-NEXT_LEAD_INDICES = [probVars.index(v) for v in (*MEMBER_MASK_VARS, *TYPE_VOTE_VARS)]
+# each hour instead of a blend of two leads (interp_time_take_blend). Only the
+# member masks: OR-ing bit words can't be blended. The type vote shares are
+# blended like the type means, so a row's votes and means (which break vote
+# ties and split mixed hours) carry the same time weighting.
+NEXT_LEAD_INDICES = [probVars.index(v) for v in MEMBER_MASK_VARS]
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR

@@ -1,7 +1,9 @@
 """Summary text windows, period names and fallbacks."""
 
+import datetime
 import math
 from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pytest
@@ -10,6 +12,7 @@ from pirateweather_translations.translation import Translation
 
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
 from API.daily.builder import build_daily_section
+from API.hourly.builder import initialize_time_grids
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
@@ -18,7 +21,7 @@ from API.legacy.summary import (
 from API.PirateDailyText import HourColumns, calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateWeeklyText import calculate_weekly_text
-from tests.helpers.text import BASE_TIME, HOUR, make_hours
+from tests.helpers.text import BASE_TIME, HOUR, make_hour, make_hours
 
 RAIN = {
     "precipType": "rain",
@@ -152,6 +155,7 @@ def test_block_summary_ties_go_to_the_earliest_entry(first, second):
         hour_icon_list=entries,
         time_machine=True,
         base_time_offset_int=0,
+        day_array_grib=np.array([0, 24 * HOUR]),
         logger=MagicMock(),
         loc_tag="test",
     ) == (first, first)
@@ -668,32 +672,69 @@ def test_single_day_daily_summary_runs_midnight_to_midnight():
     assert day["icon"] == "snow"
 
 
-def test_single_day_hourly_summary_is_the_forecast_sentence():
+@pytest.mark.parametrize(
+    "tz_name, day, rain_from_day_end, rain_in_day",
+    [
+        # The grid's extra row is the next day's 00:00.
+        pytest.param("UTC", (2021, 1, 1), 0, False, id="24-hour-day"),
+        # Spring forward: the day has 23 hours, so the grid's last two rows
+        # are the next day's.
+        pytest.param("America/Toronto", (2026, 3, 8), 0, False, id="23-hour-day"),
+        # Fall back: the day has 25 hours, so the grid's last row is its 23:00.
+        pytest.param("America/Toronto", (2026, 11, 1), -1, True, id="25-hour-day"),
+    ],
+)
+def test_single_day_hourly_summary_is_the_forecast_sentence(
+    tz_name, day, rain_from_day_end, rain_in_day
+):
     """A Time Machine or future-date hourly.summary (#711) was the most common
     hourly title ("Mostly Cloudy"), leaving out a night of snow. It must be the
     forecast's 24-hour summary sentence, over the requested day from local
     midnight (not from the requested hour), and without the next-24-hours
-    names relative to now: "tonight" is wrong for a date last year.
+    names relative to now: "tonight" is wrong for a date last year. The day
+    ends at the next local midnight, so a fixed 24 rows described the next
+    day's 00:00 on a 23-hour day and left out 23:00 on a 25-hour day.
     """
-    hours = make_hours(25, BASE_TIME, cloudCover=0.8, temperature=-3.0)
-    for hour in hours[:6]:
-        hour.update(SNOW)
+    local_tz = ZoneInfo(tz_name)
+    base_day = datetime.datetime(*day, tzinfo=local_tz)
+    # The single-day grid and day boundaries prepare_initial_request builds
+    grid = initialize_time_grids(
+        base_time=base_day,
+        base_day=base_day,
+        daily_days=1,
+        daily_day_hours=1,
+        local_tz=local_tz,
+    )
+    hour_array_grib, day_array_grib = grid[5], grid[7]
+    rain_start = day_array_grib[1] + rain_from_day_end * HOUR
+    hours = []
+    for time in hour_array_grib:
+        hour = make_hour(int(time), cloudCover=0.8, temperature=-3.0)
+        local_hour = datetime.datetime.fromtimestamp(int(time), local_tz).hour
+        if time < day_array_grib[1] and local_hour < 6:
+            hour.update(SNOW)
+        if time >= rain_start:
+            hour.update(RAIN)
+        hours.append(hour)
 
     text, icon = build_hourly_summary(
         summary_text=True,
         translation=Translation(load_translation("en")),
         hour_list_si=hours,
         is_all_night=False,
-        tz_name="UTC",
+        tz_name=tz_name,
         icon="darksky",
         unit_system="si",
         hour_text_list=["Mostly Cloudy"] * len(hours),
         hour_icon_list=["partly-cloudy-day"] * len(hours),
         time_machine=True,
         base_time_offset_int=12,
+        day_array_grib=day_array_grib,
         logger=MagicMock(),
         loc_tag="test",
     )
 
-    assert text.startswith("Light snow overnight.")
+    assert text.startswith("Light snow")
+    assert "tonight" not in text.lower()
+    assert ("rain" in text.lower()) == rain_in_day
     assert icon == "snow"

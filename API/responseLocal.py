@@ -1430,6 +1430,7 @@ async def PW_Forecast(
             hour_icon_list=hourIconList,
             time_machine=singleDay,
             base_time_offset_int=base_time_offset_int,
+            day_array_grib=day_array_grib,
             logger=logger,
             loc_tag=loc_tag,
             hour_columns=hour_columns,
@@ -1463,15 +1464,19 @@ async def PW_Forecast(
 
     if exDaily != 1:
         returnOBJ["daily"] = {}
+        # Summarise only the days daily.data returns: a Time Machine request
+        # with more hours than days (days=1&hours=48) backs its grid with the
+        # extra days, which daily.summary must not describe. A forecast's
+        # day list is already its returned days.
         daily_summary, daily_icon = build_daily_summary(
             summary_text=summaryText,
             translation=translation,
-            day_list_si=dayList_si,
+            day_list_si=dayList_si[0:ouputDays],
             tz_name=tz_name,
             unit_system=unitSystem,
             icon=icon,
-            day_text_list=dayTextList,
-            day_icon_list=dayIconList,
+            day_text_list=dayTextList[0:ouputDays],
+            day_icon_list=dayIconList[0:ouputDays],
             time_machine=singleDay,
             logger=logger,
             loc_tag=loc_tag,
