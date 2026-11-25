@@ -1,6 +1,6 @@
 """Air Quality Index (AQI) constants and calculation helpers.
 
-Supports three AQI systems:
+Supports these AQI systems:
   - US EPA AQI  (unit_system="us")
   - Canadian AQHI (unit_system="ca")
   - EU CAQI     (unit_system="si")
@@ -157,8 +157,8 @@ def rolling_mean(conc: np.ndarray, window: int) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# EPA AQI breakpoints (concentrations in µg/m³)
-# The model stores O3, NO2, SO2, CO in ppb; convert before lookup.
+# EPA AQI breakpoints (PM in µg/m³; O3, NO2, SO2 and CO in ppb)
+# The gases are looked up in the model-native ppb, with no conversion.
 # ---------------------------------------------------------------------------
 
 # PM2.5 (Fine Particulate Matter, µg/m³)
@@ -171,7 +171,7 @@ PM25_AQI = [0, 50, 100, 150, 200, 300, 500]
 PM10_BP = [0, 54, 154, 254, 354, 424, 504, 604]
 PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
-# O3 (Ozone, µg/m³) — EPA breakpoints converted to µg/m³ (1 ppm O3 ≈ 1996 µg/m³ @ 25°C)
+# O3 (Ozone, ppb) — EPA breakpoints (EPA publishes them in ppm)
 # Breakpoints for 8-hour average ozone concentrations
 O3_8H_BP = [0, 54, 70, 85, 105, 200]
 O3_8H_AQI = [0, 50, 100, 150, 200, 300]
@@ -186,21 +186,21 @@ NO2_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 # SO2 (Sulfur Dioxide, ppb) — EPA breakpoints
 # Breakpoints for 1-hour average SO2 concentrations
-# EPA SO2 Breakpoints
 SO2_BP = [0, 35, 75, 185, 304]
 SO2_AQI = [0, 50, 100, 150, 200]
 
 SO2_24H_BP = [305, 604, 804, 1004]
 SO2_24H_AQI = [201, 300, 400, 500]
 
-# CO (Carbon Monoxide, ppb) — EPA breakpoints
+# CO (Carbon Monoxide, ppb) — EPA breakpoints (EPA publishes them in ppm)
 # Breakpoints for 8-hour average CO concentrations
 CO_BP = [0, 4400, 9400, 12400, 15400, 30400, 40400, 50400]
 CO_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 # ---------------------------------------------------------------------------
 # Unit conversion factors (ppb → µg/m³ at 25 °C, 1 atm)
-# Used to bring model-native ppb values to µg/m³ before EPA breakpoint lookup.
+# Used to bring model-native ppb values to µg/m³ for the indices whose gas
+# tables are in µg/m³ (the EPA tables are in ppb and need no conversion).
 # ---------------------------------------------------------------------------
 PPB_O3_TO_UG_M3 = 1.996  # 1 ppb O3  ≈ 1.996 µg/m³
 PPB_NO2_TO_UG_M3 = 1.88  # 1 ppb NO2 ≈ 1.88  µg/m³
@@ -279,22 +279,28 @@ CHINA_CO_24H_BP = [0.0, 2.0, 4.0, 14.0, 24.0, 36.0, 48.0, 60.0]
 
 # ---------------------------------------------------------------------------
 # Malaysia API breakpoints (µg/m³ for PM and ppb for gases)
-# Reference: https://aqihub.info/indices/malaysia
+# Reference: https://aqihub.info/indices/malaysia (from the DOE "Air Pollutant
+# Index (API) Calculation"). DOE gives CO in ppm (30/40/50/60); stored here in ppb.
+# The hazardous band (301-500) has no published top; it is set to about twice its
+# lower breakpoint.
 # ---------------------------------------------------------------------------
 API_PM25_BP = [0, 103, 153, 203, 253, 508]
 API_PM10_BP = [0, 190, 240, 290, 340, 682]
 API_O3_BP = [0, 80, 134, 187, 240, 482]
 API_NO2_BP = [0, 106, 178, 249, 320, 642]
 API_SO2_BP = [0, 134, 172, 210, 249, 500]
-API_CO_BP = [0, 3000, 4000, 5000, 6000, 12000]
+API_CO_BP = [0, 30000, 40000, 50000, 60000, 120000]
 API_INDEX = [0, 50, 100, 200, 300, 500]  # API 0–500
 
 # ---------------------------------------------------------------------------
 # Vietnam VN_AQI breakpoints (µg/m³ for all species)
-# Reference: https://aqihub.info/indices/vietnam
+# Reference: https://aqihub.info/indices/vietnam (VEA Decision 1459/QD-TCMT, 2019).
+# aqihub labels the gas rows ppm, but the values are the decision's µg/m³.
+# The 8-hour O3 table stops at 400 µg/m³ (AQI 200); above it the 1-hour table is
+# used, so the repeated 400s only make anything higher cap and fall back.
 # ---------------------------------------------------------------------------
 VNAQI_PM25_BP = [0, 25, 80, 150, 250, 350, 500]
-VNAQI_PM10_BP = [0, 50, 250, 350, 430, 500, 600]
+VNAQI_PM10_BP = [0, 50, 250, 350, 420, 500, 600]
 VNAQI_O3_1H_BP = [0, 160, 300, 400, 800, 1000, 1200]
 VNAQI_O3_8H_BP = [0, 100, 170, 210, 400, 400, 400]
 VNAQI_NO2_BP = [0, 100, 700, 1200, 2350, 3100, 3850]

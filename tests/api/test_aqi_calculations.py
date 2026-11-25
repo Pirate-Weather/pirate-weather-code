@@ -111,6 +111,14 @@ from API.data_inputs import prepare_aq_inputs
             100.0,
             id="my-api-pm25-breakpoint",
         ),
+        # Malaysia DOE gives CO in ppm: 30 ppm (30000 ppb) is the top of "Good".
+        # The table once had ppb values 10x too small, which reported 500.
+        pytest.param(
+            "my",
+            {"co_ppb": 30000.0},
+            50.0,
+            id="my-api-co-ppm-table",
+        ),
         # Vietnam VN_AQI (VEA Decision 1459/QD-TCMT): PM2.5 25 µg/m³ and PM10
         # 50 µg/m³ are both the top of "Good" (50).
         pytest.param(
@@ -118,6 +126,14 @@ from API.data_inputs import prepare_aq_inputs
             {"pm25_ug": 25.0, "pm10_ug": 50.0},
             50.0,
             id="vn-aqi-good-ceiling",
+        ),
+        # Vietnam PM10 420 µg/m³ is the top of "Unhealthy" (200); the table
+        # once had 430 there.
+        pytest.param(
+            "vn",
+            {"pm10_ug": 420.0},
+            200.0,
+            id="vn-aqi-pm10-unhealthy-ceiling",
         ),
     ],
 )
