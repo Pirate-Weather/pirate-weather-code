@@ -103,12 +103,15 @@ peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
 - CFS gust, visibility and UV are estimated, no longer listed as missing; visibility
   in `currently` lists its real sources; RDAQA added to air quality.
 
-### AQI tables for Malaysia and Vietnam checked (2026-11-25)
-- Malaysia (aqihub.info, from DOE's "Air Pollutant Index (API) Calculation"): CO was
-  10x too strict: DOE gives 1-hour CO of 30/40/50/60 ppm and the table had
-  3000-6000 ppb, so 3 ppm already read as "Moderate". Now 30000-60000 ppb. The
-  2000 DOE guide's 8-hour CO bands (4.5/9/15/30/40/50 ppm for API 50-500) belong
-  to the older scheme; the API computes Malaysia from 1-hour values throughout.
+### AQI tables for Malaysia and Vietnam follow the official documents (2026-11-25)
+- Malaysia: checked against DOE's own "API Calculation"
+  (eqms.doe.gov.my/Documents/APIMS/API_Calculation.pdf). It is the pre-2015 US EPA
+  scheme (EPA's 2008 8-hour O3 table, 2012 PM2.5 table with "Moderate" ending at
+  50.4 instead of 35.4 µg/m³): seven bands (0/50/100/150/200/300/400/500), PM 24 h,
+  O3 8 h and 1 h, CO 8 h (4.4-50.4 ppm), SO2 and NO2 1 h. aqihub.info's Malaysia
+  table matches none of it, and the code had followed aqihub, using raw hourly
+  values. Every Malaysia table and its averaging now follow DOE (CO was 10x too
+  strict before: 3 ppm read as "Moderate").
 - Vietnam: checked against Decision 1459/QD-TCMT Table 2 itself (cem.gov.vn PDF).
   It has eight index levels (0/50/100/150/200/300/400/500); aqihub's summary drops
   one, and every row in the code was shifted by a level (PM10 420 gave 200, not
@@ -118,7 +121,8 @@ peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
   8-hour value only for the daily AQI; the API's hourly series uses both.
 - Comments: the module docstring no longer says "three AQI systems", and the EPA
   O3/CO tables are labelled ppb (how they are used), not µg/m³.
-- `tests/api/test_aqi_calculations.py` pins Malaysia CO and Vietnam PM10 at 420.
+- `tests/api/test_aqi_calculations.py` pins Malaysia PM2.5 and 8-hour CO, and Vietnam
+  PM10 at 420.
 
 ### RDAQA for current air quality (2026-11-24, #848)
 ECCC's Regional Deterministic Air Quality Analysis (RAQDPS blended with hourly AirNow
