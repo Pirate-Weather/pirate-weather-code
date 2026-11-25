@@ -104,16 +104,21 @@ peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
   in `currently` lists its real sources; RDAQA added to air quality.
 
 ### AQI tables for Malaysia and Vietnam checked (2026-11-25)
-Checked `API/constants/aqi_const.py` against aqihub.info (Malaysia: DOE "Air Pollutant
-Index (API) Calculation"; Vietnam: VEA Decision 1459/QD-TCMT, 2019).
-- Malaysia CO was 10x too strict: DOE gives 30/40/50/60 ppm and the table had
-  3000-6000 ppb, so 3 ppm already read as "Moderate". Now 30000-60000 ppb.
-- Vietnam PM10's "Unhealthy" top was 430 µg/m³; the decision has 420.
-- Everything else matches. aqihub labels Vietnam's gas rows ppm, but the values are
-  µg/m³, which is how the code reads them.
+- Malaysia (aqihub.info, from DOE's "Air Pollutant Index (API) Calculation"): CO was
+  10x too strict: DOE gives 1-hour CO of 30/40/50/60 ppm and the table had
+  3000-6000 ppb, so 3 ppm already read as "Moderate". Now 30000-60000 ppb. The
+  2000 DOE guide's 8-hour CO bands (4.5/9/15/30/40/50 ppm for API 50-500) belong
+  to the older scheme; the API computes Malaysia from 1-hour values throughout.
+- Vietnam: checked against Decision 1459/QD-TCMT Table 2 itself (cem.gov.vn PDF).
+  It has eight index levels (0/50/100/150/200/300/400/500); aqihub's summary drops
+  one, and every row in the code was shifted by a level (PM10 420 gave 200, not
+  300). All rows now follow Table 2. The 8-hour O3 table ends at 400 µg/m³ (AQI
+  300), and above that only the 1-hour value is used, as the decision says.
+- Not changed: the decision computes the hourly AQI from 1-hour O3 only, and the
+  8-hour value only for the daily AQI; the API's hourly series uses both.
 - Comments: the module docstring no longer says "three AQI systems", and the EPA
   O3/CO tables are labelled ppb (how they are used), not µg/m³.
-- `tests/api/test_aqi_calculations.py` pins both corrected breakpoints.
+- `tests/api/test_aqi_calculations.py` pins Malaysia CO and Vietnam PM10 at 420.
 
 ### RDAQA for current air quality (2026-11-24, #848)
 ECCC's Regional Deterministic Air Quality Analysis (RAQDPS blended with hourly AirNow

@@ -119,21 +119,22 @@ from API.data_inputs import prepare_aq_inputs
             50.0,
             id="my-api-co-ppm-table",
         ),
-        # Vietnam VN_AQI (VEA Decision 1459/QD-TCMT): PM2.5 25 µg/m³ and PM10
-        # 50 µg/m³ are both the top of "Good" (50).
+        # Vietnam VN_AQI (VEA Decision 1459/QD-TCMT, Table 2): PM2.5 25 µg/m³
+        # and PM10 50 µg/m³ are both the top of "Good" (50).
         pytest.param(
             "vn",
             {"pm25_ug": 25.0, "pm10_ug": 50.0},
             50.0,
             id="vn-aqi-good-ceiling",
         ),
-        # Vietnam PM10 420 µg/m³ is the top of "Unhealthy" (200); the table
-        # once had 430 there.
+        # Vietnam Decision 1459 Table 2 has eight index levels: PM10 420 µg/m³
+        # is AQI 300. A summary table missing one level once shifted every row,
+        # which gave 200 here.
         pytest.param(
             "vn",
             {"pm10_ug": 420.0},
-            200.0,
-            id="vn-aqi-pm10-unhealthy-ceiling",
+            300.0,
+            id="vn-aqi-pm10-table2-level6",
         ),
     ],
 )

@@ -294,19 +294,22 @@ API_INDEX = [0, 50, 100, 200, 300, 500]  # API 0–500
 
 # ---------------------------------------------------------------------------
 # Vietnam VN_AQI breakpoints (µg/m³ for all species)
-# Reference: https://aqihub.info/indices/vietnam (VEA Decision 1459/QD-TCMT, 2019).
-# aqihub labels the gas rows ppm, but the values are the decision's µg/m³.
-# The 8-hour O3 table stops at 400 µg/m³ (AQI 200); above it the 1-hour table is
-# used, so the repeated 400s only make anything higher cap and fall back.
+# Reference: VEA Decision 1459/QD-TCMT (2019), Table 2
+# (https://cem.gov.vn/storage/news_file_attach/QD%201459%20TCMT%20ngay%2012.11.2019%20AQI.pdf).
+# Table 2 has eight index levels; aqihub.info's summary drops one, which shifts
+# every row by a level, so these follow the decision itself.
+# The 8-hour O3 table stops at 400 µg/m³ (AQI 300). Above that the decision
+# drops the 8-hour value and uses only the 1-hour one.
 # ---------------------------------------------------------------------------
-VNAQI_PM25_BP = [0, 25, 80, 150, 250, 350, 500]
-VNAQI_PM10_BP = [0, 50, 250, 350, 420, 500, 600]
-VNAQI_O3_1H_BP = [0, 160, 300, 400, 800, 1000, 1200]
-VNAQI_O3_8H_BP = [0, 100, 170, 210, 400, 400, 400]
-VNAQI_NO2_BP = [0, 100, 700, 1200, 2350, 3100, 3850]
-VNAQI_SO2_BP = [0, 125, 550, 800, 1600, 2100, 2630]
-VNAQI_CO_BP = [0, 10000, 45000, 60000, 90000, 120000, 150000]
-VNAQI_INDEX = [0, 50, 100, 150, 200, 300, 500]  # Vietnam 0–500
+VNAQI_INDEX = [0, 50, 100, 150, 200, 300, 400, 500]  # Vietnam 0–500
+VNAQI_PM25_BP = [0, 25, 50, 80, 150, 250, 350, 500]
+VNAQI_PM10_BP = [0, 50, 150, 250, 350, 420, 500, 600]
+VNAQI_O3_1H_BP = [0, 160, 200, 300, 400, 800, 1000, 1200]
+VNAQI_NO2_BP = [0, 100, 200, 700, 1200, 2350, 3100, 3850]
+VNAQI_SO2_BP = [0, 125, 350, 550, 800, 1600, 2100, 2630]
+VNAQI_CO_BP = [0, 10000, 30000, 45000, 60000, 90000, 120000, 150000]
+VNAQI_O3_8H_BP = [0, 100, 120, 170, 210, 400]
+VNAQI_O3_8H_INDEX = [0, 50, 100, 150, 200, 300]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1071,27 +1074,19 @@ def compute_vn_aqi(
     co_ug = co_ppb * PPB_CO_TO_UG_M3 if not math.isnan(co_ppb) else float("nan")
 
     # Initialize all sub-indices to NaN
-    o3_sub = float("nan")
     sub_1h = float("nan")
     sub_8h = float("nan")
 
-    # 1. Calculate 8-hour sub-index (valid up to AQI 200)
-    if not math.isnan(o3_8h_ug):
-        # 8-hr table caps at 400 µg/m³ (AQI 200)
-        sub_8h = _aqi_from_breakpoints(o3_8h_ug, VNAQI_O3_8H_BP, VNAQI_INDEX)
+    # The 8-hour table ends at 400 µg/m³ (AQI 300). Decision 1459 does not use
+    # the 8-hour value above that, only the 1-hour one.
+    if not math.isnan(o3_8h_ug) and o3_8h_ug <= VNAQI_O3_8H_BP[-1]:
+        sub_8h = _aqi_from_breakpoints(o3_8h_ug, VNAQI_O3_8H_BP, VNAQI_O3_8H_INDEX)
 
-    # 2. Calculate 1-hour sub-index
     if not math.isnan(o3_1h_ug):
         sub_1h = _aqi_from_breakpoints(o3_1h_ug, VNAQI_O3_1H_BP, VNAQI_INDEX)
 
-    # 3. Handle threshold boundaries
-    # If 8-hour AQI is >= 201, force fallback to 1-hour
-    if sub_8h > 200:
-        o3_sub = sub_1h if not math.isnan(sub_1h) else 200.0
-    else:
-        # Return max of available sub-indices
-        o3_valid = [v for v in (sub_1h, sub_8h) if not math.isnan(v)]
-        o3_sub = max(o3_valid) if o3_valid else float("nan")
+    o3_valid = [v for v in (sub_1h, sub_8h) if not math.isnan(v)]
+    o3_sub = max(o3_valid) if o3_valid else float("nan")
 
     if not math.isnan(pm25_ug):
         sub_indices.append(_aqi_from_breakpoints(pm25_ug, VNAQI_PM25_BP, VNAQI_INDEX))
