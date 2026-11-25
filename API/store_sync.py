@@ -66,24 +66,49 @@ SUPPORT_FILES = tuple(name for _, name in SUPPORT_PICKLES)
 READY_FILE = "models_ready"
 
 
+def _write_bytes_atomic(path: str, data: bytes) -> None:
+    tmp_path = path + ".tmp"
+    Path(tmp_path).write_bytes(data)
+    os.replace(tmp_path, path)
+
+
 def _download_files(remote, keys: list[str], local_dir: str, prefix: str) -> None:
     """Download ``keys`` (all under ``prefix``) into ``local_dir``,
-    ``DOWNLOAD_CONCURRENCY`` at a time. obstore retries each request itself."""
+    ``DOWNLOAD_CONCURRENCY`` at a time. obstore retries each request itself.
+
+    Files already in ``local_dir`` are kept: a published version never changes,
+    and each file is written whole (temp file, then rename), so one that exists
+    is complete. A pass that fails part-way therefore resumes where it stopped.
+    Without this, a cold BHS node never finished GFS: one chunk failing after
+    obstore's retries, across the Atlantic, restarted the whole store."""
 
     async def get_all() -> None:
         semaphore = asyncio.Semaphore(DOWNLOAD_CONCURRENCY)
 
         async def get(key: str) -> None:
             local_file = os.path.join(local_dir, key.removeprefix(prefix))
+            if os.path.exists(local_file):
+                return
             os.makedirs(os.path.dirname(local_file), exist_ok=True)
             async with semaphore:
                 result = await obstore.get_async(remote, key)
                 data = await result.bytes_async()
-            await asyncio.to_thread(Path(local_file).write_bytes, data)
+            await asyncio.to_thread(_write_bytes_atomic, local_file, data)
 
         await asyncio.gather(*(get(key) for key in keys))
 
     asyncio.run(get_all())
+
+
+def _remove_other_partials(model_dir: str, keep: str) -> None:
+    """Delete partial copies of versions other than ``keep``: their pointer has
+    moved on, so they will never be finished."""
+    if not os.path.isdir(model_dir):
+        return
+    for entry in os.scandir(model_dir):
+        if entry.name.endswith(".partial") and entry.path != keep:
+            shutil.rmtree(entry.path, ignore_errors=True)
+            logger.info("Deleted unfinished copy %s", entry.path)
 
 
 def _write_json_atomic(path: str, payload: dict) -> None:
@@ -107,7 +132,8 @@ def sync_store(remote, name: str, base_dir: str) -> bool:
     if not os.path.isdir(local_version):
         started = time.time()
         partial = local_version + ".partial"
-        shutil.rmtree(partial, ignore_errors=True)
+        # Keep this version's partial copy, if a failed pass left one, and resume it.
+        _remove_other_partials(os.path.dirname(local_version), partial)
         keys = [
             meta["path"]
             for batch in obstore.list(remote, prefix=f"{version}/")
@@ -173,8 +199,8 @@ def sync_static_store(remote, name: str, base_dir: str) -> bool:
     if f"{prefix}zarr.json" not in keys:
         logger.warning("Static store %s is not published", name)
         return False
+    # Resumed if a failed pass left it: the static store never changes.
     partial = local_store + ".partial"
-    shutil.rmtree(partial, ignore_errors=True)
     _download_files(remote, keys, partial, prefix)
     os.rename(partial, local_store)
     logger.info("Copied static store %s", name)
