@@ -367,6 +367,7 @@ def read_lightning_artifact(cache_dir: Path) -> tuple[np.ndarray, dict] | None:
         return None
     except (
         OSError,
+        EOFError,  # a zero-byte file
         ValueError,
         KeyError,
         AttributeError,
@@ -422,7 +423,11 @@ def lightning_storm_fields(
         if last_e is None:
             logger.info("Lightning: no %s feed in the artifact", name)
             continue
-        lag = now - float(last_e)
+        last_e = float(last_e)
+        if not np.isfinite(last_e):
+            logger.warning("Lightning: %s has no valid data time (%s)", name, last_e)
+            continue
+        lag = now - last_e
         if lag > max_lag:
             logger.warning(
                 "Lightning: %s data ends %.0f min ago; dropping its coverage",
@@ -437,8 +442,8 @@ def lightning_storm_fields(
         distance[covered] = np.inf
         in_window = (
             (points["satellite"] == satellite_id)
-            & (points["time_s"] > float(last_e) - LIGHTNING_RECENT_WINDOW_SECONDS)
-            & (points["time_s"] <= float(last_e))
+            & (points["time_s"] > last_e - LIGHTNING_RECENT_WINDOW_SECONDS)
+            & (points["time_s"] <= last_e)
         )
         recent.append(points[in_window])
         logger.info(

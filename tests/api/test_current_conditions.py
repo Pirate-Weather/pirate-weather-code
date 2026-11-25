@@ -490,6 +490,18 @@ def test_satellite_lightning_sets_nearest_storm_and_thunderstorm_summary():
     assert "lightningCount" not in remove_conditional_fields(
         dict(v1), version=1, time_machine=False, tm_extra=False
     )
+    # Very light rain has summary text but no precipitation icon; the observed
+    # lightning must still set the icon, not leave a cloud icon under a
+    # thunderstorm summary
+    from API.PirateText import calculate_text
+
+    drizzle = dict(v2, precipIntensity=0.02, rainIntensity=0.02)
+    assert calculate_text(
+        drizzle, True, "current", "darksky", lightning_nearby=True
+    ) == (
+        "thunderstorm",
+        "thunderstorm",
+    )
 
     # Covered, nothing within 300 km: GFS's 50 km storm is ruled out
     none_near = _currently_with_lightning(

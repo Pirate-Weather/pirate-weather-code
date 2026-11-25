@@ -127,6 +127,7 @@ def calculate_text(
     # Thunderstorms only ever replace precipitation text or its icon, so a dry
     # hour (most of them) skips the stability scoring
     thuText = thuIcon = None
+    lightning_override = False
     if precipText is not None or precipIcon is not None:
         thuText, thuIcon = calculate_thunderstorm_text(
             cape,
@@ -144,6 +145,7 @@ def calculate_text(
         # Observed lightning overrides the stability score
         if lightning_nearby:
             thuText = thuIcon = "thunderstorm"
+            lightning_override = True
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
 
     # If there is precipitation text use that and join with wind texts if they exist
@@ -167,8 +169,9 @@ def calculate_text(
     else:
         c_text = skyText
 
-    # If precipitation icon use that unless there are thunderstorms occurring
-    if precipIcon is not None:
+    # If precipitation icon use that unless there are thunderstorms occurring.
+    # Very light rain has text but no icon; observed lightning still shows its icon
+    if precipIcon is not None or lightning_override:
         if thuIcon is not None:
             c_icon = thuIcon
         else:

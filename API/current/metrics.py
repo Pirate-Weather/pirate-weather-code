@@ -2739,12 +2739,14 @@ def build_current_section(
         if not np.isnan(InterPcurrent[DATA_CURRENT["storm_dir"]])
         else np.nan
     )
-    # Recent satellite strikes within 15 km; missing outside satellite coverage
-    currently["lightningCount"] = (
-        int(lightning[2])
-        if lightning is not None and np.isfinite(lightning[2])
-        else np.nan
-    )
+    # Recent satellite strikes within 15 km; missing outside satellite coverage.
+    # Time Machine has no satellite lightning, so it never gets the field.
+    if not timeMachine:
+        currently["lightningCount"] = (
+            int(lightning[2])
+            if lightning is not None and np.isfinite(lightning[2])
+            else np.nan
+        )
     currently["precipIntensity"] = minuteItems[0]["precipIntensity"]
     currently["precipProbability"] = minuteItems[0]["precipProbability"]
     currently["precipIntensityError"] = minuteItems[0]["precipIntensityError"]

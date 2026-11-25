@@ -190,6 +190,11 @@ def test_export_publishes_radar_composite_for_api(tmp_path, monkeypatch):
     assert np.isposinf(store[1, 0, y, x])
     assert store[3, 0, y, x] == 0
 
+    # A torn (zero-byte) artifact must read as "no lightning", never stop the
+    # radar export
+    (cache / "lightning" / "current.npz").write_bytes(b"")
+    assert sidecar.read_lightning_artifact(cache) is None
+
 
 def test_stale_nowcast_is_not_exported_under_new_radar_frame(tmp_path):
     """LibreWXR also writes state.json mid-cycle, after a new radar frame lands

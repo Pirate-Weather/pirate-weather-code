@@ -270,7 +270,7 @@ an element:
 | UV index | GFS-compatible source → HRDPS → GDPS → ERA5 |
 | Ozone | GFS-compatible source → GDPS → ERA5 |
 | Visibility | Regional stack filtered to NBM, HRRR, DWD MOSMIX, GFS-compatible source, and ERA5 |
-| Nearest storm | GFS-compatible source only |
+| Nearest storm | GFS-compatible source only (`currently` uses LibreWXR satellite lightning first; see Currently) |
 | Feels-like temperature | NBM → GFS-compatible source → CFS (computed from its temperature, humidity, wind and solar radiation) |
 | CAPE | NBM → HRRR → HRDPS → GDPS → GFS-compatible source → ERA5 |
 | Smoke | HRRR, with SILAM used for air-quality detail where applicable |
