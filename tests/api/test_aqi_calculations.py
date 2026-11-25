@@ -103,21 +103,39 @@ from API.data_inputs import prepare_aq_inputs
             150.0,
             id="cn-aqi-pm25-breakpoint",
         ),
-        # Malaysia API, breakpoints from aqihub.info (the reference aqi_const
-        # cites): PM2.5 153 µg/m³ -> 100, PM10 190 µg/m³ -> 50.
+        # Malaysia API (DOE "API Calculation"): PM2.5 50.4 µg/m³ is the top
+        # of "Moderate" (100) on DOE's modified PM2.5 table; PM10 54 -> 50.
         pytest.param(
             "my",
-            {"pm25_ug": 153.0, "pm10_ug": 190.0},
+            {"pm25_ug": 50.4, "pm10_ug": 54.0},
             100.0,
             id="my-api-pm25-breakpoint",
         ),
-        # Vietnam VN_AQI (VEA Decision 1459/QD-TCMT): PM2.5 25 µg/m³ and PM10
-        # 50 µg/m³ are both the top of "Good" (50).
+        # DOE's CO sub-index is an 8-hour average in ppm: 30 ppm sits just
+        # under the 30.4 ppm (API 300) breakpoint. A 1-hour table from a
+        # summary site once gave 50 here, and an earlier one 500.
+        pytest.param(
+            "my",
+            {"co_ppb": 30000.0},
+            297.0,
+            id="my-api-co-8h-table",
+        ),
+        # Vietnam VN_AQI (VEA Decision 1459/QD-TCMT, Table 2): PM2.5 25 µg/m³
+        # and PM10 50 µg/m³ are both the top of "Good" (50).
         pytest.param(
             "vn",
             {"pm25_ug": 25.0, "pm10_ug": 50.0},
             50.0,
             id="vn-aqi-good-ceiling",
+        ),
+        # Vietnam Decision 1459 Table 2 has eight index levels: PM10 420 µg/m³
+        # is AQI 300. A summary table missing one level once shifted every row,
+        # which gave 200 here.
+        pytest.param(
+            "vn",
+            {"pm10_ug": 420.0},
+            300.0,
+            id="vn-aqi-pm10-table2-level6",
         ),
     ],
 )

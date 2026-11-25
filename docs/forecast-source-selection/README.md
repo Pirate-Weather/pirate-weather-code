@@ -123,14 +123,26 @@ ensemble-precipitation fields rather than temperature fields.
 
 | Region | Priority |
 | --- | --- |
-| Canada | HRDPS → REPS → GDPS → GEPS → NBM → HRRR → ECMWF IFS → GFS → GEFS → DWD MOSMIX → ERA5 → CFS |
-| North America outside Canada | NBM → HRRR → ECMWF IFS → GFS → GEFS → GDPS → GEPS → DWD MOSMIX → ERA5 → HRDPS → REPS → CFS |
-| Global / standard | NBM → HRRR → DWD MOSMIX → ECMWF IFS → GFS → GEFS → GDPS → GEPS → ERA5 → HRDPS → REPS → CFS |
+| Canada | HRDPS → REPS → GDPS → GEPS → NBM → HRRR → ECMWF IFS → ERA5 → GFS → GEFS → DWD MOSMIX → CFS |
+| North America outside Canada | NBM → HRRR → ECMWF IFS → ERA5 → GFS → GEFS → GDPS → GEPS → DWD MOSMIX → HRDPS → REPS → CFS |
+| Global / standard | NBM → HRRR → DWD MOSMIX → ECMWF IFS → ERA5 → GFS → GEFS → GDPS → GEPS → HRDPS → REPS → CFS |
 
-When `include=aimodels` is enabled, the compatible AI model is placed ahead of
-the conventional order. In North America, AIGEFS leads ensemble precipitation
-fields and AIGFS leads deterministic GFS-compatible fields. Globally, ECMWF
-AIFS leads ECMWF-compatible fields.
+ERA5 is read only for Time Machine requests (and requests more than ten days
+old). There it leads GFS, and GFS's history fills the hours ERA5 does not have
+yet, so ERA5's place in these orders does not affect forecasts.
+
+When `include=aimodels` is enabled, the CMC sources are excluded and the order
+changes so the AI-backed schemas come first. Canada uses the North America
+order in this mode.
+
+| Region | Priority with `include=aimodels` |
+| --- | --- |
+| North America (including Canada) | GEFS (AIGEFS) → GFS (AIGFS) → ECMWF IFS → NBM → HRRR → DWD MOSMIX → ERA5 → CFS |
+| Global / standard | ECMWF IFS (AIFS) → DWD MOSMIX → GFS → GEFS → NBM → HRRR → ERA5 → CFS |
+
+In North America, AIGEFS leads ensemble precipitation fields and AIGFS leads
+deterministic GFS-compatible fields. Globally, ECMWF AIFS leads
+ECMWF-compatible fields.
 
 ## Currently
 
@@ -140,12 +152,18 @@ requested field.
 
 | Region | Priority for compatible surface elements |
 | --- | --- |
-| Canada | RTMA-RU → HRRR SubH → HRDPS → GDPS → NBM → HRRR → ECMWF IFS → GFS → DWD MOSMIX → ERA5 → CFS |
-| North America outside Canada | RTMA-RU → HRRR SubH → NBM → HRRR → ECMWF IFS → GFS → GDPS → DWD MOSMIX → ERA5 → HRDPS → CFS |
-| Global / standard | RTMA-RU → HRRR SubH → NBM → HRRR → DWD MOSMIX → ECMWF IFS → GFS → GDPS → ERA5 → HRDPS → CFS |
+| Canada | RTMA-RU → HRRR SubH → HRDPS → GDPS → NBM → HRRR → ECMWF IFS → ERA5 → GFS → DWD MOSMIX → CFS |
+| North America outside Canada | RTMA-RU → HRRR SubH → NBM → HRRR → ECMWF IFS → ERA5 → GFS → GDPS → DWD MOSMIX → HRDPS → CFS |
+| Global / standard | RTMA-RU → HRRR SubH → NBM → HRRR → DWD MOSMIX → ECMWF IFS → ERA5 → GFS → GDPS → HRDPS → CFS |
 
-With AI models enabled, compatible AI data is selected before RTMA-RU, HRRR
-SubH, NBM, and the other conventional sources.
+With AI models enabled, the CMC sources are excluded and the AI-backed schemas
+lead. In North America (including Canada) ECMWF IFS then comes second, ahead of
+RTMA-RU:
+
+| Region | Priority with `include=aimodels` |
+| --- | --- |
+| North America (including Canada) | GFS (AIGFS) → ECMWF IFS → RTMA-RU → HRRR SubH → NBM → HRRR → DWD MOSMIX → ERA5 → CFS |
+| Global / standard | ECMWF IFS (AIFS) → RTMA-RU → HRRR SubH → NBM → HRRR → DWD MOSMIX → GFS → ERA5 → CFS |
 
 Current precipitation fields (`precipIntensity`, `precipProbability`,
 `precipIntensityError`, `precipType` and the rain, snow and ice intensities)
@@ -163,8 +181,9 @@ Some current elements have intentionally narrower source sets:
 
 | Element | Source logic |
 | --- | --- |
-| UV index | GFS-compatible source → ERA5 |
-| Ozone | GFS-compatible source → ERA5 |
+| UV index | Canada: HRDPS → GDPS → GFS-compatible source → CFS (estimated). Elsewhere: GFS-compatible source → GDPS → HRDPS → CFS (estimated). In Time Machine, ERA5 comes just before the GFS-compatible source. |
+| Ozone | Canada: GDPS → GFS-compatible source. Elsewhere: GFS-compatible source → GDPS. In Time Machine, ERA5 comes just before the GFS-compatible source. |
+| Visibility | The `currently` order filtered to RTMA-RU, HRRR SubH, NBM, HRRR, DWD MOSMIX, GFS-compatible source and CFS (estimated) |
 | Nearest storm | LibreWXR satellite lightning (nearest strike in the last 15 min of each satellite's data, within 300 km) → GFS-compatible source, floored at 300 km where satellites see no strike that close |
 | Smoke | HRRR → SILAM |
 | Feels-like temperature | NBM → GFS-compatible source → CFS (computed from its temperature, humidity, wind and solar radiation) |
@@ -267,14 +286,14 @@ an element:
 
 | Element family | Available sources, in its dedicated order |
 | --- | --- |
-| UV index | GFS-compatible source → HRDPS → GDPS → ERA5 |
-| Ozone | GFS-compatible source → GDPS → ERA5 |
-| Visibility | Regional stack filtered to NBM, HRRR, DWD MOSMIX, GFS-compatible source, and ERA5 |
+| UV index | Regional stack filtered to HRDPS, GDPS, GFS-compatible source, ERA5 and CFS (estimated): HRDPS → GDPS → GFS in Canada, GFS → GDPS → HRDPS elsewhere |
+| Ozone | Regional stack filtered to GDPS, GFS-compatible source and ERA5: GDPS → GFS in Canada, GFS → GDPS elsewhere |
+| Visibility | Regional stack filtered to NBM, HRRR, DWD MOSMIX, GFS-compatible source, ERA5 and CFS (estimated) |
 | Nearest storm | GFS-compatible source only (`currently` uses LibreWXR satellite lightning first; see Currently) |
 | Feels-like temperature | NBM → GFS-compatible source → CFS (computed from its temperature, humidity, wind and solar radiation) |
 | CAPE | NBM → HRRR → HRDPS → GDPS → GFS-compatible source → ERA5 |
 | Smoke | HRRR, with SILAM used for air-quality detail where applicable |
-| Air quality | RAQDPS → SILAM; carbon monoxide uses SILAM |
+| Air quality | RDAQA (hours it has analysed, and `currently` when its newest hour is at most 3 h old) → RAQDPS → SILAM; carbon monoxide uses SILAM |
 
 ## Future days and CFS
 
@@ -322,9 +341,12 @@ interpolated to the requested time.
   0.75 or 1). After that member 01 runs alone: state variables and intensity
   continue, but hourly and daily `precipProbability` and `precipIntensityError`
   are missing (-999).
-- **Missing:** gust (falls back to wind speed, as for any model without it),
-  visibility, UV index, ozone, CAPE and the other thunderstorm indices, smoke,
-  and nearest storm come back missing (-999) for hours only CFS covers.
+- **Estimated:** CFS has no gust, visibility or UV fields, so they are
+  estimated: gust from the 10 m wind and a typical gust factor, visibility from
+  temperature, humidity, precipitation rate and wind, and UV index from the
+  sun's height and cloud cover at a typical ozone.
+- **Missing:** ozone, CAPE and the other thunderstorm indices, smoke, and
+  nearest storm come back missing (-999) for hours only CFS covers.
 - **Feels-like:** CFS has no apparent temperature, so on its hours feels-like
   is computed from its temperature, humidity, wind and solar radiation, as
   `apparentTemperature` is.

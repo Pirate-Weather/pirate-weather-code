@@ -1,6 +1,6 @@
 """Air Quality Index (AQI) constants and calculation helpers.
 
-Supports three AQI systems:
+Supports these AQI systems:
   - US EPA AQI  (unit_system="us")
   - Canadian AQHI (unit_system="ca")
   - EU CAQI     (unit_system="si")
@@ -28,8 +28,8 @@ References:
     - Israel AQI: https://aqihub.info/indices/israel
     - Indonesia ISPU: https://aqihub.info/indices/indonesia
     - China AQI: https://aqihub.info/indices/china
-    - Malaysia API: https://aqihub.info/indices/malaysia
-    - Vietnam VN_AQI: https://aqihub.info/indices/vietnam
+    - Malaysia API: https://eqms.doe.gov.my/Documents/APIMS/API_Calculation.pdf
+    - Vietnam VN_AQI: https://cem.gov.vn/storage/news_file_attach/QD%201459%20TCMT%20ngay%2012.11.2019%20AQI.pdf
 """
 
 from __future__ import annotations
@@ -157,8 +157,8 @@ def rolling_mean(conc: np.ndarray, window: int) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# EPA AQI breakpoints (concentrations in µg/m³)
-# The model stores O3, NO2, SO2, CO in ppb; convert before lookup.
+# EPA AQI breakpoints (PM in µg/m³; O3, NO2, SO2 and CO in ppb)
+# The gases are looked up in the model-native ppb, with no conversion.
 # ---------------------------------------------------------------------------
 
 # PM2.5 (Fine Particulate Matter, µg/m³)
@@ -171,7 +171,7 @@ PM25_AQI = [0, 50, 100, 150, 200, 300, 500]
 PM10_BP = [0, 54, 154, 254, 354, 424, 504, 604]
 PM10_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
-# O3 (Ozone, µg/m³) — EPA breakpoints converted to µg/m³ (1 ppm O3 ≈ 1996 µg/m³ @ 25°C)
+# O3 (Ozone, ppb) — EPA breakpoints (EPA publishes them in ppm)
 # Breakpoints for 8-hour average ozone concentrations
 O3_8H_BP = [0, 54, 70, 85, 105, 200]
 O3_8H_AQI = [0, 50, 100, 150, 200, 300]
@@ -186,21 +186,21 @@ NO2_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 # SO2 (Sulfur Dioxide, ppb) — EPA breakpoints
 # Breakpoints for 1-hour average SO2 concentrations
-# EPA SO2 Breakpoints
 SO2_BP = [0, 35, 75, 185, 304]
 SO2_AQI = [0, 50, 100, 150, 200]
 
 SO2_24H_BP = [305, 604, 804, 1004]
 SO2_24H_AQI = [201, 300, 400, 500]
 
-# CO (Carbon Monoxide, ppb) — EPA breakpoints
+# CO (Carbon Monoxide, ppb) — EPA breakpoints (EPA publishes them in ppm)
 # Breakpoints for 8-hour average CO concentrations
 CO_BP = [0, 4400, 9400, 12400, 15400, 30400, 40400, 50400]
 CO_AQI = [0, 50, 100, 150, 200, 300, 400, 500]
 
 # ---------------------------------------------------------------------------
 # Unit conversion factors (ppb → µg/m³ at 25 °C, 1 atm)
-# Used to bring model-native ppb values to µg/m³ before EPA breakpoint lookup.
+# Used to bring model-native ppb values to µg/m³ for the indices whose gas
+# tables are in µg/m³ (the EPA tables are in ppb and need no conversion).
 # ---------------------------------------------------------------------------
 PPB_O3_TO_UG_M3 = 1.996  # 1 ppb O3  ≈ 1.996 µg/m³
 PPB_NO2_TO_UG_M3 = 1.88  # 1 ppb NO2 ≈ 1.88  µg/m³
@@ -279,28 +279,47 @@ CHINA_CO_24H_BP = [0.0, 2.0, 4.0, 14.0, 24.0, 36.0, 48.0, 60.0]
 
 # ---------------------------------------------------------------------------
 # Malaysia API breakpoints (µg/m³ for PM and ppb for gases)
-# Reference: https://aqihub.info/indices/malaysia
+# Reference: DOE, "Pengiraan Indeks Pencemar Udara (IPU) / Air Pollutant Index
+# (API) Calculation" (https://eqms.doe.gov.my/Documents/APIMS/API_Calculation.pdf).
+# DOE's sub-indices are the US EPA tables from before EPA's 2015 ozone and 2024
+# PM2.5 revisions (8-hour O3 59/75/95/115/374 ppb is EPA's 2008 table), so they
+# differ from the current EPA tables above. The one DOE change is PM2.5's
+# "Moderate" top: 50.4 µg/m³ where EPA's 2012 table had 35.4. DOE gives the gases
+# in ppm; stored here in ppb. Averaging periods: PM2.5 and PM10
+# 24 h, O3 8 h and 1 h, CO 8 h, SO2 and NO2 1 h; the API is the largest
+# sub-index. (aqihub.info's Malaysia table does not match this document.)
 # ---------------------------------------------------------------------------
-API_PM25_BP = [0, 103, 153, 203, 253, 508]
-API_PM10_BP = [0, 190, 240, 290, 340, 682]
-API_O3_BP = [0, 80, 134, 187, 240, 482]
-API_NO2_BP = [0, 106, 178, 249, 320, 642]
-API_SO2_BP = [0, 134, 172, 210, 249, 500]
-API_CO_BP = [0, 3000, 4000, 5000, 6000, 12000]
-API_INDEX = [0, 50, 100, 200, 300, 500]  # API 0–500
+API_INDEX = [0, 50, 100, 150, 200, 300, 400, 500]  # API 0–500
+API_PM25_BP = [0, 12.0, 50.4, 55.4, 150.4, 250.4, 350.4, 500.4]
+API_PM10_BP = [0, 54, 154, 254, 354, 424, 504, 604]
+API_NO2_BP = [0, 53, 100, 360, 649, 1249, 1649, 2049]
+API_SO2_BP = [0, 35, 75, 185, 304, 604, 804, 1004]
+API_CO_BP = [0, 4400, 9400, 12400, 15400, 30400, 40400, 50400]
+# The 8-hour O3 table ends at 374 ppb (API 300); the 1-hour table starts at
+# 125 ppb (API 101), and below that the 1-hour value gives no sub-index.
+API_O3_8H_BP = [0, 59, 75, 95, 115, 374]
+API_O3_8H_INDEX = [0, 50, 100, 150, 200, 300]
+API_O3_1H_BP = [125, 164, 204, 404, 504, 604]
+API_O3_1H_INDEX = [101, 150, 200, 300, 400, 500]
 
 # ---------------------------------------------------------------------------
 # Vietnam VN_AQI breakpoints (µg/m³ for all species)
-# Reference: https://aqihub.info/indices/vietnam
+# Reference: VEA Decision 1459/QD-TCMT (2019), Table 2
+# (https://cem.gov.vn/storage/news_file_attach/QD%201459%20TCMT%20ngay%2012.11.2019%20AQI.pdf).
+# Table 2 has eight index levels; aqihub.info's summary drops one, which shifts
+# every row by a level, so these follow the decision itself.
+# The 8-hour O3 table stops at 400 µg/m³ (AQI 300). Above that the decision
+# drops the 8-hour value and uses only the 1-hour one.
 # ---------------------------------------------------------------------------
-VNAQI_PM25_BP = [0, 25, 80, 150, 250, 350, 500]
-VNAQI_PM10_BP = [0, 50, 250, 350, 430, 500, 600]
-VNAQI_O3_1H_BP = [0, 160, 300, 400, 800, 1000, 1200]
-VNAQI_O3_8H_BP = [0, 100, 170, 210, 400, 400, 400]
-VNAQI_NO2_BP = [0, 100, 700, 1200, 2350, 3100, 3850]
-VNAQI_SO2_BP = [0, 125, 550, 800, 1600, 2100, 2630]
-VNAQI_CO_BP = [0, 10000, 45000, 60000, 90000, 120000, 150000]
-VNAQI_INDEX = [0, 50, 100, 150, 200, 300, 500]  # Vietnam 0–500
+VNAQI_INDEX = [0, 50, 100, 150, 200, 300, 400, 500]  # Vietnam 0–500
+VNAQI_PM25_BP = [0, 25, 50, 80, 150, 250, 350, 500]
+VNAQI_PM10_BP = [0, 50, 150, 250, 350, 420, 500, 600]
+VNAQI_O3_1H_BP = [0, 160, 200, 300, 400, 800, 1000, 1200]
+VNAQI_NO2_BP = [0, 100, 200, 700, 1200, 2350, 3100, 3850]
+VNAQI_SO2_BP = [0, 125, 350, 550, 800, 1600, 2100, 2630]
+VNAQI_CO_BP = [0, 10000, 30000, 45000, 60000, 90000, 120000, 150000]
+VNAQI_O3_8H_BP = [0, 100, 120, 170, 210, 400]
+VNAQI_O3_8H_INDEX = [0, 50, 100, 150, 200, 300]
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1008,14 +1027,17 @@ def compute_china_aqi(
 def compute_api(
     pm25_ug: float = float("nan"),
     pm10_ug: float = float("nan"),
-    o3_ppb: float = float("nan"),
+    o3_8h_ppb: float = float("nan"),
+    o3_1h_ppb: float = float("nan"),
     no2_ppb: float = float("nan"),
     so2_ppb: float = float("nan"),
     co_ppb: float = float("nan"),
 ) -> float:
-    """Compute the Malaysian Air Quality Index (API).
+    """Compute the Malaysian Air Pollutant Index (API).
 
-    Returns the maximum sub-index across available pollutants.
+    Inputs are already averaged over DOE's periods (PM 24 h, O3 8 h and 1 h,
+    CO 8 h, SO2 and NO2 1 h). Returns the maximum sub-index across available
+    pollutants.
     """
 
     sub_indices = []
@@ -1023,8 +1045,14 @@ def compute_api(
         sub_indices.append(_aqi_from_breakpoints(pm25_ug, API_PM25_BP, API_INDEX))
     if not math.isnan(pm10_ug):
         sub_indices.append(_aqi_from_breakpoints(pm10_ug, API_PM10_BP, API_INDEX))
-    if not math.isnan(o3_ppb):
-        sub_indices.append(_aqi_from_breakpoints(o3_ppb, API_O3_BP, API_INDEX))
+    if not math.isnan(o3_8h_ppb):
+        sub_indices.append(
+            _aqi_from_breakpoints(o3_8h_ppb, API_O3_8H_BP, API_O3_8H_INDEX)
+        )
+    if not math.isnan(o3_1h_ppb) and o3_1h_ppb >= API_O3_1H_BP[0]:
+        sub_indices.append(
+            _aqi_from_breakpoints(o3_1h_ppb, API_O3_1H_BP, API_O3_1H_INDEX)
+        )
     if not math.isnan(no2_ppb):
         sub_indices.append(_aqi_from_breakpoints(no2_ppb, API_NO2_BP, API_INDEX))
     if not math.isnan(so2_ppb):
@@ -1065,27 +1093,19 @@ def compute_vn_aqi(
     co_ug = co_ppb * PPB_CO_TO_UG_M3 if not math.isnan(co_ppb) else float("nan")
 
     # Initialize all sub-indices to NaN
-    o3_sub = float("nan")
     sub_1h = float("nan")
     sub_8h = float("nan")
 
-    # 1. Calculate 8-hour sub-index (valid up to AQI 200)
-    if not math.isnan(o3_8h_ug):
-        # 8-hr table caps at 400 µg/m³ (AQI 200)
-        sub_8h = _aqi_from_breakpoints(o3_8h_ug, VNAQI_O3_8H_BP, VNAQI_INDEX)
+    # The 8-hour table ends at 400 µg/m³ (AQI 300). Decision 1459 does not use
+    # the 8-hour value above that, only the 1-hour one.
+    if not math.isnan(o3_8h_ug) and o3_8h_ug <= VNAQI_O3_8H_BP[-1]:
+        sub_8h = _aqi_from_breakpoints(o3_8h_ug, VNAQI_O3_8H_BP, VNAQI_O3_8H_INDEX)
 
-    # 2. Calculate 1-hour sub-index
     if not math.isnan(o3_1h_ug):
         sub_1h = _aqi_from_breakpoints(o3_1h_ug, VNAQI_O3_1H_BP, VNAQI_INDEX)
 
-    # 3. Handle threshold boundaries
-    # If 8-hour AQI is >= 201, force fallback to 1-hour
-    if sub_8h > 200:
-        o3_sub = sub_1h if not math.isnan(sub_1h) else 200.0
-    else:
-        # Return max of available sub-indices
-        o3_valid = [v for v in (sub_1h, sub_8h) if not math.isnan(v)]
-        o3_sub = max(o3_valid) if o3_valid else float("nan")
+    o3_valid = [v for v in (sub_1h, sub_8h) if not math.isnan(v)]
+    o3_sub = max(o3_valid) if o3_valid else float("nan")
 
     if not math.isnan(pm25_ug):
         sub_indices.append(_aqi_from_breakpoints(pm25_ug, VNAQI_PM25_BP, VNAQI_INDEX))
@@ -1153,7 +1173,7 @@ def compute_aqi_for_unit_system(
     elif system == "ISPU":
         return compute_ispu(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "API":
-        return compute_api(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
+        return compute_api(pm25_ug, pm10_ug, o3_ppb, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "IAQI":
         return compute_iaqi(pm25_ug, pm10_ug, o3_ppb, no2_ppb, so2_ppb, co_ppb)
     elif system == "CHINA_AQI":
@@ -1310,13 +1330,11 @@ def compute_aqi_array(
         )
         o3_8h_calc = rolling_mean(o3_v, window=8)
     elif system == "API":
-        # Malayia rounds everything to nearest whole number
-        pm25_calc = np.round(pm25_v, 0)
-        pm10_calc = np.round(pm10_v, 0)
-        o3_calc = np.round(o3_v, 0)
-        no2_calc = np.round(no2_v, 0)
-        so2_calc = np.round(so2_v, 0)
-        co_calc = np.round(co_v, 0)
+        # Malaysia DOE: PM2.5 and PM10 24-hour averages, O3 8-hour and 1-hour,
+        # CO 8-hour, SO2 and NO2 1-hour
+        pm25_calc, pm10_calc = rolling_mean(np.stack((pm25_v, pm10_v)), window=24)
+        o3_calc, co_calc = rolling_mean(np.stack((o3_v, co_v)), window=8)
+        o3_1h_calc = o3_v
     elif system == "VN_AQI":
         # Vietnam AQI uses nowcast for PM2.5, PM10, 8-hour for O3, and 1-hour for NO2, SO2, CO
         # For all pollutants, round to whole numbers
@@ -1370,6 +1388,16 @@ def compute_aqi_array(
                 no2_1h_ppb=float(no2_calc[i]),
                 so2_1h_ppb=float(so2_calc[i]),
                 co_1h_ppb=float(co_calc[i]),
+            )
+        elif system == "API":
+            result[i] = compute_api(
+                pm25_ug=float(pm25_calc[i]),
+                pm10_ug=float(pm10_calc[i]),
+                o3_8h_ppb=float(o3_calc[i]),
+                o3_1h_ppb=float(o3_1h_calc[i]),
+                no2_ppb=float(no2_calc[i]),
+                so2_ppb=float(so2_calc[i]),
+                co_ppb=float(co_calc[i]),
             )
         elif system == "VN_AQI":
             result[i] = compute_vn_aqi(
