@@ -64,13 +64,19 @@ from API.constants.model_const import (
     HRDPS,
     HRRR,
     HRRR_SUBH,
+    LIBREWXR,
     NBM,
     RRFS,
     RRFS_SUBH,
     RTMA_RU,
     URMA,
 )
-from API.constants.shared_const import MISSING_DATA
+from API.constants.shared_const import (
+    LIGHTNING_MAX_AGE_SECONDS,
+    LIGHTNING_SEARCH_DISTANCE_M,
+    LIGHTNING_THUNDERSTORM_DISTANCE_M,
+    MISSING_DATA,
+)
 from API.legacy.current import get_legacy_current_summary
 from API.PirateText import calculate_text
 from API.PirateTextHelper import estimate_snow_height
@@ -1563,18 +1569,59 @@ def _get_ozone(
     return clipLog(val, CLIP_OZONE["min"], CLIP_OZONE["max"], "Ozone Current")
 
 
-def _get_storm(sourceList, model_data, state: InterpolationState):
+def _get_lightning(librewxr_data, lightning_time, current_time):
+    """Nearest recent satellite lightning strike at the point, from LibreWXR's T+0 row.
+
+    Returns ``(distance_m, bearing_deg, count)`` or None when the point has no lightning
+    data: outside satellite coverage (NaN distance), or fields computed
+    (``lightning_time``, the store's attribute) more than LIGHTNING_MAX_AGE_SECONDS
+    from the current time, since they have no forecast steps to fall back on. A
+    distance of +inf means no recent strike within LIGHTNING_SEARCH_DISTANCE_M;
+    ``count`` is the number of recent strikes within LIGHTNING_COUNT_DISTANCE_M.
+    """
+    # A store published before the lightning export has only the radar column
+    # and no lightning_time
+    if librewxr_data is None or lightning_time is None:
+        return None
+    if librewxr_data.shape[1] <= LIBREWXR["lightning_count"]:
+        return None
+    if abs(current_time - lightning_time) > LIGHTNING_MAX_AGE_SECONDS:
+        return None
+    distance = librewxr_data[0, LIBREWXR["lightning_dist"]]
+    if np.isnan(distance):
+        return None
+    return (
+        float(distance),
+        float(librewxr_data[0, LIBREWXR["lightning_dir"]]),
+        float(librewxr_data[0, LIBREWXR["lightning_count"]]),
+    )
+
+
+def _get_storm(sourceList, model_data, state: InterpolationState, lightning=None):
     """
     Get current storm distance and bearing from available sources.
+
+    Satellite lightning (``lightning``, from ``_get_lightning``) takes precedence
+    wherever it is available: it is an observation of thunderstorms, where the
+    GFS distance is to the nearest forecast precipitation above a threshold. With
+    no strike within LIGHTNING_SEARCH_DISTANCE_M, lightning still rules a nearer
+    storm out, so the GFS distance is floored there (its bearing kept).
 
     Args:
         sourceList: List of available sources.
         model_data: Dictionary of model data.
         state: Interpolation state.
+        lightning: ``_get_lightning``'s ``(distance_m, bearing_deg, count)``, or None.
 
     Returns:
         Tuple of (storm distance, storm bearing).
     """
+    used = model_data.get("used_sources")
+    if lightning is not None and np.isfinite(lightning[0]):
+        if used is not None:
+            used.add("librewxr")
+        return lightning[0], lightning[1]
+
     if "gfs" in sourceList:
         dist = np.maximum(
             (
@@ -1584,12 +1631,18 @@ def _get_storm(sourceList, model_data, state: InterpolationState):
             0,
         )
         bearing = model_data["GFS_Merged"][state.idx2, GFS["storm_dir"]]
-        used = model_data.get("used_sources")
         if used is not None and np.isfinite(dist):
             used.add("gfs")
-        return dist, bearing
     else:
-        return MISSING_DATA, MISSING_DATA
+        dist, bearing = MISSING_DATA, MISSING_DATA
+
+    if lightning is not None:
+        # No strike within the search distance
+        if used is not None:
+            used.add("librewxr")
+        if not dist >= LIGHTNING_SEARCH_DISTANCE_M:
+            dist = LIGHTNING_SEARCH_DISTANCE_M
+    return dist, bearing
 
 
 def _get_smoke(sourceList, model_data, state: InterpolationState):
@@ -2182,6 +2235,8 @@ def build_current_section(
     rrfsSubHInterpolation=None,
     RRFS_Merged=None,
     CFS_Merged=None,
+    librewxr_data=None,
+    librewxr_lightning_time=None,
     used_sources: set | None = None,
 ) -> CurrentSection:
     """
@@ -2368,10 +2423,19 @@ def build_current_section(
         sourceList, model_data, state, lat, lon_IN, prioritize_ai_models
     )
 
+    # Satellite lightning (LibreWXR, never Time Machine): the nearest storm, and
+    # in version 2 a nearby strike makes current precipitation a thunderstorm
+    lightning = (
+        None
+        if timeMachine
+        else _get_lightning(
+            librewxr_data, librewxr_lightning_time, float(minute_array_grib[0])
+        )
+    )
     (
         InterPcurrent[DATA_CURRENT["storm_dist"]],
         InterPcurrent[DATA_CURRENT["storm_dir"]],
-    ) = _get_storm(sourceList, hidden_field_data, state)
+    ) = _get_storm(sourceList, hidden_field_data, state, lightning)
 
     InterPcurrent[DATA_CURRENT["smoke"]] = _get_smoke(sourceList, model_data, state)
     # If HRRR smoke is unavailable, fall back to SILAM PM_FRP_column smoke
@@ -2675,6 +2739,14 @@ def build_current_section(
         if not np.isnan(InterPcurrent[DATA_CURRENT["storm_dir"]])
         else np.nan
     )
+    # Recent satellite strikes within 15 km; missing outside satellite coverage.
+    # Time Machine has no satellite lightning, so it never gets the field.
+    if not timeMachine:
+        currently["lightningCount"] = (
+            int(lightning[2])
+            if lightning is not None and np.isfinite(lightning[2])
+            else np.nan
+        )
     currently["precipIntensity"] = minuteItems[0]["precipIntensity"]
     currently["precipProbability"] = minuteItems[0]["precipProbability"]
     currently["precipIntensityError"] = minuteItems[0]["precipIntensityError"]
@@ -2765,6 +2837,9 @@ def build_current_section(
             currentDay,
             "current",
             icon,
+            lightning_nearby=version >= 2
+            and lightning is not None
+            and lightning[0] <= LIGHTNING_THUNDERSTORM_DISTANCE_M,
         )
     except Exception:
         logger.exception("CURRENTLY TEXT GEN ERROR %s", loc_tag)

@@ -1348,6 +1348,11 @@ async def PW_Forecast(
             HRDPS_Merged=HRDPS_Merged,
             GDPS_Merged=GDPS_Merged,
             CFS_Merged=merge_result.cfs,
+            librewxr_data=grid_result.dataOut_librewxr
+            if "librewxr" in sourceList
+            and isinstance(grid_result.dataOut_librewxr, np.ndarray)
+            else None,
+            librewxr_lightning_time=grid_result.librewxrLightningTime,
             logger=logger,
             loc_tag=loc_tag,
             include_currently=exCurrently != 1,

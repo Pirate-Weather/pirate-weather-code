@@ -153,13 +153,19 @@ are copied from the first minute of the minutely block and therefore use the
 minutely rules below, except on a future day, where they are the hourly item of
 the requested hour (see Future days and CFS).
 
+In version 2, a satellite lightning strike within 15 km of a point with current
+precipitation makes the `currently` summary and icon a thunderstorm, whatever
+the models' stability indices say. `currently.lightningCount` (version 2) is the
+number of those recent strikes within 15 km, and is missing outside satellite
+coverage.
+
 Some current elements have intentionally narrower source sets:
 
 | Element | Source logic |
 | --- | --- |
 | UV index | GFS-compatible source → ERA5 |
 | Ozone | GFS-compatible source → ERA5 |
-| Nearest storm | GFS-compatible source |
+| Nearest storm | LibreWXR satellite lightning (nearest strike in the last 15 min of each satellite's data, within 300 km) → GFS-compatible source, floored at 300 km where satellites see no strike that close |
 | Smoke | HRRR → SILAM |
 | Feels-like temperature | NBM → GFS-compatible source → CFS (computed from its temperature, humidity, wind and solar radiation) |
 
@@ -264,7 +270,7 @@ an element:
 | UV index | GFS-compatible source → HRDPS → GDPS → ERA5 |
 | Ozone | GFS-compatible source → GDPS → ERA5 |
 | Visibility | Regional stack filtered to NBM, HRRR, DWD MOSMIX, GFS-compatible source, and ERA5 |
-| Nearest storm | GFS-compatible source only |
+| Nearest storm | GFS-compatible source only (`currently` uses LibreWXR satellite lightning first; see Currently) |
 | Feels-like temperature | NBM → GFS-compatible source → CFS (computed from its temperature, humidity, wind and solar radiation) |
 | CAPE | NBM → HRRR → HRDPS → GDPS → GFS-compatible source → ERA5 |
 | Smoke | HRRR, with SILAM used for air-quality detail where applicable |

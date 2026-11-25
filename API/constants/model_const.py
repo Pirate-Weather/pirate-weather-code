@@ -533,7 +533,15 @@ FORECAST_SOURCES = frozenset(
 )
 # LibreWXR global radar composite (ingest/LibreWXR_Local_Ingest.py): composite
 # reflectivity in dBZ at T+0 and each 10-minute nowcast step, NaN outside radar
-# coverage.
+# coverage. The lightning fields are set at T+0 only (NaN at the nowcast steps):
+# the distance (m) and bearing (degrees, from the point towards the strike) of
+# the nearest recent satellite lightning strike. Distance is NaN outside
+# satellite coverage and +inf where no strike is within LIGHTNING_SEARCH_DISTANCE_M.
+# The count is the number of recent strikes within LIGHTNING_COUNT_DISTANCE_M,
+# NaN where the distance is.
 LIBREWXR = {
     "refc": 1,
+    "lightning_dist": 2,
+    "lightning_dir": 3,
+    "lightning_count": 4,
 }

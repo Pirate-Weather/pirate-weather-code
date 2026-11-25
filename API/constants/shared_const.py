@@ -22,6 +22,28 @@ LIBREWXR_GRID_WIDTH = 9000
 # the pipeline has stalled, so the minutely block falls back to the models.
 LIBREWXR_MAX_NOWCAST_AGE_SECONDS = 3600
 
+# Satellite lightning (GOES GLM, Meteosat-12 LI) from LibreWXR's lightning
+# artifact, exported with each nowcast as the distance and bearing from every
+# grid cell to the nearest recent strike (ingest/LibreWXR_Local_Ingest.py).
+# A strike counts as recent when it is within this long of its satellite's
+# newest published data, not of the clock: Meteosat-12 flashes arrive in
+# 10-minute files 15-25 minutes late, GOES files every 20 s.
+LIGHTNING_RECENT_WINDOW_SECONDS = 15 * 60
+# Nearest strikes are searched out to this distance (m). Inside satellite
+# coverage, a cell with no recent strike that close stores +inf: lightning
+# rules out a storm nearer than this, and the API takes the GFS distance beyond.
+LIGHTNING_SEARCH_DISTANCE_M = 300_000.0
+# A recent strike within this distance (m) of a point with precipitation makes
+# the version 2 currently summary a thunderstorm.
+LIGHTNING_THUNDERSTORM_DISTANCE_M = 15_000.0
+# currently.lightningCount counts the recent strikes within this distance (m)
+# of the point, the same radius that makes a thunderstorm.
+LIGHTNING_COUNT_DISTANCE_M = LIGHTNING_THUNDERSTORM_DISTANCE_M
+# The API uses the lightning fields only from a store exported at most this
+# long ago (its lightning_time attribute): two 10-minute nowcast cycles. Unlike
+# the radar nowcast, they have no forecast steps to fall back on.
+LIGHTNING_MAX_AGE_SECONDS = 20 * 60
+
 # An ensemble member counts towards precipitation probability (GEFS, AIGEFS,
 # GEPS, REPS) when its hourly precipitation rate exceeds this (mm/h).
 ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H = 0.1

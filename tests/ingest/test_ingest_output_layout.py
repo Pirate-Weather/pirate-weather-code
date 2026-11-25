@@ -84,7 +84,15 @@ LAYOUTS = [
     pytest.param("RRFS_NA_Local_Ingest", "RRFS", _RRFS_LAYOUT, id="rrfs_na"),
     pytest.param("RRFS_NA_6H_Local_Ingest", "RRFS", _RRFS_LAYOUT, id="rrfs_na_6h"),
     pytest.param(
-        "LibreWXR_Local_Ingest", "LIBREWXR", {"refc": "REFC_composite"}, id="librewxr"
+        "LibreWXR_Local_Ingest",
+        "LIBREWXR",
+        {
+            "refc": "REFC_composite",
+            "lightning_dist": "Lightning_Distance",
+            "lightning_dir": "Lightning_Direction",
+            "lightning_count": "Lightning_Count",
+        },
+        id="librewxr",
     ),
     pytest.param(
         "SubH_Local_Ingest",

@@ -20,6 +20,7 @@ def calculate_text(
     isDayTime,
     type,
     icon="darksky",
+    lightning_nearby=False,
 ):
     """
     Calculates the textual summary and icon for an hourly forecast period.
@@ -39,6 +40,9 @@ def calculate_text(
     - isDayTime (bool): Whether it's currently daytime
     - type (str): The type of summary being generated ("current", "hour", "hourly")
     - icon (str): Which icon set to use - "darksky" or "pirate" (default: "darksky")
+    - lightning_nearby (bool): A recent satellite lightning strike is close to the
+        point (current summaries only). Precipitation then reads as a thunderstorm
+        whatever the stability indices say.
 
     Returns:
     - tuple: A tuple containing:
@@ -123,6 +127,7 @@ def calculate_text(
     # Thunderstorms only ever replace precipitation text or its icon, so a dry
     # hour (most of them) skips the stability scoring
     thuText = thuIcon = None
+    lightning_override = False
     if precipText is not None or precipIcon is not None:
         thuText, thuIcon = calculate_thunderstorm_text(
             cape,
@@ -137,6 +142,10 @@ def calculate_text(
             dewpoint=dewPoint,
             temperature=temp,
         )
+        # Observed lightning overrides the stability score
+        if lightning_nearby:
+            thuText = thuIcon = "thunderstorm"
+            lightning_override = True
     skyText, skyIcon = calculate_sky_text(cloudCover, isDayTime, icon, "both")
 
     # If there is precipitation text use that and join with wind texts if they exist
@@ -160,8 +169,9 @@ def calculate_text(
     else:
         c_text = skyText
 
-    # If precipitation icon use that unless there are thunderstorms occurring
-    if precipIcon is not None:
+    # If precipitation icon use that unless there are thunderstorms occurring.
+    # Very light rain has text but no icon; observed lightning still shows its icon
+    if precipIcon is not None or lightning_override:
         if thuIcon is not None:
             c_icon = thuIcon
         else:

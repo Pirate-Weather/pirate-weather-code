@@ -16,6 +16,12 @@ exported, never the NWP blend LibreWXR uses for its tiles, so cells outside rada
 coverage are NaN and the API falls back to its models there. Inside coverage, no echo
 and reflectivity below ``REFC_THRESHOLD`` are 0 dBZ, as for HRRR.
 
+The same run exports LibreWXR's satellite lightning (GOES-18/19 GLM and, with EUMETSAT
+credentials, Meteosat-12 LI flashes, ``<cache>/lightning/current.npz``) as two more
+variables at T+0: the distance and bearing from each cell to the nearest recent strike,
+which the API serves as ``currently.nearestStormDistance`` / ``nearestStormBearing``, and
+the number of recent strikes within 15 km (``currently.lightningCount``).
+
 One pass per run, like the other ingests: it reads the cache the hook names
 (``LIBREWXR_CACHE_DIR``), exits early when that nowcast is already published, and
 exits non-zero on failure so the pipeline logs it. It runs inside the pipeline's
@@ -29,16 +35,19 @@ Alexander Rey, November 2026
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 import dask.array as da
 import numpy as np
 import pandas as pd
+from scipy.spatial import cKDTree
 
 from API.constants.shared_const import (
     INGEST_VERSION_STR,
@@ -48,6 +57,9 @@ from API.constants.shared_const import (
     LIBREWXR_GRID_WEST,
     LIBREWXR_GRID_WIDTH,
     LIBREWXR_MAX_NOWCAST_AGE_SECONDS,
+    LIGHTNING_COUNT_DISTANCE_M,
+    LIGHTNING_RECENT_WINDOW_SECONDS,
+    LIGHTNING_SEARCH_DISTANCE_M,
     REFC_THRESHOLD,
 )
 from API.ingest_utils import (
@@ -59,14 +71,22 @@ from API.ingest_utils import (
     read_published_run_time,
     write_final_zarr,
 )
+from API.utils.storm_proc import _bearing_deg, _haversine_distance_m
 
 logger = logging.getLogger(__name__)
 
 # %% Store constants
 STORE_NAME = "LibreWXR.zarr"
 TIME_PICKLE_NAME = "LibreWXR.time.pickle"
-# The published store's only variable; column 1 of the API's LIBREWXR index map
-zarr_vars = ("REFC_composite",)
+# The published variables; zarr_vars[i] is column i + 1 of the API's LIBREWXR map
+zarr_vars = (
+    "REFC_composite",
+    "Lightning_Distance",
+    "Lightning_Direction",
+    "Lightning_Count",
+)
+RADAR_VARS = 1
+LIGHTNING_VARS = 3
 
 # LibreWXR stores reflectivity as uint8 pixel = (dBZ + 32) * 2 (0 = no echo)
 LIBREWXR_PIXEL_DBZ_OFFSET = 32.0
@@ -74,6 +94,29 @@ LIBREWXR_PIXEL_PER_DBZ = 2.0
 # Reflectivity above this is not weather (large hail tops out near 75 dBZ); a
 # saturated pixel (255 = 95.5 dBZ) is a decode sentinel and becomes NaN
 LIBREWXR_MAX_VALID_DBZ = 80.0
+
+# Lightning satellites: the satellite id LibreWXR stores with each flash, its name in
+# the artifact's metadata, its sub-satellite longitude, the great-circle angle
+# from the sub-satellite point inside which a feed with no strikes is trusted to
+# mean no lightning, and how far behind the clock its newest data may be before
+# the feed is treated as down (its coverage dropped, so the API keeps GFS there). On 2026-11-24, 99.9 % of 2 h of strikes lay within 55-60
+# degrees for GOES GLM and 78 degrees for Meteosat-12 LI (99 % within 58); the
+# limits stay inside those, where detection is reliable, and beyond them a strike
+# is still used but its absence says nothing.
+# GOES GLM files cover 20 s and LibreWXR fetches every 5 minutes, so its data runs
+# 1-6 minutes behind and 15 minutes (three missed fetches) is an outage.
+# Meteosat-12 LI files cover 10 minutes and reach LibreWXR 10-25 minutes after
+# their window closes; 45 minutes is three missed files.
+LIGHTNING_SATELLITES = (
+    (18, "goes18", -137.2, 55.0, 15 * 60),
+    (19, "goes19", -75.2, 55.0, 15 * 60),
+    (12, "meteosat12", 0.0, 65.0, 45 * 60),
+)
+LIGHTNING_ARTIFACT = Path("lightning") / "current.npz"
+EARTH_RADIUS_M = 6_371_000.0
+# The nearest-strike search runs per 1 degree tile (25 x 25 cells): only tiles
+# that can hold a cell within LIGHTNING_SEARCH_DISTANCE_M of a strike are queried.
+LIGHTNING_TILE_CELLS = 25
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -303,6 +346,186 @@ def composite_step(
     return used
 
 
+# %% Satellite lightning
+def read_lightning_artifact(cache_dir: Path) -> tuple[np.ndarray, dict] | None:
+    """The flash points and per-satellite metadata LibreWXR holds, or None.
+
+    ``points`` is a structured array (``time_s``, ``lat``, ``lon``, ``energy``,
+    ``satellite``) of every flash in LibreWXR's retention window (2 h); the
+    metadata's ``satellites`` entry gives each feed's newest data end (``last_e``).
+    A missing or unreadable artifact (lightning disabled, first minutes after a
+    pipeline start, a torn write) returns None; see ``export_nowcast`` for why
+    that only blanks the lightning fields.
+    """
+    path = cache_dir / LIGHTNING_ARTIFACT
+    try:
+        with np.load(path, allow_pickle=False) as loaded:
+            points = loaded["points"]
+            satellites = json.loads(str(loaded["meta"])).get("satellites", {})
+    except FileNotFoundError:
+        logger.warning("No LibreWXR lightning artifact at %s", path)
+        return None
+    except (
+        OSError,
+        EOFError,  # a zero-byte file
+        ValueError,
+        KeyError,
+        AttributeError,
+        zipfile.BadZipFile,
+    ) as exc:
+        logger.warning("Unreadable LibreWXR lightning artifact %s: %s", path, exc)
+        return None
+    return points, satellites
+
+
+def unit_vectors(lats: np.ndarray, lons: np.ndarray) -> np.ndarray:
+    """Points on the unit sphere, so a k-d tree's chord distance orders by arc length."""
+    lat = np.deg2rad(lats.astype(np.float64))
+    lon = np.deg2rad(lons.astype(np.float64))
+    cos_lat = np.cos(lat)
+    return np.column_stack((cos_lat * np.cos(lon), cos_lat * np.sin(lon), np.sin(lat)))
+
+
+def chord_for_distance(distance_m: float) -> float:
+    """Unit-sphere chord length of a great-circle distance."""
+    return 2.0 * np.sin(min(distance_m / EARTH_RADIUS_M, np.pi) / 2.0)
+
+
+def lightning_storm_fields(
+    points: np.ndarray,
+    satellites: dict,
+    now: float,
+    lats: np.ndarray,
+    lons: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Distance (m) and bearing (degrees) from every cell to the nearest recent
+    strike, and the number of recent strikes within LIGHTNING_COUNT_DISTANCE_M.
+
+    Each satellite feed contributes its strikes from the last
+    ``LIGHTNING_RECENT_WINDOW_SECONDS`` of its own data and, while it is not
+    stale, its coverage. A covered cell with no strike within
+    ``LIGHTNING_SEARCH_DISTANCE_M`` is +inf (lightning rules a nearer storm out);
+    an uncovered one is NaN unless a strike is in range. Bearings point from the
+    cell towards the strike, as the GFS storm direction does. The count is 0
+    wherever the distance is known and NaN where it is not.
+
+    Where two satellites overlap (GOES-East and -West over the Americas, GOES-East
+    and Meteosat-12 over the Atlantic) each reports the same flashes, so a cell's
+    count is the largest single satellite's, never their sum.
+    """
+    distance = np.full((lats.size, lons.size), np.nan, dtype=np.float32)
+    direction = np.full((lats.size, lons.size), np.nan, dtype=np.float32)
+    cos_lat = np.cos(np.deg2rad(lats.astype(np.float64)))[:, np.newaxis]
+
+    recent = []
+    for satellite_id, name, sub_lon, coverage_deg, max_lag in LIGHTNING_SATELLITES:
+        last_e = satellites.get(name, {}).get("last_e")
+        if last_e is None:
+            logger.info("Lightning: no %s feed in the artifact", name)
+            continue
+        last_e = float(last_e)
+        if not np.isfinite(last_e):
+            logger.warning("Lightning: %s has no valid data time (%s)", name, last_e)
+            continue
+        lag = now - last_e
+        if lag > max_lag:
+            logger.warning(
+                "Lightning: %s data ends %.0f min ago; dropping its coverage",
+                name,
+                lag / 60,
+            )
+            continue
+        # Great-circle angle from the sub-satellite point (on the equator):
+        # cos(angle) = cos(lat) * cos(lon - sub_lon)
+        cos_lon = np.cos(np.deg2rad(lons.astype(np.float64) - sub_lon))[np.newaxis, :]
+        covered = cos_lat * cos_lon >= np.cos(np.deg2rad(coverage_deg))
+        distance[covered] = np.inf
+        in_window = (
+            (points["satellite"] == satellite_id)
+            & (points["time_s"] > last_e - LIGHTNING_RECENT_WINDOW_SECONDS)
+            & (points["time_s"] <= last_e)
+        )
+        recent.append(points[in_window])
+        logger.info(
+            "Lightning: %s %d recent strikes, data %.0f min old",
+            name,
+            int(in_window.sum()),
+            lag / 60,
+        )
+        del covered
+
+    strikes = np.concatenate(recent) if recent else points[:0]
+    if strikes.size == 0:
+        count = np.where(np.isnan(distance), np.nan, 0.0).astype(np.float32)
+        return distance, direction, count
+
+    tree = cKDTree(unit_vectors(strikes["lat"], strikes["lon"]))
+    search_chord = chord_for_distance(LIGHTNING_SEARCH_DISTANCE_M)
+
+    # Pick the 1 degree tiles whose centre is within the search distance plus the
+    # tile's half-diagonal of some strike; no cell outside them can be in range
+    tile = LIGHTNING_TILE_CELLS
+    tile_lats = lats.reshape(-1, tile).mean(axis=1)
+    tile_lons = lons.reshape(-1, tile).mean(axis=1)
+    tile_lat_grid, tile_lon_grid = np.meshgrid(tile_lats, tile_lons, indexing="ij")
+    # Largest at the equator, where a degree of longitude is longest
+    tile_size_m = tile * np.deg2rad(LIBREWXR_GRID_RESOLUTION_DEG) * EARTH_RADIUS_M
+    half_diagonal_m = np.sqrt(2.0) * tile_size_m / 2.0
+    tile_chord, _ = tree.query(
+        unit_vectors(tile_lat_grid.ravel(), tile_lon_grid.ravel()),
+        distance_upper_bound=chord_for_distance(
+            LIGHTNING_SEARCH_DISTANCE_M + half_diagonal_m
+        ),
+        workers=-1,
+    )
+    near_tiles = np.isfinite(tile_chord).reshape(tile_lat_grid.shape)
+    near_cells = np.repeat(np.repeat(near_tiles, tile, axis=0), tile, axis=1)
+    rows, cols = np.nonzero(near_cells)
+    del near_cells
+
+    cell_lats = lats[rows]
+    cell_lons = lons[cols]
+    chord, nearest = tree.query(
+        unit_vectors(cell_lats, cell_lons),
+        distance_upper_bound=search_chord,
+        workers=-1,
+    )
+    found = np.isfinite(chord)
+    nearest = nearest[found]
+    rows, cols = rows[found], cols[found]
+    cell_lats, cell_lons = cell_lats[found], cell_lons[found]
+    distance[rows, cols] = _haversine_distance_m(
+        cell_lats, cell_lons, strikes["lat"][nearest], strikes["lon"][nearest]
+    )
+    direction[rows, cols] = _bearing_deg(
+        cell_lats, cell_lons, strikes["lat"][nearest], strikes["lon"][nearest]
+    )
+
+    # Strike counts, only for cells whose nearest strike is close enough to count
+    count = np.where(np.isnan(distance), np.nan, 0.0).astype(np.float32)
+    close = distance[rows, cols] <= LIGHTNING_COUNT_DISTANCE_M
+    rows, cols = rows[close], cols[close]
+    close_cells = unit_vectors(cell_lats[close], cell_lons[close])
+    close_count = np.zeros(rows.size, dtype=np.int64)
+    for satellite_strikes in recent:
+        if satellite_strikes.size == 0:
+            continue
+        satellite_tree = cKDTree(
+            unit_vectors(satellite_strikes["lat"], satellite_strikes["lon"])
+        )
+        close_count = np.maximum(
+            close_count,
+            satellite_tree.query_ball_point(
+                close_cells,
+                r=chord_for_distance(LIGHTNING_COUNT_DISTANCE_M),
+                return_length=True,
+                workers=-1,
+            ),
+        )
+    count[rows, cols] = close_count
+    return distance, direction, count
+
+
 # %% Export
 def export_nowcast(
     lib: dict, cache_dir: Path, forecast_remote, zarr_store_workers: int
@@ -333,7 +556,7 @@ def export_nowcast(
     # %% Composite every step onto the global grid: (variable, time, y, x)
     lats, lons = grid_coordinates()
     stacked = np.full(
-        (len(zarr_vars), len(steps), LIBREWXR_GRID_HEIGHT, LIBREWXR_GRID_WIDTH),
+        (RADAR_VARS, len(steps), LIBREWXR_GRID_HEIGHT, LIBREWXR_GRID_WIDTH),
         np.nan,
         dtype=np.float32,
     )
@@ -363,12 +586,64 @@ def export_nowcast(
         covered_fraction * 100,
     )
 
+    # %% Nearest recent lightning strike, at T+0 only
+    # The artifact is LibreWXR's (an external image), and a problem with it must
+    # not hold back the radar nowcast: the lightning fields are then published as
+    # NaN without a lightning_time, so the API keeps its GFS storm distance. The
+    # handler is limited to what a changed or torn artifact layout raises.
+    lightning_start = time.time()
+    lightning_attributes = {}
+    lightning_fields = None
+    lightning = read_lightning_artifact(cache_dir)
+    if lightning is not None:
+        points, satellites = lightning
+        try:
+            lightning_fields = lightning_storm_fields(
+                points, satellites, lightning_start, lats, lons
+            )
+            lightning_attributes = {"lightning_time": int(lightning_start)}
+        except (AttributeError, KeyError, TypeError, ValueError, IndexError):
+            logger.exception("LibreWXR lightning artifact has an unexpected layout")
+        del points
+    if lightning_fields is None:
+        lightning_fields = tuple(
+            np.full(stacked.shape[2:], np.nan, dtype=np.float32)
+            for _ in range(LIGHTNING_VARS)
+        )
+    lightning_distance = lightning_fields[0]
+    logger.info(
+        "Lightning fields in %.1f s: %.1f%% of the globe covered, %.2f%% with a "
+        "strike within %.0f km",
+        time.time() - lightning_start,
+        float((~np.isnan(lightning_distance)).mean() * 100),
+        float(np.isfinite(lightning_distance).mean() * 100),
+        LIGHTNING_SEARCH_DISTANCE_M / 1000,
+    )
+
     # %% Write the final store (no time interpolation for 10-minute data)
     final_chunk = FINAL_CHUNK_SIZES["LibreWXR"]
     shard = FINAL_SHARD_SIZES["LibreWXR"]
-    stacked_dask = da.from_array(
-        stacked, chunks=(len(zarr_vars), len(steps), shard, shard)
+    spatial_chunks = (shard, shard)
+    radar_dask = da.from_array(
+        stacked, chunks=(RADAR_VARS, len(steps)) + spatial_chunks
     )
+    # The lightning fields have no nowcast steps; the NaN steps are built lazily
+    # per shard so they never take a full-grid array of memory
+    lightning_t0 = da.stack(
+        [
+            da.from_array(field[np.newaxis], chunks=(1,) + spatial_chunks)
+            for field in lightning_fields
+        ]
+    )
+    lightning_steps = da.full(
+        (LIGHTNING_VARS, len(steps) - 1) + stacked.shape[2:],
+        np.nan,
+        dtype=np.float32,
+        chunks=(LIGHTNING_VARS, len(steps) - 1) + spatial_chunks,
+    )
+    stacked_dask = da.concatenate(
+        (radar_dask, da.concatenate((lightning_t0, lightning_steps), axis=1)), axis=0
+    ).rechunk((len(zarr_vars), len(steps)) + spatial_chunks)
     write_final_zarr(
         stacked_dask,
         forecast_process_dir + "/" + STORE_NAME,
@@ -377,8 +652,9 @@ def export_nowcast(
         zarr_store_workers,
         zarr_vars,
         times=times,
+        extra_attributes=lightning_attributes,
     )
-    del stacked_dask, stacked
+    del stacked_dask, stacked, lightning_fields, lightning_distance
 
     # %% Publish the store, then the run time the API uses to detect it
     publish_ingest_run(

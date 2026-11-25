@@ -205,6 +205,35 @@ def test_librewxr_echo_without_model_precip_is_typed_rain():
     assert minute_items[0]["precipIntensity"] > 0
 
 
+def test_librewxr_lightning_without_radar_leaves_the_model_minutely_unchanged():
+    """Regression: a point with satellite lightning but no radar reads LibreWXR
+    for its lightning columns. That must not count as radar coverage: it turned
+    off the models' small-value filter, so drizzle below the noise threshold
+    showed up in minutely intensity across most of the globe.
+    """
+    # Below PRECIP_NOISE_THRESHOLD_MMH (0.01 mm/h)
+    gfs = _source_array(GFS, intensity=0.005, rain=1.0)
+    gefs = _source_array(GEFS, prob=0.05, error=0.005, rain=1.0)
+    lightning_only = _source_array(LIBREWXR, refc=np.nan)
+    lightning_only[:, LIBREWXR["lightning_dist"]] = np.inf
+    lightning_only[:, LIBREWXR["lightning_count"]] = 0.0
+
+    without = _build(
+        ["gfs", "gefs"], lat=-15.0, lon=-50.0, gfs_data=gfs, gefs_data=gefs
+    )
+    with_lightning = _build(
+        ["gfs", "gefs", "librewxr"],
+        lat=-15.0,
+        lon=-50.0,
+        gfs_data=gfs,
+        gefs_data=gefs,
+        librewxr_data=lightning_only,
+    )
+    # The minute items are what the noise filter applies to
+    assert with_lightning[2] == without[2]
+    assert without[2][0]["precipIntensity"] == 0
+
+
 def test_reps_rows_without_time_do_not_blank_minutes_inside_its_span():
     """Regression: merged arrays start at local midnight, so a model without
     short-term history (REPS) has NaN times before its first lead and after its

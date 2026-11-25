@@ -116,6 +116,30 @@ peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
 
 ## Done
 
+### Satellite lightning for the current nearest storm (2026-11-24)
+[Discussion #212](https://github.com/Pirate-Weather/pirateweather/discussions/212):
+`ingest/LibreWXR_Local_Ingest.py` now also reads LibreWXR's lightning artifact
+(`<cache>/lightning/current.npz`: GOES-18/19 GLM, and Meteosat-12 LI once the EUMETSAT
+key pair is set, which it is on RBX since 2026-11-24) and adds `Lightning_Distance` (m)
+and `Lightning_Direction` to `LibreWXR.zarr` at T+0: the nearest strike in the last
+15 minutes of each satellite's own data, searched to 300 km. Distance is NaN outside
+coverage (great-circle angle from the sub-satellite point: 55 degrees GLM, 65 degrees LI)
+and for a feed too far behind (15 min GOES, 45 min Meteosat-12), +inf where nothing is
+within 300 km. The export time is the store attribute `lightning_time`.
+`currently.nearestStormDistance` / `Bearing` take it for every version, fall back to GFS
+(floored at 300 km under +inf), and ignore fields computed over 20 min ago.
+In version 2 a strike within 15 km makes current precipitation a thunderstorm (existing
+text and icon, no new strings). `Lightning_Count`, the recent strikes within 15 km, is
+served as the version 2 field `currently.lightningCount` (missing outside coverage);
+where satellites overlap a cell takes the largest single satellite's count, since each
+reports the same flashes.
+- Cost: 2.9 s and ~1.1 GB per export with the count (2.6 s and ~0.9 GB without) against the 2026-11-24 artifact (374k strikes in
+  2 h; 6 % of the globe within 300 km of a recent strike); point read 182-213 us before,
+  205-211 us after; store ~19 % larger over an active storm region.
+- Meteosat-12 runs 15-25 min behind (10-minute files), so its strikes are older than GOES's.
+- Deploy order does not matter: an API reading the old one-variable store
+  keeps GFS, and an old API ignores the new columns.
+
 ### Ensemble time interpolation no longer depends on the hash seed (2026-11-12)
 GEFS (14 Gi) and AIGEFS (5 Gi) were OOM-killed on about a third of runs from 2026-11-10,
 about 40 s after the last member, and usually passed on retry. A once-a-second cgroup
