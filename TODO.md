@@ -8,57 +8,32 @@ then move the entry to Done.
 
 ## Improvements
 
-### RDAQA for current air quality (awaiting a decision, asked 2026-11-14)
-ECCC's Regional Deterministic Air Quality Analysis blends RAQDPS with hourly AirNow and
-Canadian monitor observations (no satellites or low-cost sensors) on the RAQDPS 10 km
-grid, so the RAQDPS cell lookup can be reused. The Datamart URLs are built by
-`build_rdaqa_url` in `ingest/RDAQA_Local_Ingest.py` (`analysis="prelim" | "final" | "fw"`).
-`scripts/compare_rdaqa_raqdps_point.py` prints both for one lat/lon from the Datamart.
-
-PM2.5 (µg/m³) mean absolute error against monitors, 2026-11-17/18:
-
-| Station | RDAQA Prelim | RAQDPS |
-|---|---|---|
-| Ottawa Downtown, 17-18th | 1.3 | 6.6 |
-| Ottawa Downtown, 18-19th | 0.8 | 4.1 (12Z run 7.1, 00Z run 2.3) |
-| Kingston | 2.8 | 11.4 |
-| Thunder Bay (clean air) | 1.7 | 1.8 |
-
-Agreement at a monitor's own cell is partly built in (the analysis uses that monitor).
-Away from monitors it falls back toward RAQDPS; corrected PurpleAir sensors near
-Manotick/Kemptville were within a few µg/m³ of it while RAQDPS was about half. RAQDPS's
-error changes from run to run (6-13 low through one run, within 2 the next), so no
-fixed correction.
-
-Plan if accepted:
-- Prelim only: posted ~40 min after the hour (final ~2 h), same values to 0.1 µg/m³
-  in 20 of 21 hours checked, and fewer missing hours.
-- Ingest (done, `ingest/RDAQA_Local_Ingest.py`, branch `rdaqa-ingest`): hourly at :50,
-  archives each hour like URMA and publishes `RDAQA.zarr` with the last
-  `HISTORY_PERIODS["RDAQA"] = 48` hours (24 h AQ lead-in plus up to 24 h since local
-  midnight). A late or missing hour is a NaN row, retried each run. Downloads skip
-  Herbie: its existence check reports failed requests as "not found", which stored
-  3 of 49 posted hours as NaN. Backfilling all 49 hours took 140-160 s at a 1.6 GB
-  peak; an hourly run fetches one hour in ~20 s. History stores are ~5 MB an hour;
-  the compose `prune-history` job deletes them after 96 h (48 h window + 2 days).
-  A run whose newest hour is already published still retries the missing hours and
-  republishes if one arrived.
-- API (done, branch `rdaqa-api-response`): `RDAQA.zarr` is read at the RAQDPS cell
-  (one point read, not the 3 x 3 maximum the forecasts use); per hour RDAQA >
-  RAQDPS > SILAM, so RDAQA gives the past hours and the AQI lead-in and RAQDPS the
-  forecast. `currently` reports the newest RDAQA hour when it is at most
-  `RDAQA_CURRENT_MAX_AGE_HOURS` (3) old: interpolating the hours around now would
-  mostly be RAQDPS, since an hour's analysis is posted ~40 min after it.
-  `exclude=rdaqa`, `rdaqa` in flags.sources/sourceTimes (its newest hour) and
-  `PUBLISH_SCHEDULE_HOURS` (estimated, check against deployed stamps). Checked on
-  real stores (downtown Ottawa, 2026-11-20 14:47 EST): currently PM2.5 6.0 from
-  the 13:00 analysis against 2.9 interpolated from RAQDPS; a full HTTP request
-  wasn't run locally (no forecast store: the Canadian ingests need wgrib2). This
-  changes v2 air quality values and adds a store read for North American requests.
-- Later, if the jump from `currently` to the first forecast hour is noticeable: fade
-  from the last RDAQA hour into RAQDPS over the first few hours.
+### RDAQA follow-ups
+- If the jump from `currently` to the first forecast hour is noticeable: fade from the
+  last RDAQA hour into RAQDPS over the first few hours.
 - Smoke season: compare `fw` with Prelim. The standard analysis rejects PM observations
   more than 100 µg/m³ above the forecast; FW only above 300.
+- `PUBLISH_SCHEDULE_HOURS["RDAQA"]` is estimated; check it against deployed stamps.
+
+### Mixed precipitation hours put all of the precipitation in one type
+When an hour forecasts more than one type, the API reports `precipType: "mixed"` and
+puts all of the precipitation in the ice/sleet channel. Example (`time` 1795752000,
+2026-11-27 04Z):
+
+```json
+"summary": "Mixed Precipitation", "icon": "sleet", "precipType": "mixed",
+"precipIntensity": 1.1118, "precipProbability": 0.49, "precipAccumulation": 0.1114,
+"rainIntensity": 0, "snowIntensity": 0, "iceIntensity": 1.1118,
+"liquidAccumulation": 0, "snowAccumulation": 0, "iceAccumulation": 0.1114
+```
+
+The hour might be 0.5 mm of rain and 0.6 mm of snow, but it is all reported as ice.
+
+Ideal fix: split the intensity and accumulation between the types by the ensemble
+amounts. Watch the source priority: the per-type amounts could come from GEPS while
+the total comes from GFS (or the other way round), depending on which data is
+available, so the split and the total can disagree.
+
 ### GEPS/REPS precip type follows the wettest members (needs discussion)
 GEPS and REPS have no categorical type. The ingests store the ensemble mean of each
 type's rate (`AFRAIN_Mean`, `AICEP_Mean`, `ARAIN_Mean`, `ASNOW_Mean`), and
@@ -115,6 +90,59 @@ pick the cache size (the shard indexes alone are ~35 MB), and check the write
 peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
 
 ## Done
+
+### Source-selection docs match the code again (2026-11-25)
+`docs/forecast-source-selection/README.md` now follows `API/data_inputs.py` and
+`API/current/metrics.py`:
+- UV and ozone: HRDPS UV and GDPS ozone lead GFS in Canada (since #734), in both
+  `currently` and the element table.
+- `include=aimodels`: hourly and `currently` orders as tables, including ECMWF IFS
+  second, ahead of RTMA-RU, in North American `currently`.
+- ERA5 sits ahead of GFS (it is read only for Time Machine, with GFS history filling
+  its gaps).
+- CFS gust, visibility and UV are estimated, no longer listed as missing; visibility
+  in `currently` lists its real sources; RDAQA added to air quality.
+
+### AQI tables for Malaysia and Vietnam checked (2026-11-25)
+Checked `API/constants/aqi_const.py` against aqihub.info (Malaysia: DOE "Air Pollutant
+Index (API) Calculation"; Vietnam: VEA Decision 1459/QD-TCMT, 2019).
+- Malaysia CO was 10x too strict: DOE gives 30/40/50/60 ppm and the table had
+  3000-6000 ppb, so 3 ppm already read as "Moderate". Now 30000-60000 ppb.
+- Vietnam PM10's "Unhealthy" top was 430 µg/m³; the decision has 420.
+- Everything else matches. aqihub labels Vietnam's gas rows ppm, but the values are
+  µg/m³, which is how the code reads them.
+- Comments: the module docstring no longer says "three AQI systems", and the EPA
+  O3/CO tables are labelled ppb (how they are used), not µg/m³.
+- `tests/api/test_aqi_calculations.py` pins both corrected breakpoints.
+
+### RDAQA for current air quality (2026-11-24, #848)
+ECCC's Regional Deterministic Air Quality Analysis (RAQDPS blended with hourly AirNow
+and Canadian monitors, RAQDPS 10 km grid) now gives the past hours, the AQI lead-in and
+`currently` in North America. PM2.5 mean absolute error against monitors, 2026-11-17/18:
+
+| Station | RDAQA Prelim | RAQDPS |
+|---|---|---|
+| Ottawa Downtown, 17-18th | 1.3 | 6.6 |
+| Ottawa Downtown, 18-19th | 0.8 | 4.1 (12Z run 7.1, 00Z run 2.3) |
+| Kingston | 2.8 | 11.4 |
+| Thunder Bay (clean air) | 1.7 | 1.8 |
+
+Agreement at a monitor's own cell is partly built in (the analysis uses that monitor);
+away from monitors it falls back toward RAQDPS. RAQDPS's error changes from run to run,
+so no fixed correction.
+- Prelim only: posted ~40 min after the hour (final ~2 h), same values to 0.1 µg/m³ in
+  20 of 21 hours checked, and fewer missing hours.
+- Ingest (`ingest/RDAQA_Local_Ingest.py`): hourly at :50, archives each hour like URMA
+  and publishes `RDAQA.zarr` with the last `HISTORY_PERIODS["RDAQA"] = 48` hours. A
+  late or missing hour is a NaN row, retried each run. Downloads skip Herbie (its
+  existence check reports failed requests as "not found"). Backfilling 49 hours took
+  140-160 s at a 1.6 GB peak; an hourly run takes ~20 s. History stores are ~5 MB an
+  hour; `prune-history` deletes them after 96 h.
+- API: read at the RAQDPS cell (one point read); per hour RDAQA > RAQDPS > SILAM.
+  `currently` reports the newest RDAQA hour when at most `RDAQA_CURRENT_MAX_AGE_HOURS`
+  (3) old. `exclude=rdaqa`, and `rdaqa` in flags.sources/sourceTimes. This changes v2
+  air quality values and adds a store read for North American requests.
+- `scripts/compare_rdaqa_raqdps_point.py` prints both for one lat/lon from the Datamart.
 
 ### Satellite lightning for the current nearest storm (2026-11-24)
 [Discussion #212](https://github.com/Pirate-Weather/pirateweather/discussions/212):
@@ -864,23 +892,3 @@ Measured end to end (sharded copies of the e2e history, warm runs):
 Unsharded stores written before this still work (64 in flight got ~14 MB/s
 on them) and are replaced as the window moves on. The local copy adds working
 disk: ~9 GB for GFS and ~17 GB for URMA.
-
-## Docs
-
-### Source-selection docs predate #734 and the AI ordering
-`docs/forecast-source-selection/README.md` lists current UV as "GFS-compatible → ERA5"
-(and "GFS-compatible → HRDPS → GDPS" in the element table), but since #734 HRDPS UV and
-GDPS ozone lead GFS in the Canada box (pinned by
-`tests/api/test_regional_source_priority.py`). It also only says the AI source leads
-in AI mode; in North America the currently order then puts ECMWF IFS second, ahead of
-RTMA-RU, which isn't documented.
-
-## Needs verification
-
-### AQI breakpoint tables for Vietnam and Malaysia
-`API/constants/aqi_const.py`: `VNAQI_PM25_BP` / `VNAQI_PM10_BP` may not match VEA
-Decision 1459, and `API_PM25_BP` / `API_CO_BP` (Malaysia) may not match the DOE
-tables. Flagged from memory during the test review, not checked against the official
-documents. `tests/api/test_aqi_calculations.py` only pins values where both readings
-agree. Comment-only issues in the same file: the EPA O3/CO tables are labelled µg/m³
-but are in ppb, and the module docstring says "three AQI systems" (there are eleven).
