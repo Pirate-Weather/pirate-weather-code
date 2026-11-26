@@ -6,11 +6,12 @@ import pytest
 from API.api_utils import map_ensemble_precip_rates_to_ptype, select_daily_precip_type
 from API.constants.api_const import PRECIP_IDX
 from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
-from API.constants.shared_const import MISSING_DATA
-from API.hourly.block import _calculate_derived_metrics
-from API.PirateDailyText import calculate_day_text
-from API.PirateTextHelper import calculate_precip_text
-from tests.helpers.text import make_hours
+from API.constants.model_const import GEPS
+from API.constants.shared_const import ENSEMBLE_MEMBER_COUNTS, MISSING_DATA
+from API.data_inputs import prepare_data_inputs
+from API.hourly.block import build_hourly_block
+from API.PirateTextHelper import calculate_precip_text, estimate_snow_height
+from tests.helpers.hourly import hourly_block_kwargs
 
 
 def test_daily_precip_type_follows_dominant_accumulation():
@@ -148,46 +149,151 @@ def test_daily_sleet_is_kept_apart_from_freezing_rain(
     assert result.tolist() == [PRECIP_IDX[expected]]
 
 
-def test_mixed_ensemble_hours_keep_their_precipitation():
-    """GEPS and REPS mark an hour with several strong channels as mixed before the
-    accumulation is split by type, which only knew rain, snow, ice and sleet: the
-    hour's precipitation vanished from the accumulation, intensity, and the daily
-    text and type. It must count as ice and still read as mixed.
+def test_geps_hours_type_by_member_vote_and_split_mixed_hours():
+    """Regression for #851. GEPS/REPS typed an hour by the largest type mean, so two
+    members with heavy freezing rain outweighed ten with light snow (Ottawa got 13
+    hours of freezing drizzle), and a mixed hour put all its precipitation in the
+    ice columns. The member vote must decide the type, a mixed hour must split its
+    accumulation and intensity between the types without losing any, its ice must
+    count as sleet and freezing rain by the type means, and a store from before the
+    votes (NaN) must keep the mean-based type.
     """
-    hours = 24
-    InterPhour = np.zeros((hours, max(DATA_HOURLY.values()) + 1))
-    InterPhour[:, DATA_HOURLY["type"]] = PRECIP_IDX["mixed"]
-    InterPhour[:, DATA_HOURLY["accum"]] = 2.0
-    InterPhour[:, DATA_HOURLY["intensity"]] = 2.0
-    InterPhour[:, DATA_HOURLY["prob"]] = 0.9
-    InterPhour[:, DATA_HOURLY["temp"]] = 0.0
+    import datetime
 
-    _calculate_derived_metrics(
+    from API.constants.api_const import PRECIP_TYPES
+    from API.daily.builder import _frozen_accum_by_type
+    from API.minutely.builder import _process_geps_ptype
+    from API.PirateDailyText import (
+        HourColumns,
+        _aggregate_periods,
+        _window_accumulation,
+    )
+
+    members = ENSEMBLE_MEMBER_COUNTS["GEPS"]
+    num_hours = 5
+    geps = np.full((num_hours, max(GEPS.values()) + 1), np.nan)
+    # (freezing rain, ice pellets, rain, snow) means in mm/h, then votes in members
+    hours = [
+        # One member with 6 mm/h of freezing rain against ten with light snow
+        ((6.0, 0.0, 0.0, 4.0), (1, 0, 0, 10)),
+        # Rain and snow members nearly even: mixed although no mean reaches the
+        # 0.5 mm/h the mean-based rule needs
+        ((0.1, 0.1, 0.3, 0.2), (1, 0, 4, 3)),
+        # A store from before the votes types by the largest mean
+        ((0.3, 0.0, 0.0, 0.1), None),
+        # Mixed rain and freezing rain without temperature or wind (set below)
+        ((0.2, 0.2, 0.3, 0.0), (3, 0, 4, 0)),
+        # Ice pellets and freezing rain tie on votes; pellets have the larger mean
+        ((0.1, 0.4, 0.0, 0.0), (3, 3, 0, 0)),
+    ]
+    for row, (means, votes) in enumerate(hours):
+        means = np.array(means) / (members if row == 0 else 1)
+        geps[row, [GEPS[k] for k in ("freezing_rain", "ice", "rain", "snow")]] = means
+        geps[row, GEPS["accum"]] = means.sum()
+        geps[row, GEPS["prob"]] = 0.5
+        if votes is not None:
+            geps[
+                row,
+                [GEPS[f"{k}_votes"] for k in ("freezing_rain", "ice", "rain", "snow")],
+            ] = np.array(votes) / members
+    inputs = prepare_data_inputs(
+        source_list=["geps"],
+        nbm_merged=None,
+        hrrr_merged=None,
+        dwd_mosmix_merged=None,
+        ecmwf_merged=None,
+        gefs_merged=None,
+        gfs_merged=None,
+        era5_merged=None,
+        extra_vars=[],
+        num_hours=num_hours,
+        lat=45.42,
+        lon=-75.70,
+        geps_merged=geps,
+    )
+    # GEPS has no temperature or wind; above -1 C, so rain stays rain
+    temp_c = 0.5
+    inputs["temperature_inputs"] = np.full((num_hours, 1), temp_c)
+    inputs["wind_inputs"] = np.full((num_hours, 1), 2.0)
+    inputs["temperature_inputs"][3] = np.nan
+    inputs["wind_inputs"][3] = np.nan
+    *_, InterPhour = build_hourly_block(
+        **hourly_block_kwargs(num_hours, source_list=["geps"], **inputs)
+    )
+    hour_types = InterPhour[:, DATA_HOURLY["type"]].tolist()
+    assert hour_types == [
+        PRECIP_IDX["snow"],
+        PRECIP_IDX["mixed"],
+        PRECIP_IDX["ice"],
+        PRECIP_IDX["mixed"],
+        PRECIP_IDX["mixed"],
+    ]
+
+    # A mixed hour without a snow share has no snow. The snow density is NaN
+    # without temperature or wind, and a zero share turned into NaN snow that
+    # reached the hourly and daily totals.
+    assert InterPhour[3, DATA_HOURLY["snow"]] == 0
+    np.testing.assert_allclose(
+        InterPhour[3, [DATA_HOURLY["rain"], DATA_HOURLY["ice"]]], [0.3, 0.4]
+    )
+
+    # Minutely takes the vote like the hourly type: a tie goes to the larger
+    # mean (argmax picked freezing rain, the first column), and a clear vote
+    # beats a larger mean (one heavy freezing-rain member against ten snow)
+    InterTminute = np.zeros((num_hours, 5))
+    _process_geps_ptype(geps, InterTminute)
+    minute_types = np.argmax(InterTminute, axis=1)
+    assert minute_types[0] == PRECIP_IDX["snow"]
+    assert minute_types[4] == PRECIP_IDX["sleet"]
+
+    # The mixed hour: 0.3 rain, 0.2 snow (liquid), 0.2 ice of its 0.7 mm
+    mixed = InterPhour[1]
+    np.testing.assert_allclose(
+        [mixed[DATA_HOURLY["rain"]], mixed[DATA_HOURLY["ice"]]], [0.3, 0.2]
+    )
+    np.testing.assert_allclose(
+        mixed[DATA_HOURLY["snow"]], estimate_snow_height(np.array([0.2]), temp_c, 2.0)
+    )
+    np.testing.assert_allclose(
+        mixed[DATA_HOURLY["rain_intensity"]]
+        + mixed[DATA_HOURLY["snow_intensity"]] / 10
+        + mixed[DATA_HOURLY["ice_intensity"]],
+        mixed[DATA_HOURLY["intensity"]],
+    )
+    np.testing.assert_allclose(mixed[DATA_HOURLY["intensity"]], 0.7)
+
+    # Mixed hours' ice by the type means: 0.1 sleet + 0.1 freezing rain, then
+    # 0.2 + 0.2 and 0.4 + 0.1; the third hour's 0.4 mm is freezing rain
+    expected_sleet, expected_freezing_rain = 0.7, 0.8
+    sleet, freezing_rain = _frozen_accum_by_type(
+        InterPhour, np.zeros(num_hours, dtype=int), 1
+    )
+    np.testing.assert_allclose(
+        [sleet[0], freezing_rain[0]], [expected_sleet, expected_freezing_rain]
+    )
+
+    # The summary text splits it the same way, both in the period text, which
+    # put all of a mixed hour's ice in sleet, and in the expected amount
+    start = int(datetime.datetime(2026, 11, 26, 12, tzinfo=datetime.UTC).timestamp())
+    type_names = {index: PRECIP_TYPES[name] for name, index in PRECIP_IDX.items()}
+    columns = HourColumns.from_interphour(
         InterPhour,
-        hourlyDayIndex=np.zeros(hours, dtype=int),
-        baseTimeOffset=0,
-        timeMachine=True,
+        np.arange(start, start + num_hours * 3600, 3600),
+        [type_names[hour_type] for hour_type in hour_types],
     )
-
-    assert np.all(InterPhour[:, DATA_HOURLY["ice"]] == 2.0)
-    assert np.all(InterPhour[:, DATA_HOURLY["ice_intensity"]] == 2.0)
-
-    day_sum = np.zeros((1, max(DATA_DAY.values()) + 1))
-    day_sum[0, DATA_DAY["ice"]] = InterPhour[:, DATA_HOURLY["ice"]].sum()
-    daily_type = select_daily_precip_type(
-        day_sum, DATA_DAY, np.array([PRECIP_IDX["mixed"]]), PRECIP_IDX
+    window = columns.window(0, num_hours)
+    period_stats = _aggregate_periods(window, datetime.UTC, "daily", 0.0)[1]
+    np.testing.assert_allclose(
+        [
+            sum(period["sleet_accum"] for period in period_stats),
+            sum(period["frzrain_accum"] for period in period_stats),
+        ],
+        [expected_sleet, expected_freezing_rain],
     )
-    assert daily_type.tolist() == [PRECIP_IDX["mixed"]]
-
-    hour_list = make_hours(
-        hours,
-        precipType="mixed",
-        iceAccumulation=2.0,
-        iceIntensity=2.0,
-        precipProbability=0.9,
+    *_, window_freezing_rain, window_sleet = _window_accumulation(window)
+    np.testing.assert_allclose(
+        [window_sleet, window_freezing_rain], [expected_sleet, expected_freezing_rain]
     )
-    _, text = calculate_day_text(hour_list, True, "UTC", "day")
-    assert "mixed-precipitation" in str(text)
 
 
 def _rain_and_frozen_day(rain_hours, rain_mm, frozen_type, frozen_hours, frozen_mm):

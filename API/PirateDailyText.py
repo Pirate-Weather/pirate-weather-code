@@ -571,6 +571,7 @@ class HourColumns:
         "k_index",
         "lifted_index",
         "liquid",
+        "mixed_freezing_rain",
         "pop",
         "precip_accum",
         "precip_type",
@@ -611,6 +612,7 @@ class HourColumns:
         cin,
         vertical_velocity,
         k_index,
+        mixed_freezing_rain=None,
     ):
         as_float = np.asarray
         wind = as_float(wind, dtype=float)
@@ -642,6 +644,13 @@ class HourColumns:
         self.liquid = liquid.tolist()
         self.snow = snow.tolist()
         self.ice = ice.tolist()
+        # The freezing-rain part of a mixed GEPS/REPS hour's ice (the rest is
+        # sleet); none without it (hour dicts)
+        self.mixed_freezing_rain = (
+            [0.0] * len(self.time)
+            if mixed_freezing_rain is None
+            else as_float(mixed_freezing_rain, dtype=float).tolist()
+        )
         self.precip_type = list(precip_type)
         self.vis = vis.tolist()
         self.smoke = smoke.tolist()
@@ -737,6 +746,7 @@ class HourColumns:
             cin=col("convective_inhibition"),
             vertical_velocity=col("vertical_velocity"),
             k_index=col("k_index"),
+            mixed_freezing_rain=col("mixed_freezing_rain"),
         )
 
     def __len__(self):
@@ -827,13 +837,15 @@ def _aggregate_periods(window, zone, mode, min_pop):
     liquid = cols.liquid
     snow = cols.snow
     ice = cols.ice
+    mixed_freezing_rain = cols.mixed_freezing_rain
     pop = cols.pop
     precip_type = cols.precip_type
     temp = cols.temp
     dew = cols.dew
     light_wind = WIND_THRESHOLDS["light"]
     sleet_type = PRECIP_TYPES["sleet"]
-    # A mixed hour's accumulation is stored as ice (see the hourly block)
+    # A mixed hour's accumulation is stored as ice (see the hourly block); a
+    # mixed GEPS/REPS hour's ice is sleet apart from its freezing-rain part
     mixed_type = PRECIP_TYPES["mixed"]
     freezing_rain_type = PRECIP_TYPES["ice"]
 
@@ -888,10 +900,16 @@ def _aggregate_periods(window, zone, mode, min_pop):
         data["num_hours_precip"] = sum(pick_precip(cols.wet))
 
         data["frzrain_accum"] = _sequential_sum(
-            ice[row] for row in precip_rows if precip_type[row] == freezing_rain_type
+            ice[row]
+            if precip_type[row] == freezing_rain_type
+            else mixed_freezing_rain[row]
+            for row in precip_rows
+            if precip_type[row] in (freezing_rain_type, mixed_type)
         )
         data["sleet_accum"] = _sequential_sum(
-            ice[row]
+            ice[row] - mixed_freezing_rain[row]
+            if precip_type[row] == mixed_type
+            else ice[row]
             for row in precip_rows
             if precip_type[row] in (sleet_type, mixed_type)
         )
@@ -1039,11 +1057,19 @@ def _window_accumulation(window):
             kind, error_mm = hour_error
             errors[kind] += error_mm
             has_error_data[kind] = True
+    # A mixed hour's ice is sleet apart from its freezing-rain part (mixed
+    # GEPS/REPS hours)
     frzrain_accum = _sequential_sum(
-        cols.ice[row] for row in rows if cols.precip_type[row] == PRECIP_TYPES["ice"]
+        cols.ice[row]
+        if cols.precip_type[row] == PRECIP_TYPES["ice"]
+        else cols.mixed_freezing_rain[row]
+        for row in rows
+        if cols.precip_type[row] in (PRECIP_TYPES["ice"], PRECIP_TYPES["mixed"])
     )
     sleet_accum = _sequential_sum(
-        cols.ice[row]
+        cols.ice[row] - cols.mixed_freezing_rain[row]
+        if cols.precip_type[row] == PRECIP_TYPES["mixed"]
+        else cols.ice[row]
         for row in rows
         if cols.precip_type[row] in (PRECIP_TYPES["sleet"], PRECIP_TYPES["mixed"])
     )

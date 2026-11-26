@@ -1,19 +1,27 @@
 """Summary text windows, period names and fallbacks."""
 
+import datetime
 import math
 from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
 
+import numpy as np
 import pytest
+from pirateweather_translations.dynamic_loader import load_translation
+from pirateweather_translations.translation import Translation
 
+from API.constants.forecast_const import DATA_DAY, DATA_HOURLY
+from API.daily.builder import build_daily_section
+from API.hourly.builder import initialize_time_grids
 from API.legacy.summary import (
     build_daily_summary,
     build_hourly_summary,
     build_minutely_summary,
 )
-from API.PirateDailyText import calculate_day_text
+from API.PirateDailyText import HourColumns, calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateWeeklyText import calculate_weekly_text
-from tests.helpers.text import BASE_TIME, HOUR, make_hours
+from tests.helpers.text import BASE_TIME, HOUR, make_hour, make_hours
 
 RAIN = {
     "precipType": "rain",
@@ -126,8 +134,8 @@ def test_minutely_summary_falls_back_when_text_fails():
 
 @pytest.mark.parametrize("first, second", [("rain", "wind"), ("wind", "rain")])
 def test_block_summary_ties_go_to_the_earliest_entry(first, second):
-    """Without summary text (and always for Time Machine) the hourly and daily
-    block text and icon are the most common entries. Picking them from a set
+    """Without summary text the hourly and daily block text and icon are the
+    most common entries. Picking them from a set
     let a tie be won by whichever value the process's string hash seed put
     first, so API pods returned different block icons for the same request.
     A tie must go to the earliest hour/day; both orders are checked so a
@@ -147,6 +155,7 @@ def test_block_summary_ties_go_to_the_earliest_entry(first, second):
         hour_icon_list=entries,
         time_machine=True,
         base_time_offset_int=0,
+        day_array_grib=np.array([0, 24 * HOUR]),
         logger=MagicMock(),
         loc_tag="test",
     ) == (first, first)
@@ -574,3 +583,158 @@ def test_rest_of_today_is_not_throughout_the_day(start_hour):
 
     # ["sentence", ["for-rest-of-day", <rain text>]]
     assert text[1][0] == "for-rest-of-day"
+
+
+SNOW = {
+    "precipType": "snow",
+    "snowIntensity": 1.5,
+    "snowAccumulation": 4.5,
+    "precipProbability": 0.9,
+    "cloudCover": 1.0,
+    "temperature": -3.0,
+    "dewPoint": -5.0,
+    "visibility": 3000,
+}
+
+
+def test_single_day_daily_summary_runs_midnight_to_midnight():
+    """A Time Machine or future-date day (#711) has its totals from midnight to
+    midnight, but its text and icon came from the forecast's 6am-6am window:
+    snow from midnight to 6am was in the day's snowAccumulation while the
+    summary read "Mostly cloudy". The window must also stop at midnight, not
+    describe the next day's 00:00 grid row (rain here).
+    """
+    times = np.arange(25) * HOUR
+    InterPhour = np.zeros((len(times), max(DATA_HOURLY.values()) + 1))
+    InterPhour[:, DATA_HOURLY["time"]] = times
+    InterPhour[:, DATA_HOURLY["cloud"]] = 0.8
+    InterPhour[:, DATA_HOURLY["prob"]] = 0.05
+    InterPhour[:, DATA_HOURLY["vis"]] = 16000
+    InterPhour[:, DATA_HOURLY["temp"]] = -3.0
+    InterPhour[:, DATA_HOURLY["dew"]] = -5.0
+    snow = slice(0, 6)
+    InterPhour[snow, DATA_HOURLY["type"]] = 1
+    InterPhour[snow, DATA_HOURLY["snow_intensity"]] = 1.5
+    InterPhour[snow, DATA_HOURLY["intensity"]] = 1.5
+    InterPhour[snow, DATA_HOURLY["snow"]] = 4.5
+    InterPhour[snow, DATA_HOURLY["prob"]] = 0.9
+    InterPhour[snow, DATA_HOURLY["cloud"]] = 1.0
+    InterPhour[24, DATA_HOURLY["type"]] = 4
+    InterPhour[24, DATA_HOURLY["rain_intensity"]] = 4.0
+    InterPhour[24, DATA_HOURLY["rain"]] = 4.0
+    InterPhour[24, DATA_HOURLY["prob"]] = 0.9
+    precip_types = ["snow"] * 6 + ["none"] * 18 + ["rain"]
+    # The grid's last row is the next day's (calculate_time_indexing)
+    day_index = (times >= 24 * HOUR).astype(int)
+
+    result = build_daily_section(
+        InterPhour=InterPhour,
+        hourlyDayIndex=day_index,
+        hourlyDay6amIndex=day_index,
+        hourlyHalfDayIndex=day_index,
+        hourlyHalfNightIndex=day_index,
+        hourlyHighIndex=day_index,
+        hourlyLowIndex=day_index,
+        daily_days=1,
+        prepAccumUnit=1.0,
+        prepIntensityUnit=1.0,
+        windUnit=1.0,
+        visUnits=1.0,
+        tempUnits=1.0,
+        extraVars=[],
+        summaryText=True,
+        translation=Translation(load_translation("en")),
+        is_all_night=False,
+        is_all_day=False,
+        tz_name="UTC",
+        icon="darksky",
+        unitSystem="si",
+        version=2,
+        timeMachine=True,
+        tmExtra=False,
+        day_array_grib=np.array([0, 24 * HOUR]),
+        day_array_6am_grib=np.array([6 * HOUR, 30 * HOUR]),
+        day_array_6pm_grib=np.array([18 * HOUR]),
+        InterSday=np.zeros((2, max(DATA_DAY.values()) + 1)),
+        hourList_si=[{"time": int(time)} for time in times],
+        pTypeMap=np.array(["none", "snow", "ice", "sleet", "rain", "mixed"]),
+        pTextMap=np.array(["None", "Snow", "Ice", "Sleet", "Rain", "Mixed"]),
+        logger=MagicMock(),
+        loc_tag="test",
+        include_day_night=False,
+        hour_columns=HourColumns.from_interphour(InterPhour, times, precip_types),
+        singleDay=True,
+    )
+
+    day = result.day_list[0]
+    assert day["summary"].startswith("Light snow overnight.")
+    assert "rain" not in day["summary"].lower()
+    assert day["icon"] == "snow"
+
+
+@pytest.mark.parametrize(
+    "tz_name, day, rain_from_day_end, rain_in_day",
+    [
+        # The grid's extra row is the next day's 00:00.
+        pytest.param("UTC", (2021, 1, 1), 0, False, id="24-hour-day"),
+        # Spring forward: the day has 23 hours, so the grid's last two rows
+        # are the next day's.
+        pytest.param("America/Toronto", (2026, 3, 8), 0, False, id="23-hour-day"),
+        # Fall back: the day has 25 hours, so the grid's last row is its 23:00.
+        pytest.param("America/Toronto", (2026, 11, 1), -1, True, id="25-hour-day"),
+    ],
+)
+def test_single_day_hourly_summary_is_the_forecast_sentence(
+    tz_name, day, rain_from_day_end, rain_in_day
+):
+    """A Time Machine or future-date hourly.summary (#711) was the most common
+    hourly title ("Mostly Cloudy"), leaving out a night of snow. It must be the
+    forecast's 24-hour summary sentence, over the requested day from local
+    midnight (not from the requested hour), and without the next-24-hours
+    names relative to now: "tonight" is wrong for a date last year. The day
+    ends at the next local midnight, so a fixed 24 rows described the next
+    day's 00:00 on a 23-hour day and left out 23:00 on a 25-hour day.
+    """
+    local_tz = ZoneInfo(tz_name)
+    base_day = datetime.datetime(*day, tzinfo=local_tz)
+    # The single-day grid and day boundaries prepare_initial_request builds
+    grid = initialize_time_grids(
+        base_time=base_day,
+        base_day=base_day,
+        daily_days=1,
+        daily_day_hours=1,
+        local_tz=local_tz,
+    )
+    hour_array_grib, day_array_grib = grid[5], grid[7]
+    rain_start = day_array_grib[1] + rain_from_day_end * HOUR
+    hours = []
+    for time in hour_array_grib:
+        hour = make_hour(int(time), cloudCover=0.8, temperature=-3.0)
+        local_hour = datetime.datetime.fromtimestamp(int(time), local_tz).hour
+        if time < day_array_grib[1] and local_hour < 6:
+            hour.update(SNOW)
+        if time >= rain_start:
+            hour.update(RAIN)
+        hours.append(hour)
+
+    text, icon = build_hourly_summary(
+        summary_text=True,
+        translation=Translation(load_translation("en")),
+        hour_list_si=hours,
+        is_all_night=False,
+        tz_name=tz_name,
+        icon="darksky",
+        unit_system="si",
+        hour_text_list=["Mostly Cloudy"] * len(hours),
+        hour_icon_list=["partly-cloudy-day"] * len(hours),
+        time_machine=True,
+        base_time_offset_int=12,
+        day_array_grib=day_array_grib,
+        logger=MagicMock(),
+        loc_tag="test",
+    )
+
+    assert text.startswith("Light snow")
+    assert "tonight" not in text.lower()
+    assert ("rain" in text.lower()) == rain_in_day
+    assert icon == "snow"

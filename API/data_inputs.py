@@ -11,7 +11,7 @@ from API.api_utils import (
     estimate_cfs_visibility,
     estimate_visibility_gultepe_rh_pr_numpy,
     map_canadian_precip_type_to_ptype,
-    map_ensemble_precip_rates_to_ptype,
+    map_ensemble_member_votes_to_ptype,
     map_wmo4677_to_ptype,
     relative_humidity_from_dewpoint_c,
     wet_bulb_temperature_stull_c,
@@ -269,15 +269,50 @@ def _stack_in_order(num_hours, order, source_data):
     return np.column_stack(arrays), tuple(sources)
 
 
+def _ensemble_vote_precip_type(merged, index_map, model):
+    """GEPS or REPS precipitation type: by member vote, or by the type means
+    where the store has no votes (see map_ensemble_member_votes_to_ptype)."""
+    return map_ensemble_member_votes_to_ptype(
+        rain=merged[:, index_map["rain"]],
+        ice=merged[:, index_map["ice"]],
+        freezing_rain=merged[:, index_map["freezing_rain"]],
+        snow=merged[:, index_map["snow"]],
+        rain_votes=merged[:, index_map["rain_votes"]],
+        ice_votes=merged[:, index_map["ice_votes"]],
+        freezing_rain_votes=merged[:, index_map["freezing_rain_votes"]],
+        snow_votes=merged[:, index_map["snow_votes"]],
+        member_count=ENSEMBLE_MEMBER_COUNTS[model],
+    )
+
+
+def _ensemble_component_rates(merged, index_map):
+    """GEPS or REPS type mean rates (mm/h) as (hours, 4) columns in
+    ENSEMBLE_COMPONENT_TYPES order: snow, ice pellets, freezing rain, rain."""
+    return np.column_stack(
+        [
+            merged[:, index_map[component]]
+            for component in ("snow", "ice", "freezing_rain", "rain")
+        ]
+    )
+
+
+# Internal precipitation types (PRECIP_IDX): "ice" (2) is freezing rain, shown
+# as "Freezing Rain", and "sleet" (3) is ice pellets, shown as "Sleet", as in
+# the Canadian, GEPS and REPS mappings. A source's ice pellets (CICEP, code 8)
+# go to sleet and its freezing rain (CFRZR, code 3) to ice.
+
+
 def _component_precip_type(snow, ice, freezing_rain, rain):
+    """Hourly type from the categorical components (CSNOW, CICEP, CFRZR,
+    CRAIN, or NBM's type probabilities); ``ice`` is ice pellets."""
     if snow is None or ice is None or freezing_rain is None or rain is None:
         return None
 
     inter_thour = np.zeros((len(snow), 5))
-    inter_thour[:, 1] = snow
-    inter_thour[:, 2] = ice
-    inter_thour[:, 3] = freezing_rain
-    inter_thour[:, 4] = rain
+    inter_thour[:, PRECIP_IDX["snow"]] = snow
+    inter_thour[:, PRECIP_IDX["sleet"]] = ice
+    inter_thour[:, PRECIP_IDX["ice"]] = freezing_rain
+    inter_thour[:, PRECIP_IDX["rain"]] = rain
     inter_thour[inter_thour < 0.01] = 0
 
     component_ptype = np.argmax(inter_thour, axis=1).astype(float)
@@ -285,10 +320,19 @@ def _component_precip_type(snow, ice, freezing_rain, rain):
     return component_ptype
 
 
-# GRIB categorical precipitation type (NCEP table 4.201) to the internal
-# category: 1 snow, 2 ice pellets, 3 freezing rain, 4 rain
+# GRIB precipitation type codes (WMO table 4.201, ECMWF and ERA5 ptype) to the
+# internal type: 1 rain, 2 thunderstorm, 7 rain and snow, 11 drizzle -> rain;
+# 3 freezing rain, 12 freezing drizzle -> ice (freezing rain); 4 mixed/ice,
+# 8 ice pellets, 10 hail -> sleet (no hail type, and hail is solid ice like
+# pellets); 5 snow, 6 wet snow, 9 graupel -> snow
 GRIB_PTYPE_TABLE = _precip_code_table(
-    {1: [5, 6, 9], 2: [4, 8, 10], 3: [3, 12], 4: [1, 2, 7, 11]}, 13
+    {
+        PRECIP_IDX["snow"]: [5, 6, 9],
+        PRECIP_IDX["sleet"]: [4, 8, 10],
+        PRECIP_IDX["ice"]: [3, 12],
+        PRECIP_IDX["rain"]: [1, 2, 7, 11],
+    },
+    13,
 )
 
 
@@ -584,6 +628,32 @@ def prepare_data_inputs(
             prioritize_ai_models=prioritize_ai_models,
         )
     )
+
+    # --- ensemble_precip_rates (mixed GEPS/REPS hours) ---
+    # A GEPS or REPS hour typed mixed has one accumulation and intensity for
+    # several types. The hourly block splits them by the type means of the model
+    # that supplied the hour's intensity, which also supplied its type (the type
+    # stack has the same columns). NaN for hours from any other source.
+    ensemble_precip_rates = np.full((num_hours, 4), np.nan)
+    intensity_sources = input_sources["prcipIntensity_inputs"]
+    if intensity_sources:
+        hour_source = np.asarray(intensity_sources)[
+            np.argmin(np.isnan(prcip_intensity_inputs), axis=1)
+        ]
+        for source, merged, index_map in (
+            ("geps", geps_merged, GEPS),
+            ("reps", reps_merged, REPS),
+        ):
+            if prcip_intensity_source_data.get(source) is None:
+                continue
+            rows = hour_source == USED_SOURCE_COLUMN[source]
+            if rows.any():
+                ensemble_precip_rates[rows] = _normalize_length(
+                    num_hours,
+                    _ensemble_component_rates(merged, index_map),
+                    label=source,
+                )[rows]
+
     era5_rain_intensity = (
         _normalize_length(num_hours, era5_rain_intensity)
         if era5_rain_intensity is not None
@@ -738,28 +808,10 @@ def prepare_data_inputs(
             )
             if "ecmwf_ifs" in source_list
             else None,
-            "geps": map_ensemble_precip_rates_to_ptype(
-                rain=geps_merged[:, GEPS["rain"]] if geps_merged is not None else None,
-                ice=geps_merged[:, GEPS["ice"]] if geps_merged is not None else None,
-                freezing_rain=(
-                    geps_merged[:, GEPS["freezing_rain"]]
-                    if geps_merged is not None
-                    else None
-                ),
-                snow=geps_merged[:, GEPS["snow"]] if geps_merged is not None else None,
-            )
+            "geps": _ensemble_vote_precip_type(geps_merged, GEPS, "GEPS")
             if "geps" in source_list and geps_merged is not None
             else None,
-            "reps": map_ensemble_precip_rates_to_ptype(
-                rain=reps_merged[:, REPS["rain"]] if reps_merged is not None else None,
-                ice=reps_merged[:, REPS["ice"]] if reps_merged is not None else None,
-                freezing_rain=(
-                    reps_merged[:, REPS["freezing_rain"]]
-                    if reps_merged is not None
-                    else None
-                ),
-                snow=reps_merged[:, REPS["snow"]] if reps_merged is not None else None,
-            )
+            "reps": _ensemble_vote_precip_type(reps_merged, REPS, "REPS")
             if "reps" in source_list and reps_merged is not None
             else None,
             "gefs": _component_precip_type(
@@ -1422,6 +1474,7 @@ def prepare_data_inputs(
         "prcipProbability_inputs": prcip_probability_inputs,
         "precip_member_masks": precip_member_masks,
         "prcipType_inputs": prcip_type_inputs,
+        "ensemble_precip_rates": ensemble_precip_rates,
         "temperature_inputs": temperature_inputs,
         "dew_inputs": dew_inputs,
         "humidity_inputs": humidity_inputs,

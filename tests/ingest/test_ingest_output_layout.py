@@ -71,6 +71,10 @@ _CANADIAN_ENSEMBLE_LAYOUT = {
     "rain": "ARAIN_Mean",
     "snow": "ASNOW_Mean",
     "member_mask_0": "Precipitation_Member_Mask_0",
+    "freezing_rain_votes": "AFRAIN_Prob",
+    "ice_votes": "AICEP_Prob",
+    "rain_votes": "ARAIN_Prob",
+    "snow_votes": "ASNOW_Prob",
 }
 
 # (ingest module, or (module, name of its store variable tuple) when it is not
@@ -363,9 +367,12 @@ def test_member_mask_words_cover_every_member_and_stay_exact():
         assert len(mask_columns) == len(
             member_mask_var_names(ENSEMBLE_MEMBER_COUNTS[count_key])
         ), model
-        # Appended after every earlier column, so older stores still read
+        # Appended after every earlier column, so older stores still read; only
+        # the GEPS/REPS type votes were appended after them
         assert min(mask_columns) > max(
-            v for k, v in index_map.items() if not k.startswith("member_mask_")
+            v
+            for k, v in index_map.items()
+            if not k.startswith("member_mask_") and not k.endswith("_votes")
         ), model
 
 

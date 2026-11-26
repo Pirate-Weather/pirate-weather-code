@@ -289,19 +289,26 @@ def _raise_prob_to_member_share(max_arr, prob_column, share):
 
 def _frozen_accum_by_type(InterPhour, index_array, daily_days):
     """Each day's ice accumulation (mm) split by the hours' type, as (sleet,
-    freezing rain). Mixed hours count as sleet, as in the daily text summary."""
+    freezing rain). A mixed hour's ice is sleet except its freezing-rain part
+    (mixed GEPS/REPS hours, ``mixed_freezing_rain``), as in the daily text summary."""
     in_window = (index_array >= 0) & (index_array < daily_days)
     days = index_array[in_window].astype(int)
     rows = InterPhour[in_window]
     hour_types = rows[:, DATA_HOURLY["type"]]
     ice = np.nan_to_num(rows[:, DATA_HOURLY["ice"]])
-    is_sleet = (hour_types == PRECIP_IDX["sleet"]) | (hour_types == PRECIP_IDX["mixed"])
+    is_mixed = hour_types == PRECIP_IDX["mixed"]
+    mixed_frzrain = np.where(
+        is_mixed, np.nan_to_num(rows[:, DATA_HOURLY["mixed_freezing_rain"]]), 0.0
+    )
+    is_sleet = (hour_types == PRECIP_IDX["sleet"]) | is_mixed
     is_frzrain = hour_types == PRECIP_IDX["ice"]
     sleet = np.bincount(
-        days, weights=np.where(is_sleet, ice, 0.0), minlength=daily_days
+        days, weights=np.where(is_sleet, ice, 0.0) - mixed_frzrain, minlength=daily_days
     )
     frzrain = np.bincount(
-        days, weights=np.where(is_frzrain, ice, 0.0), minlength=daily_days
+        days,
+        weights=np.where(is_frzrain, ice, 0.0) + mixed_frzrain,
+        minlength=daily_days,
     )
     return sleet, frzrain
 
@@ -805,6 +812,7 @@ def build_daily_section(
     current_hour_time: int | None = None,
     precip_member_masks=None,
     used_sources: set | None = None,
+    singleDay: bool = False,
 ) -> DailySection:
     """
     Build all daily- and half-day-level objects.
@@ -851,7 +859,7 @@ def build_daily_section(
         include_day_night: Build the day/night (half-day) items; when False
             ``day_night_list`` is empty.
         current_hour_time: Unix time of the current hour, where today's summary
-            starts. None (Time Machine) keeps the whole 6am to 6am window.
+            starts. None (Time Machine, future dates) keeps the whole window.
         hour_columns: The forecast's HourColumns (the same hours as
             ``hourList_si``), built once per request; built here from
             ``hourList_si`` when not given.
@@ -860,6 +868,8 @@ def build_daily_section(
             precipitation probability; None or empty keeps the hourly maximum.
         used_sources: Set the ensembles whose member share became a returned
             probability are added to (flags.sources), or None.
+        singleDay: A Time Machine or future-date request: each day's summary
+            text and icon cover the local day, midnight to midnight.
 
     Returns:
         DailySection object containing the daily forecast.
@@ -1430,6 +1440,15 @@ def build_daily_section(
                 # describes what is left of that: past hours have no precipitation
                 # (zeroed in the hourly block), which would misdescribe the day.
                 text_start = int(day_array_6am_grib[idx])
+                text_end = int(day_array_6am_grib[idx + 1])
+                if singleDay:
+                    # A requested date describes that local day, midnight to
+                    # midnight, as its statistics do (#711): from 6am the
+                    # summary left out its 00:00-06:00 hours, and the grid
+                    # ends an hour after the last day's midnight. The end is
+                    # exclusive, so the next day's 00:00 row is not included.
+                    text_start = int(day_array_grib[idx])
+                    text_end = int(day_array_grib[idx + 1])
                 partial_day = (
                     idx == 0
                     and current_hour_time is not None
@@ -1441,7 +1460,7 @@ def build_daily_section(
                     select_hour_window(
                         window_source,
                         start_time=text_start,
-                        end_time=int(day_array_6am_grib[idx + 1]),
+                        end_time=text_end,
                         hour_times=hour_times_si,
                     ),
                     not is_all_night,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 
+from API.constants.api_const import UNIT_CONVERSION_CONST
 from API.PirateDailyText import HourColumns, calculate_day_text
 from API.PirateMinutelyText import calculate_minutely_text
 from API.PirateTextHelper import most_common
@@ -53,25 +54,44 @@ def build_hourly_summary(
     hour_icon_list,
     time_machine: bool,
     base_time_offset_int: int,
+    day_array_grib,
     logger: logging.Logger,
     loc_tag: str,
     hour_columns: HourColumns | None = None,
 ) -> tuple[str, str]:
     """Compute hourly summary/icon text. ``hour_columns`` (the forecast's
-    HourColumns, the same hours as ``hour_list_si``) saves building them."""
-    # The block text and icon are the most common hourly ones. most_common
-    # counts with a Counter, so a tie goes to the value of the earliest hour
-    # carrying a tied value; picking from a set made the winner depend on the
-    # process's string hash seed, so pods disagreed on the same request.
-    if time_machine:
-        return (
-            most_common(hour_text_list),
-            most_common(hour_icon_list),
-        )
-
+    HourColumns, the same hours as ``hour_list_si``) saves building them.
+    ``time_machine`` is a single-day (Time Machine or future-date) request,
+    whose window ends at the next local midnight in ``day_array_grib`` (local
+    midnights, UTC seconds)."""
+    # Without summary text the block text and icon are the most common hourly
+    # ones. most_common counts with a Counter, so a tie goes to the value of
+    # the earliest hour carrying a tied value; picking from a set made the
+    # winner depend on the process's string hash seed, so pods disagreed on
+    # the same request.
     try:
         if summary_text:
-            next_24_hours = slice(base_time_offset_int, base_time_offset_int + 24)
+            if time_machine:
+                # A requested date is summarised as the forecast's next 24 hours
+                # are (#711), over its first local day: the grid rows from its
+                # local midnight to the next, as the daily block's window
+                # (calculate_time_indexing). That is 23 or 25 rows on a DST
+                # change day, where a fixed 24 would take in the next day's
+                # midnight or drop the day's last hour. Its periods are named
+                # as a daily summary's ("overnight", "in the morning"): the
+                # next-24-hours names ("tonight", "this morning") are relative
+                # to now, wrong for any other date.
+                first_hour = 0
+                window_hours = int(
+                    (day_array_grib[1] - day_array_grib[0])
+                    // UNIT_CONVERSION_CONST["seconds_to_hours"]
+                )
+                period_mode = "day"
+            else:
+                first_hour = base_time_offset_int
+                window_hours = 24
+                period_mode = "hour"
+            next_24_hours = slice(first_hour, first_hour + window_hours)
             if hour_columns is not None:
                 next_24_hours = hour_columns.window(
                     next_24_hours.start, min(next_24_hours.stop, len(hour_columns))
@@ -82,7 +102,7 @@ def build_hourly_summary(
                 next_24_hours,
                 not is_all_night,
                 str(tz_name),
-                "hour",
+                period_mode,
                 icon,
                 unit_system,
             )
@@ -113,18 +133,22 @@ def build_daily_summary(
     logger: logging.Logger,
     loc_tag: str,
 ) -> tuple[str, str]:
-    """Compute daily summary/icon text."""
+    """Compute daily summary/icon text. ``time_machine`` is a single-day (Time
+    Machine or future-date) request."""
     # As for the hourly block, a tie goes to the earliest day's value.
-    if time_machine:
-        return (
-            most_common(day_text_list),
-            most_common(day_icon_list),
-        )
-
     try:
         if summary_text:
+            if time_machine and len(day_list_si) == 1:
+                # One requested day: the block summary is that day's summary.
+                return day_text_list[0], day_icon_list[0]
+            # Days of a requested range are named by weekday ("on Monday"), not
+            # relative to now ("today", "tomorrow") as a forecast's are.
             weekText, weekIcon = calculate_weekly_text(
-                day_list_si, str(tz_name), unit_system, icon
+                day_list_si,
+                str(tz_name),
+                unit_system,
+                icon,
+                relative_day_names=not time_machine,
             )
             return translation.translate(["sentence", weekText]), weekIcon
         return (

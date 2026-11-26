@@ -132,8 +132,8 @@ FINAL_SHARD_SIZES = {
     "RRFS_SubH": 100,  # 13
     "LibreWXR": 100,  # < 1 (10 steps x 1 variable)
     "HRDPS": 100,  # 35
-    "REPS": 100,  # 22
-    "GEPS": 100,  # 76
+    "REPS": 100,  # 33
+    "GEPS": 100,  # 114
     "RTMA": 100,  # RTMA-RU, < 1
     "RTMA_HOURLY": 100,  # 21
     "RAQDPS": 100,  # 18
@@ -227,6 +227,12 @@ KEEPBITS = {
             "CICEP_Prob",
             "CFRZR_Prob",
             "CRAIN_Prob",
+            # GEPS/REPS type votes: k / 21 stays distinct, and equal counts round
+            # alike; the API rounds them back to member counts
+            "AFRAIN_Prob",
+            "AICEP_Prob",
+            "ARAIN_Prob",
+            "ASNOW_Prob",
             "TCDC_entireatmosphere",
             "TCDC_entireatmosphere_consideredasasinglelayer_",
             "TCDC_surface",
@@ -1906,6 +1912,43 @@ def pack_member_mask(wet_members, member_count: int, label: str = "") -> list:
             word = member_bit if word is None else word | member_bit
         words.append(word.astype(np.float32))
     return words
+
+
+def member_type_vote(wet, *type_totals) -> np.ndarray:
+    """One ensemble member's precipitation-type vote at each lead and cell (GEPS
+    and REPS, which have no categorical type).
+
+    ``type_totals`` are the member's run-total accumulations of each type,
+    ``(time, ...)`` numpy arrays with every lead, and ``wet`` its mask of leads
+    above ``ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H``. Returns int8 codes: 0 where the
+    member doesn't vote (dry, or no type accumulating), else 1 + the index of the
+    type that accumulated most over the lead's interval. All types share a lead's
+    interval, so that is the type with the largest rate; a tie goes to the first.
+    One float32 pass over a member's tile, used through ``dask.array.map_blocks``.
+    """
+    code = np.zeros(wet.shape, dtype=np.int8)
+    largest = None
+    for type_index, totals in enumerate(type_totals):
+        increment = totals.astype(np.float32, copy=True)
+        increment[1:] -= totals[:-1]
+        if largest is None:
+            largest = increment
+            code[:] = 1
+        else:
+            code[increment > largest] = type_index + 1
+            np.maximum(largest, increment, out=largest)
+    code[~(wet & (largest > 0))] = 0
+    return code
+
+
+def type_vote_shares(codes, type_count: int, member_count: int) -> list:
+    """Each type's share of all members from ``(member, ...)`` ``member_type_vote``
+    codes: dry members don't vote, so the shares sum to at most the precipitation
+    probability."""
+    return [
+        (codes == type_index + 1).sum(axis=0) / member_count
+        for type_index in range(type_count)
+    ]
 
 
 def interp_time_take_blend(

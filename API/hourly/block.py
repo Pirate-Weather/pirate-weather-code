@@ -426,6 +426,37 @@ def _process_input_vars(
         )
 
 
+def _mixed_ensemble_shares(InterPhour, ensemble_precip_rates):
+    """The rows of mixed GEPS and REPS hours, and each one's share of the hour's
+    precipitation by type, from that model's type mean rates.
+
+    ``ensemble_precip_rates`` is (hours, 4) in ENSEMBLE_COMPONENT_TYPES order
+    (snow, ice pellets, freezing rain, rain), NaN where the hour's intensity came
+    from another model (``prepare_data_inputs``). Rain at or below
+    TEMP_THRESHOLD_SNOW_C counts as freezing rain, as in rain-typed hours. The
+    shares are keyed "rain", "snow", "ice" (ice pellets plus freezing rain, the
+    ice accumulation) and "freezing_rain".
+    """
+    if ensemble_precip_rates is None:
+        return np.empty(0, dtype=int), {}
+    total_rate = ensemble_precip_rates.sum(axis=1)
+    rows = np.flatnonzero(
+        (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["mixed"]) & (total_rate > 0)
+    )
+    snow, ice_pellets, freezing_rain, rain = (
+        ensemble_precip_rates[rows] / total_rate[rows, np.newaxis]
+    ).T
+    freezing = InterPhour[rows, DATA_HOURLY["temp"]] <= TEMP_THRESHOLD_SNOW_C
+    freezing_rain = np.where(freezing, freezing_rain + rain, freezing_rain)
+    rain = np.where(freezing, 0.0, rain)
+    return rows, {
+        "rain": rain,
+        "snow": snow,
+        "ice": ice_pellets + freezing_rain,
+        "freezing_rain": freezing_rain,
+    }
+
+
 def _calculate_derived_metrics(
     InterPhour,
     hourlyDayIndex,
@@ -433,6 +464,7 @@ def _calculate_derived_metrics(
     timeMachine,
     urma_hour_mask=None,
     currentHourOffset=None,
+    ensemble_precip_rates=None,
 ):
     """
     Calculate derived metrics like apparent temperature and accumulation.
@@ -446,6 +478,8 @@ def _calculate_derived_metrics(
         currentHourOffset: Hour row of the requested time, where the day-zero
             (currentDay*) totals stop; defaults to baseTimeOffset. A future day
             starts its rows at midnight but totals up to the requested hour.
+        ensemble_precip_rates: (hours, 4) GEPS/REPS type mean rates for the
+            hours they supplied, to split mixed hours (_mixed_ensemble_shares).
 
     Returns:
         Tuple containing day zero rain, snow, and ice accumulation.
@@ -508,9 +542,8 @@ def _calculate_derived_metrics(
         snow_mm_values = estimate_snow_height(liquid_mm, temp_c, wind_mps)
         InterPhour[snow_indices, DATA_HOURLY["snow"]] = snow_mm_values
 
-    # GEPS and REPS hours with several strong precipitation channels arrive as
-    # mixed. Their one accumulation can't be split between the types, so it counts
-    # as ice with sleet and freezing rain rather than being dropped.
+    # Mixed hours without type rates to split by count as ice with sleet and
+    # freezing rain rather than being dropped
     ice_type_mask = np.isin(
         InterPhour[:, DATA_HOURLY["type"]],
         (PRECIP_IDX["ice"], PRECIP_IDX["sleet"], PRECIP_IDX["mixed"]),
@@ -518,6 +551,30 @@ def _calculate_derived_metrics(
     InterPhour[ice_type_mask, DATA_HOURLY["ice"]] = InterPhour[
         ice_type_mask, DATA_HOURLY["accum"]
     ]
+
+    # GEPS and REPS hours whose members split between types arrive as mixed with
+    # one accumulation; it is shared between rain, snow and ice by the model's
+    # type means. The hour keeps the "mixed" label.
+    mixed_rows, mixed_shares = _mixed_ensemble_shares(InterPhour, ensemble_precip_rates)
+    InterPhour[:, DATA_HOURLY["mixed_freezing_rain"]] = 0
+    if mixed_rows.size > 0:
+        mixed_accum = InterPhour[mixed_rows, DATA_HOURLY["accum"]]
+        InterPhour[mixed_rows, DATA_HOURLY["rain"]] = mixed_accum * mixed_shares["rain"]
+        # Only rows with a snow share get a snow depth: the density estimate is
+        # NaN when temperature or wind is missing, which would turn a zero share
+        # into NaN snow in the hourly and daily totals.
+        has_snow = mixed_shares["snow"] > 0
+        if np.any(has_snow):
+            snow_rows = mixed_rows[has_snow]
+            InterPhour[snow_rows, DATA_HOURLY["snow"]] = estimate_snow_height(
+                mixed_accum[has_snow] * mixed_shares["snow"][has_snow],
+                InterPhour[snow_rows, DATA_HOURLY["temp"]],
+                InterPhour[snow_rows, DATA_HOURLY["wind"]],
+            )
+        InterPhour[mixed_rows, DATA_HOURLY["ice"]] = mixed_accum * mixed_shares["ice"]
+        InterPhour[mixed_rows, DATA_HOURLY["mixed_freezing_rain"]] = (
+            mixed_accum * mixed_shares["freezing_rain"]
+        )
 
     InterPhour[:, DATA_HOURLY["intensity"]] = np.maximum(
         InterPhour[:, DATA_HOURLY["intensity"]], 0
@@ -562,6 +619,7 @@ def _calculate_derived_metrics(
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["rain"]] = 0
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["snow"]] = 0
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["ice"]] = 0
+        InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["mixed_freezing_rain"]] = 0
         InterPhour[0 : int(baseTimeOffset), DATA_HOURLY["prob"]] = 0
 
     InterPhour[:, DATA_HOURLY["rain_intensity"]] = 0
@@ -585,6 +643,20 @@ def _calculate_derived_metrics(
     InterPhour[sleet_mask, DATA_HOURLY["ice_intensity"]] = InterPhour[
         sleet_mask, DATA_HOURLY["intensity"]
     ]
+
+    # Mixed GEPS/REPS hours share their intensity like their accumulation; snow
+    # intensity is liquid x 10 as above
+    if mixed_rows.size > 0:
+        mixed_intensity = InterPhour[mixed_rows, DATA_HOURLY["intensity"]]
+        InterPhour[mixed_rows, DATA_HOURLY["rain_intensity"]] = (
+            mixed_intensity * mixed_shares["rain"]
+        )
+        InterPhour[mixed_rows, DATA_HOURLY["snow_intensity"]] = (
+            mixed_intensity * mixed_shares["snow"] * 10
+        )
+        InterPhour[mixed_rows, DATA_HOURLY["ice_intensity"]] = (
+            mixed_intensity * mixed_shares["ice"]
+        )
 
     return dayZeroRain, dayZeroSnow, dayZeroIce
 
@@ -817,6 +889,7 @@ def build_hourly_block(
     currentHourOffset: float | None = None,
     input_sources: dict | None = None,
     used_hours: np.ndarray | None = None,
+    ensemble_precip_rates: np.ndarray | None = None,
 ):
     """
     Build hourly output objects and summary text/icon lists.
@@ -883,6 +956,8 @@ def build_hourly_block(
         used_hours: (hours, USED_SOURCE_KEYS) bool mask; each hour's selected
             source is marked in it for flags.sources. None (version 1, or no
             flags) skips that.
+        ensemble_precip_rates: GEPS/REPS type mean rates of the hours they
+            supplied, which split their mixed hours (``prepare_data_inputs``).
 
     Returns:
         Tuple containing hourly lists and arrays.
@@ -986,6 +1061,7 @@ def build_hourly_block(
         timeMachine,
         urma_hour_mask,
         currentHourOffset,
+        ensemble_precip_rates,
     )
 
     # Mark hours as mixed when all component types are present for that hour.

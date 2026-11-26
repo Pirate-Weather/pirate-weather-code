@@ -159,6 +159,60 @@ def test_aigefs_precip_type_falls_back_to_temperature():
     np.testing.assert_allclose(_column(minutely, "rain_intensity"), 0.0)
 
 
+@pytest.mark.parametrize(
+    ("source", "model", "lat", "lon", "rate", "pellets", "freezing_rain"),
+    [
+        # CICEP and CFRZR components, as GFS, GEFS, HRRR, RRFS and NBM store them
+        ("gfs", GFS, 40.0, -75.0, {"refc": 30.0}, {"ice": 1.0}, {"freezing_rain": 1.0}),
+        # GRIB table 4.201 (ECMWF and ERA5): 8 ice pellets, 3 freezing rain
+        (
+            "ecmwf_ifs",
+            ECMWF,
+            40.0,
+            -75.0,
+            {"intensity": 0.001},
+            {"ptype": 8.0},
+            {"ptype": 3.0},
+        ),
+        # WMO 4677 (DWD MOSMIX): 79 ice pellets, 66 freezing rain
+        (
+            "dwd_mosmix",
+            DWD_MOSMIX,
+            52.5,
+            13.4,
+            {"accum": 1.0},
+            {"ptype": 79.0},
+            {"ptype": 66.0},
+        ),
+    ],
+)
+def test_ice_pellets_are_sleet_and_freezing_rain_is_ice(
+    source, model, lat, lon, rate, pellets, freezing_rain
+):
+    """Regression: the component, GRIB 4.201 and WMO 4677 mappings put ice
+    pellets in PRECIP_IDX["ice"] and freezing rain in PRECIP_IDX["sleet"], so
+    these sources showed ice pellets as "Freezing Rain" and freezing rain as
+    "Sleet", the reverse of the Canadian models. Ice pellets must be sleet and
+    freezing rain ice (Freezing Rain), in both the hourly and minutely blocks.
+    """
+    from API.constants.api_const import PRECIP_IDX
+    from tests.helpers.model_arrays import hourly_inputs
+
+    data_name = "ecmwf" if source == "ecmwf_ifs" else source
+    for columns, expected in ((pellets, "sleet"), (freezing_rain, "ice")):
+        data = _source_array(model, temp=-3.0, **rate, **columns)
+
+        inputs = hourly_inputs(
+            lat=lat, lon=lon, source_list=[source], **{data_name: data[:2]}
+        )
+        assert inputs["prcipType_inputs"][0, 0] == PRECIP_IDX[expected]
+
+        minute_items = _build(
+            [source], lat=lat, lon=lon, **{f"{data_name}_data": data}
+        )[2]
+        assert {item["precipType"] for item in minute_items} == {expected}
+
+
 def test_librewxr_radar_takes_precedence_inside_coverage():
     """The LibreWXR radar composite must drive minutely intensity wherever it
     has coverage and hand back to the models (here HRRR sub-hourly) where it is

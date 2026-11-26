@@ -4,9 +4,10 @@ Downloads the precipitation fields of every member of the newest MSC Global
 Ensemble Prediction System run that reaches 240 h (0.5 degree global
 latitude/longitude grid; 3-hourly leads to 192 h, then 6-hourly to 240 h) from
 the MSC Datamart, reduces them to ensemble statistics (precipitation
-probability, mean and standard deviation, and the mean of each precipitation
-type), interpolates them to an hourly axis and publishes ``GEPS.zarr`` plus
-``GEPS.time.pickle``. The store starts at the first forecast lead (run + 3 h).
+probability, mean and standard deviation, the mean of each precipitation type
+and the share of members voting for each type), interpolates them to an hourly
+axis and publishes ``GEPS.zarr`` plus ``GEPS.time.pickle``. The store starts at
+the first forecast lead (run + 3 h).
 
 Alexander Rey, April 2026
 """
@@ -48,6 +49,7 @@ from API.ingest_utils import (
     interp_time_take_blend,
     make_herbie_save_dir,
     mask_invalid_data,
+    member_type_vote,
     open_remote,
     pack_member_mask,
     pad_to_chunk_size,
@@ -55,6 +57,7 @@ from API.ingest_utils import (
     prune_old_files,
     publish_ingest_run,
     read_published_run_time,
+    type_vote_shares,
     validate_stacked_time_alignment,
     write_final_zarr,
 )
@@ -108,11 +111,17 @@ GEPS_MEMBER_COUNT = ENSEMBLE_MEMBER_COUNTS["GEPS"]
 # Per-hour member bitmask words (pack_member_mask), from which the API gets the
 # share of members with precipitation at any hour of a day
 MEMBER_MASK_VARS = member_mask_var_names(GEPS_MEMBER_COUNT)
+# Each precipitation type's share of the members when every wet member votes for
+# its dominant type (member_type_vote). The API types an hour by the
+# vote, which a few members with heavy precipitation cannot swing the way they
+# swing the type means. Named like GEFS's categorical *_Prob shares.
+TYPE_VOTE_VARS = ("AFRAIN_Prob", "AICEP_Prob", "ARAIN_Prob", "ASNOW_Prob")
 
 # Variables in the published store. The API reader puts the valid times (the
 # store's time attribute) in column 0, so probVars[i] is column i + 1 of the
-# API's GEPS index map. The mask words come last so the earlier columns keep
-# their positions.
+# API's GEPS index map. Later columns are appended (the mask words, then the
+# type votes) so the earlier columns keep their positions and older stores still
+# read.
 probVars = (
     "Precipitation_Prob",
     "APCP_Mean",
@@ -122,8 +131,15 @@ probVars = (
     "ARAIN_Mean",
     "ASNOW_Mean",
     *MEMBER_MASK_VARS,
+    *TYPE_VOTE_VARS,
 )
 MEMBER_MASK_INDICES = [probVars.index(v) for v in MEMBER_MASK_VARS]
+# Per-lead statistics that take the lead whose accumulation interval contains
+# each hour instead of a blend of two leads (interp_time_take_blend). Only the
+# member masks: OR-ing bit words can't be blended. The type vote shares are
+# blended like the type means, so a row's votes and means (which break vote
+# ties and split mixed hours) carry the same time weighting.
+NEXT_LEAD_INDICES = [probVars.index(v) for v in MEMBER_MASK_VARS]
 
 # %% Paths and configuration
 ingest_version = INGEST_VERSION_STR
@@ -240,6 +256,8 @@ def write_ensemble_stats(
 
     stats_vars = {}
     member_count = None
+    # Each precipitation type's member run totals, for the vote after the loop
+    type_totals = {}
     for var_prefix, base_var_candidates in base_var_name_aliases.items():
         member_vars = []
         found_base_var = None
@@ -289,28 +307,60 @@ def write_ensemble_stats(
                     pack_member_mask(wet_members, GEPS_MEMBER_COUNT, label=run_label),
                 )
             )
+        else:
+            type_totals[var_prefix] = raw_stacked
 
-    stats_ds = xr.Dataset(
-        {
-            key: xr.DataArray(val, dims=("time", *spatial_dims))
-            for key, val in stats_vars.items()
-        },
-        coords=xarray_merged.coords,
-    ).chunk(
-        chunks={
-            "time": len(forecast_hours),
-            spatial_dims[0]: process_chunk,
-            spatial_dims[1]: process_chunk,
-        }
+    # Each wet member votes for its dominant type; members are wet by total
+    # precipitation (APCP), as for the probability. Same order as TYPE_VOTE_VARS.
+    # member_type_vote differences the leads itself, so each block needs all of
+    # them (the deaccumulated wet mask comes in two time chunks).
+    member_votes = da.stack(
+        [
+            da.map_blocks(
+                member_type_vote,
+                wet_members[member].rechunk({0: -1}),
+                *(
+                    type_totals[name.removesuffix("_Prob")][member].rechunk({0: -1})
+                    for name in TYPE_VOTE_VARS
+                ),
+                dtype=np.int8,
+            )
+            for member in range(GEPS_MEMBER_COUNT)
+        ]
     )
-    with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
-        stats_ds.to_zarr(
-            zarr_path,
-            mode="w",
-            consolidated=False,
-            compute=True,
-            chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+    vote_vars = dict(
+        zip(
+            TYPE_VOTE_VARS,
+            type_vote_shares(member_votes, len(TYPE_VOTE_VARS), GEPS_MEMBER_COUNT),
         )
+    )
+
+    # The vote needs all five fields of a member at once. Computed with the other
+    # statistics, dask kept every member of every field of a tile for it (a GEPS
+    # run went past 2.6 GiB, from 2.2), so it is a second pass that reads the
+    # converted fields again.
+    for mode, variables in (("w", stats_vars), ("a", vote_vars)):
+        stats_ds = xr.Dataset(
+            {
+                key: xr.DataArray(val, dims=("time", *spatial_dims))
+                for key, val in variables.items()
+            },
+            coords=xarray_merged.coords,
+        ).chunk(
+            chunks={
+                "time": len(forecast_hours),
+                spatial_dims[0]: process_chunk,
+                spatial_dims[1]: process_chunk,
+            }
+        )
+        with dask.config.set(scheduler="threads", num_workers=zarr_store_workers):
+            stats_ds.to_zarr(
+                zarr_path,
+                mode=mode,
+                consolidated=False,
+                compute=True,
+                chunkmanager_store_kwargs={"num_workers": zarr_store_workers},
+            )
 
 
 def main() -> None:
@@ -460,13 +510,13 @@ def main() -> None:
     daskVarArrayStackDisk = da.from_zarr(forecast_process_path + "_stack.zarr")
 
     # %% Interpolate to hourly and write the final store
-    # A blend of two member sets is meaningless: each hour takes the mask of
-    # the lead whose accumulation interval contains it
+    # A blend of two member sets is meaningless: each hour takes the mask and
+    # type votes of the lead whose accumulation interval contains it
     daskVarArrayStackDiskInterp = interp_time_take_blend(
         daskVarArrayStackDisk,
         stacked_timesUnix=stacked_timesUnix,
         hourly_timesUnix=hourly_timesUnix,
-        next_lead_vars=MEMBER_MASK_INDICES,
+        next_lead_vars=NEXT_LEAD_INDICES,
         dtype="float32",
         fill_value=np.nan,
     )

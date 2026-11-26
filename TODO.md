@@ -15,48 +15,6 @@ then move the entry to Done.
   more than 100 µg/m³ above the forecast; FW only above 300.
 - `PUBLISH_SCHEDULE_HOURS["RDAQA"]` is estimated; check it against deployed stamps.
 
-### Mixed precipitation hours put all of the precipitation in one type
-When an hour forecasts more than one type, the API reports `precipType: "mixed"` and
-puts all of the precipitation in the ice/sleet channel. Example (`time` 1795752000,
-2026-11-27 04Z):
-
-```json
-"summary": "Mixed Precipitation", "icon": "sleet", "precipType": "mixed",
-"precipIntensity": 1.1118, "precipProbability": 0.49, "precipAccumulation": 0.1114,
-"rainIntensity": 0, "snowIntensity": 0, "iceIntensity": 1.1118,
-"liquidAccumulation": 0, "snowAccumulation": 0, "iceAccumulation": 0.1114
-```
-
-The hour might be 0.5 mm of rain and 0.6 mm of snow, but it is all reported as ice.
-
-Ideal fix: split the intensity and accumulation between the types by the ensemble
-amounts. Watch the source priority: the per-type amounts could come from GEPS while
-the total comes from GFS (or the other way round), depending on which data is
-available, so the split and the total can disagree.
-
-### GEPS/REPS precip type follows the wettest members (needs discussion)
-GEPS and REPS have no categorical type. The ingests store the ensemble mean of each
-type's rate (`AFRAIN_Mean`, `AICEP_Mean`, `ARAIN_Mean`, `ASNOW_Mean`), and
-`map_ensemble_precip_rates_to_ptype` types an hour by the largest mean. When few
-members have precipitation, a couple of wet outliers decide the type.
-
-Example: Ottawa, GEPS, 2026-11-26 23Z to 11-27 13Z, probability 22-34%, mean
-intensity about 0.2 mm/h. The API gives snow, then 13 hours of freezing drizzle (at
--0.65 to -1.65 C), then rain. SpotWX's GEPS chart for the same run shows median
-freezing rain of about 0 until Dec 3 but a max of about 15 mm by Nov 27, and median
-members with light snow turning to rain. Freezing drizzle at -0.65 and -0.9 C can only
-come from the GEPS freezing-rain mean, because the rain-to-freezing-rain conversion in
-`API/hourly/block.py` applies at or below -1 C.
-
-No API-only fix: once members are averaged, two members with heavy freezing rain look
-the same as most members with light freezing rain.
-
-Option: type by member vote in the ingests. Take each wet member's dominant type
-(dry members don't vote), and store the winning type or each type's share of the
-wet members as new variables. Then have the API use them, with the mean-based
-typing as a fallback until the stores are rebuilt. This changes the GEPS and REPS
-ingests and their Zarr layouts, so it needs a decision first.
-
 ## Plan (2026-11-09)
 
 Work through the open items in this order, small ones first:
@@ -90,6 +48,55 @@ pick the cache size (the shard indexes alone are ~35 MB), and check the write
 peak of the largest shards (GFS, NBM, ECMWF) in the next end-to-end run.
 
 ## Done
+
+### GEPS/REPS precipitation type by member vote (2026-11-25)
+[#851](https://github.com/Pirate-Weather/pirate-weather-code/issues/851): GEPS and REPS
+have no categorical type, and the API typed an hour by the largest type mean, so a couple
+of wet outliers decided it (Ottawa, GEPS 2026-11-26 23Z: 13 hours of freezing drizzle at
+-0.65 to -1.65 C from a ~0.2 mm/h mean at 22-34 % probability). The ingests now give each
+member above `ENSEMBLE_PRECIP_PROB_THRESHOLD_MM_H` one vote for its dominant type
+(`member_type_vote`) and append each type's share of all members after the mask word
+(`AFRAIN_Prob`, `AICEP_Prob`, `ARAIN_Prob`, `ASNOW_Prob`; blended between leads like the
+type means, not next-lead like the masks). The API (`map_ensemble_member_votes_to_ptype`) takes the type with the
+most votes, a tie going to the larger mean, and calls the hour mixed when the runner-up
+has at least a third of the votes (`ENSEMBLE_MIXED_RUNNER_UP_VOTE_SHARE`); hours without
+votes (older stores, no wet member) keep the mean-based type. Minutely takes the vote
+winner by the same rule (`ensemble_vote_winner`, ties to the larger mean). A mixed
+GEPS/REPS hour now splits its accumulation and intensity between rain, snow and ice by
+that model's type means (rain at or below -1 C as freezing rain; snow depth only where
+there is a snow share) instead of putting it all in ice, and the daily type and text
+(period and expected-amount sentences) count its ice as sleet and freezing rain by the
+same split (`DATA_HOURLY["mixed_freezing_rain"]`). The votes are blended between leads
+with the same weights as the type means (whose sum is the GEPS/REPS intensity, so they
+can't go next-lead without making intensity a step function), keeping a row's votes,
+tie-break and split on one time weighting. Ten light-snow
+members against one with 6 mm/h of freezing rain now read snow (was freezing rain); rain
+0.55 + snow 0.60 mm/h with 5 / 6 votes reads mixed with 0.55 mm rain and 0.60 mm liquid
+as snow (was 1.15 mm ice).
+- Ingest: the vote needs a member's five fields at once. In the same dask graph as the
+  other statistics it held a tile's members of every field and went past 2.6 GiB (from
+  2.2), so it is a second pass over the converted NetCDFs. Measured with synthetic
+  members of the real size (wgrib2 isn't installed here, so everything after the
+  conversion; 2 cores, network disk): GEPS 2.19 -> 2.14 GiB VmHWM, 255 -> 530-550 s;
+  REPS 1.44 GiB and 818 s before; the new REPS run reached the vote pass at 793 s
+  and was stopped by a 30-minute session limit at 1,578 s, its anon memory at most
+  1.35 GiB against 1.38 before. The pass is read-bound here (GEPS 267 s alone, 73 % of
+  its task time in NetCDF reads); on the 4-core NVMe runs of 2026-11-07 everything after
+  the conversion took ~40 s (GEPS), so check the cost on the next real run.
+- Store: the published v32 stores rewritten with estimated votes grow GEPS 368 -> 394 MiB
+  and REPS 363 -> 382 MiB; shards 76 -> 114 MB (GEPS) and 22 -> 33 MB (REPS)
+  uncompressed. A local tensorstore point read (page cache warm, 300 cells x 5 runs, this
+  machine) went 0.41 -> 0.47 ms (GEPS) and 0.27 -> 0.32 ms (REPS).
+- No ingest version bump: an older API ignores the extra columns (`_merge_simple_source`)
+  and this one reads a store without them as NaN, so either side can deploy first. GEPS
+  and REPS precipType and per-type accumulations and intensities change for every API
+  version, with no gate.
+- Also fixed: the minutely type passed the GEPS and REPS interpolations to each other's
+  arguments.
+- The NCEP (GFS, GEFS, HRRR, RRFS, NBM), ECMWF/ERA5 and WMO 4677 (DWD) type mappings sent
+  ice pellets to `PRECIP_IDX["ice"]` (shown as Freezing Rain) and freezing rain to
+  "sleet", the reverse of the Canadian ones; they now follow the Canadian convention,
+  hourly and minutely (`test_ice_pellets_are_sleet_and_freezing_rain_is_ice`).
 
 ### Source-selection docs match the code again (2026-11-25)
 `docs/forecast-source-selection/README.md` now follows `API/data_inputs.py` and
