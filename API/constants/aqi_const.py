@@ -24,9 +24,9 @@ References:
     - EU CAQI: https://www.airqualitynow.eu/about_indices_definition.php
     - UK DAQI: https://aqihub.info/indices/uk
     - Hong Kong AQHI: https://www.aqhi.gov.hk/en.html
-    - Ireland AQIH: https://aqihub.info/indices/ireland
-    - Israel AQI: https://aqihub.info/indices/israel
-    - Indonesia ISPU: https://aqihub.info/indices/indonesia
+    - Ireland AQIH: https://www.epa.ie/environment-and-you/air/faqs/
+    - Israel AQI: https://air.sviva.gov.il/Pagesfiles/%D7%94%D7%97%D7%99%D7%A9%D7%95%D7%91%20%D7%A9%D7%9C%20%D7%9E%D7%93%D7%93%20%D7%96%D7%99%D7%94%D7%95%D7%9D%20%D7%94%D7%90%D7%95%D7%95%D7%99%D7%A8%20AQI%20%D7%9C%D7%90%D7%AA%D7%A8%20%D7%94%D7%97%D7%93%D7%A9.pdf
+    - Indonesia ISPU: https://peraturan.bpk.go.id/Read/156214/Permen%20LHK%20Nomor%2014%20Tahun%202020.pdf
     - China AQI: https://aqihub.info/indices/china
     - Malaysia API: https://eqms.doe.gov.my/Documents/APIMS/API_Calculation.pdf
     - Vietnam VN_AQI: https://cem.gov.vn/storage/news_file_attach/QD%201459%20TCMT%20ngay%2012.11.2019%20AQI.pdf
@@ -231,26 +231,29 @@ DAQI_INDEX = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  # DAQI 1–10
 
 # ---------------------------------------------------------------------------
 # Ireland AQIH breakpoints (µg/m³ for all species)
-# Reference: https://aqihub.info/indices/ireland
+# Reference: https://www.epa.ie/environment-and-you/air/faqs/
 # ---------------------------------------------------------------------------
-# The Irish AQIH uses the same breakpoints as the UK DAQI, but the SO2 breakpoints are slightly different. The AQIH SO2 breakpoints are:
+# The Irish AQIH breakpoints are similar to the UK DAQI breakpoints except for SO2 and some of the PM2.5, NO2 and O3 breakpoints.
 AQIH_SO2_BP = [0, 30, 60, 90, 120, 150, 180, 237, 296, 355]  # µg/m³
+AQIH_PM25_BP = [0, 12, 24, 36, 42, 47, 54, 59, 65, 71]
+AQIH_O3_BP = [0, 34, 66, 100, 121, 141, 160, 188, 214, 240]  # µg/m³
+AQIH_NO2_BP = [0, 67, 134, 201, 268, 335, 401, 468, 535, 601]  # µg/m³
 
 # ---------------------------------------------------------------------------
-# Israel AQI breakpoints (µg/m³ for all species except CO, which is in mg/m³)
-# Reference: https://aqihub.info/indices/israel
+# Israel AQI breakpoints (µg/m³ for all PM species, ppb for gases)
+# Reference: https://air.sviva.gov.il/Pagesfiles/%D7%94%D7%97%D7%99%D7%A9%D7%95%D7%91%20%D7%A9%D7%9C%20%D7%9E%D7%93%D7%93%20%D7%96%D7%99%D7%94%D7%95%D7%9D%20%D7%94%D7%90%D7%95%D7%95%D7%99%D7%A8%20AQI%20%D7%9C%D7%90%D7%AA%D7%A8%20%D7%94%D7%97%D7%93%D7%A9.pdf
 # ---------------------------------------------------------------------------
 IAQI_PM25_BP = [0, 18.5, 37, 84, 130, 165, 200]
 IAQI_PM10_BP = [0, 65, 129, 215, 300, 355, 430]
-IAQI_O3_BP = [0, 35, 70, 97, 117, 155, 188]  # µg/m³
-IAQI_NO2_BP = [0, 53, 105, 160, 213, 260, 316]  # µg/m³
-IAQI_SO2_BP = [0, 67, 133, 163, 191, 253, 303]  # µg/m³
-IAQI_CO_BP = [0, 26, 51, 78, 104, 130, 156]  # mg/m³
+IAQI_O3_BP = [0, 35, 70, 97, 117, 155, 188]  # ppb
+IAQI_NO2_BP = [0, 53, 105, 160, 213, 260, 316]  # ppb
+IAQI_SO2_BP = [0, 67, 133, 163, 191, 253, 303]  # ppb
+IAQI_CO_BP = [0, 26, 51, 78, 104, 130, 156]  # ppm
 IAQI_INDEX = [0, 50, 100, 200, 300, 400, 500]  # Israel 0–500
 
 # ---------------------------------------------------------------------------
 # Indonesia ISPU breakpoints (µg/m³ for all species)
-# Reference: https://aqihub.info/indices/indonesia
+# Reference: https://peraturan.bpk.go.id/Read/156214/Permen%20LHK%20Nomor%2014%20Tahun%202020.pdf
 # ---------------------------------------------------------------------------
 ISPU_PM25_BP = [0, 15.5, 55.4, 150.4, 250.4, 500]
 ISPU_PM10_BP = [0, 50, 150, 350, 420, 500]
@@ -746,7 +749,7 @@ def compute_aqih(
     no2_ppb: float = float("nan"),
     so2_ppb: float = float("nan"),
 ) -> float:
-    """Compute Ireland AQIH as the maximum sub-index across available pollutants. AQIH uses the same breakpoints as the UK DAQI, but the SO2 breakpoints are slightly different.
+    """Compute Ireland AQIH as the maximum sub-index across available pollutants. AQIH breakpoints are mostly the same as DAQI but the SO2, PM2.5, NO2 and O3 breakpoints are different. The AQIH system is used in Ireland and is based on the DAQI system used in the UK.
 
     For the AQIH system the appropriate averaging periods are applied
     before the breakpoint lookup:
@@ -766,13 +769,13 @@ def compute_aqih(
 
     sub_indices = []
     if not math.isnan(o3_ug):
-        sub_indices.append(_index_from_breakpoints(o3_ug, DAQI_O3_BP, DAQI_INDEX))
+        sub_indices.append(_index_from_breakpoints(o3_ug, AQIH_O3_BP, DAQI_INDEX))
     if not math.isnan(pm25_ug):
-        sub_indices.append(_index_from_breakpoints(pm25_ug, DAQI_PM25_BP, DAQI_INDEX))
+        sub_indices.append(_index_from_breakpoints(pm25_ug, AQIH_PM25_BP, DAQI_INDEX))
     if not math.isnan(pm10_ug):
         sub_indices.append(_index_from_breakpoints(pm10_ug, DAQI_PM10_BP, DAQI_INDEX))
     if not math.isnan(no2_ug):
-        sub_indices.append(_index_from_breakpoints(no2_ug, DAQI_NO2_BP, DAQI_INDEX))
+        sub_indices.append(_index_from_breakpoints(no2_ug, AQIH_NO2_BP, DAQI_INDEX))
     if not math.isnan(so2_ug):
         sub_indices.append(_index_from_breakpoints(so2_ug, AQIH_SO2_BP, DAQI_INDEX))
 
@@ -798,27 +801,22 @@ def compute_iaqi(
     Returns the maximum sub-index across available pollutants.
     """
 
-    # Convert gases from ppb to µg/m³
-    o3_ug = o3_ppb * PPB_O3_TO_UG_M3 if not math.isnan(o3_ppb) else float("nan")
-    no2_ug = no2_ppb * PPB_NO2_TO_UG_M3 if not math.isnan(no2_ppb) else float("nan")
-    so2_ug = so2_ppb * PPB_SO2_TO_UG_M3 if not math.isnan(so2_ppb) else float("nan")
-    co_mg = (
-        (co_ppb * PPB_CO_TO_UG_M3) / 1000 if not math.isnan(co_ppb) else float("nan")
-    )
+    # Convert CO from ppb to ppm
+    co_ppm = co_ppb / 1000 if not math.isnan(co_ppb) else float("nan")
 
     sub_indices = []
     if not math.isnan(pm25_ug):
         sub_indices.append(_aqi_from_breakpoints(pm25_ug, IAQI_PM25_BP, IAQI_INDEX))
     if not math.isnan(pm10_ug):
         sub_indices.append(_aqi_from_breakpoints(pm10_ug, IAQI_PM10_BP, IAQI_INDEX))
-    if not math.isnan(o3_ug):
-        sub_indices.append(_aqi_from_breakpoints(o3_ug, IAQI_O3_BP, IAQI_INDEX))
-    if not math.isnan(no2_ug):
-        sub_indices.append(_aqi_from_breakpoints(no2_ug, IAQI_NO2_BP, IAQI_INDEX))
-    if not math.isnan(so2_ug):
-        sub_indices.append(_aqi_from_breakpoints(so2_ug, IAQI_SO2_BP, IAQI_INDEX))
-    if not math.isnan(co_mg):
-        sub_indices.append(_aqi_from_breakpoints(co_mg, IAQI_CO_BP, IAQI_INDEX))
+    if not math.isnan(o3_ppb):
+        sub_indices.append(_aqi_from_breakpoints(o3_ppb, IAQI_O3_BP, IAQI_INDEX))
+    if not math.isnan(no2_ppb):
+        sub_indices.append(_aqi_from_breakpoints(no2_ppb, IAQI_NO2_BP, IAQI_INDEX))
+    if not math.isnan(so2_ppb):
+        sub_indices.append(_aqi_from_breakpoints(so2_ppb, IAQI_SO2_BP, IAQI_INDEX))
+    if not math.isnan(co_ppm):
+        sub_indices.append(_aqi_from_breakpoints(co_ppm, IAQI_CO_BP, IAQI_INDEX))
 
     valid = [v for v in sub_indices if not math.isnan(v)]
     # Israel AQI is defined as 100 to -400 (100 is best, 400 is worst), so we subtract the maximum sub-index from 100 to get the final AQI value.

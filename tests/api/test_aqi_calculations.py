@@ -89,6 +89,14 @@ from API.data_inputs import prepare_aq_inputs
             0.0,
             id="il-iaqi-inverted-scale",
         ),
+        # Israel AQI (inverted, 100 = clean): O3 70 ppb is the 100 sub-index
+        # breakpoint, so the reported value is 100 - 100 = 0.
+        pytest.param(
+            "il",
+            {"o3_ppb": 70.0},
+            0.0,
+            id="il-iaqi-gases-in-ppb",
+        ),
         # Indonesia ISPU (KLHK P.14/2020): PM2.5 55.4 µg/m³ -> 100.
         pytest.param(
             "id",
