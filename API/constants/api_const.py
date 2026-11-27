@@ -128,13 +128,14 @@ S3_BASE_DELAY = 1
 
 # Temperature thresholds
 TEMPERATURE_UNITS_THRESH = {"c": 0, "f": 32}
-TEMP_THRESHOLD_RAIN_C = 1
+# Rain a model forecasts at or below this 2 m temperature (C) is freezing rain
 TEMP_THRESHOLD_SNOW_C = -1
 # Temperature threshold for WMO code validation - well above freezing to account for observation errors
 TEMP_THRESHOLD_WMO_FROZEN_C = 5.0
 # 2 m wet-bulb temperature at which rain and snow are about equally likely at
-# the surface (Ding et al. 2014; Sims & Liu 2015). Used to type CFS, which has
-# no categorical precipitation type: wet-bulb includes the evaporative cooling
+# the surface (Ding et al. 2014; Sims & Liu 2015). Types precipitation that has
+# no model type (CFS, and untyped hours, minutes and radar echoes; see
+# api_utils.wet_bulb_snow_mask): wet-bulb includes the evaporative cooling
 # that lets snow reach the ground above 0 C in dry air.
 WET_BULB_RAIN_SNOW_THRESHOLD_C = 1.0
 

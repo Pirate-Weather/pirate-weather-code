@@ -332,8 +332,9 @@ interpolated to the requested time.
 - **Elements:** temperature, dew point, humidity, sea-level and station
   pressure, wind speed and bearing, cloud cover, solar radiation, precipitation
   intensity and accumulation, probability and intensity error.
-- **Precipitation type:** CFS has no categorical type; its hours are typed rain,
-  snow or sleet from temperature (`TEMP_THRESHOLD_RAIN_C` / `_SNOW_C`).
+- **Precipitation type:** CFS has no categorical type; its hours are typed rain
+  or snow by 2 m wet bulb (`WET_BULB_RAIN_SNOW_THRESHOLD_C`), the same split as
+  every other untyped hour, minute and radar echo (`wet_bulb_snow_mask`).
 - **Ensemble hand-over:** while all four members of the run exist (about 110
   days from the 00Z run; the store's `ensemble_end` attribute) values are the
   4-member mean, probability and error come from the members, and the daily
