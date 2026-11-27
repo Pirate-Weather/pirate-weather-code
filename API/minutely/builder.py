@@ -1101,7 +1101,8 @@ def _minutely_temp_and_dew(
     gdpsMinuteInterpolation,
 ):
     """2 m temperature and dew point (C) per minute from the first model with a
-    temperature there, to type radar echoes no model forecast.
+    temperature there, to type radar echoes no model forecast, and the
+    flags.sources key of that model per minute ("" where none has one).
 
     The order follows the current-conditions temperature (_get_temp): the
     sub-hourly CAMs, then NBM and DWD MOSMIX, then the global models, so the
@@ -1112,25 +1113,33 @@ def _minutely_temp_and_dew(
     """
     temperature_c = np.full(61, np.nan)
     dewpoint_c = np.full(61, np.nan)
-    for interpolation, model in (
-        (rrfsSubHInterpolation, RRFS_SUBH),
-        (hrrrSubHInterpolation, HRRR_SUBH),
-        (nbmMinuteInterpolation, NBM),
-        (dwd_mosmix_MinuteInterpolation, DWD_MOSMIX),
-        (ecmwfMinuteInterpolation, ECMWF),
-        (gfsMinuteInterpolation, GFS),
-        (gdpsMinuteInterpolation, GDPS),
+    temperature_source = np.full(61, "", dtype=object)
+    for interpolation, model, source in (
+        (rrfsSubHInterpolation, RRFS_SUBH, "rrfssubh"),
+        (hrrrSubHInterpolation, HRRR_SUBH, "hrrrsubh"),
+        (nbmMinuteInterpolation, NBM, "nbm"),
+        (dwd_mosmix_MinuteInterpolation, DWD_MOSMIX, "dwd_mosmix"),
+        (ecmwfMinuteInterpolation, ECMWF, "ecmwf_ifs"),
+        (gfsMinuteInterpolation, GFS, "gfs"),
+        (gdpsMinuteInterpolation, GDPS, "gdps"),
     ):
         if interpolation is None:
             continue
         fill = np.isnan(temperature_c) & np.isfinite(interpolation[:, model["temp"]])
         temperature_c[fill] = interpolation[fill, model["temp"]]
         dewpoint_c[fill] = interpolation[fill, model["dew"]]
-    return temperature_c, dewpoint_c
+        temperature_source[fill] = source
+    return temperature_c, dewpoint_c, temperature_source
 
 
 def _apply_librewxr_intensity(
-    intensity, precipTypes, temperature_c, dewpoint_c, librewxrMinuteInterpolation
+    intensity,
+    precipTypes,
+    temperature_c,
+    dewpoint_c,
+    temperature_source,
+    librewxrMinuteInterpolation,
+    used=None,
 ):
     """
     Replace the model intensity with the LibreWXR radar composite where it has coverage.
@@ -1140,7 +1149,8 @@ def _apply_librewxr_intensity(
     coverage or past the nowcast keep the model value. Where the radar sees an
     echo the models did not type, it is rain or snow by the 2 m wet bulb of
     ``temperature_c`` and ``dewpoint_c`` (_minutely_temp_and_dew), and rain
-    where no model has a temperature.
+    where no model has a temperature. The models whose temperature typed an
+    echo are added to ``used`` (flags.sources), as GFS is for AIGEFS.
 
     Returns:
         Tuple of the updated intensity and precipitation types.
@@ -1152,6 +1162,8 @@ def _apply_librewxr_intensity(
 
     untyped = covered & (precipTypes == PRECIP_TYPES["none"]) & (refc > 0)
     precipTypes[untyped] = _rain_or_snow(temperature_c[untyped], dewpoint_c[untyped])
+    if used is not None:
+        used.update(source for source in temperature_source[untyped] if source)
 
     radar_rate = dbz_to_rate(np.where(covered, refc, 0.0), precipTypes)
     intensity = np.where(covered, radar_rate, intensity)
@@ -1590,7 +1602,7 @@ def build_minutely_block(
     ):
         if used_sources is not None:
             used_sources.add("librewxr")
-        temperature_c, dewpoint_c = _minutely_temp_and_dew(
+        temperature_c, dewpoint_c, temperature_source = _minutely_temp_and_dew(
             rrfsSubHInterpolation,
             hrrrSubHInterpolation,
             nbmMinuteInterpolation,
@@ -1604,7 +1616,9 @@ def build_minutely_block(
             precipTypes,
             temperature_c,
             dewpoint_c,
+            temperature_source,
             librewxrMinuteInterpolation,
+            used=used_sources,
         )
         refc_used = True
     InterPminute[:, DATA_MINUTELY["intensity"]] = intensity
