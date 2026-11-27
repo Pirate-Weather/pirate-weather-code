@@ -239,24 +239,70 @@ def test_librewxr_radar_takes_precedence_inside_coverage():
     assert intensity[31:] == pytest.approx(hrrr_rate)
 
 
-def test_librewxr_echo_without_model_precip_is_typed_rain():
+@pytest.mark.parametrize(
+    ("models", "lat", "lon", "expected", "temperature_source"),
+    [
+        ({"hrrrsubh": (HRRR_SUBH, 10.0, 0.0)}, 40.7, -74.0, "rain", "hrrrsubh"),
+        # A reported case: 1.35 C over a -6 C dew point (wet bulb about -2 C)
+        # with light echoes HRRR did not type was called sleet by the old
+        # +/-1 C air-temperature band.
+        ({"hrrrsubh": (HRRR_SUBH, 0.5, -6.0)}, 40.7, -74.0, "snow", "hrrrsubh"),
+        # Outside HRRR every untyped echo used to be rain, even at -20 C
+        (
+            {"dwd_mosmix": (DWD_MOSMIX, -20.0, -22.0)},
+            59.9,
+            10.75,
+            "snow",
+            "dwd_mosmix",
+        ),
+        # HRRR supplies the (empty) type but no temperature, so GFS types the
+        # echo and must be listed in flags.sources although it supplied
+        # neither the type nor the intensity.
+        (
+            {
+                "hrrrsubh": (HRRR_SUBH, np.nan, np.nan),
+                "gfs": (GFS, -8.0, -10.0),
+            },
+            40.7,
+            -74.0,
+            "snow",
+            "gfs",
+        ),
+    ],
+)
+def test_librewxr_echo_without_model_precip_is_typed_by_wet_bulb(
+    models, lat, lon, expected, temperature_source
+):
     """Radar echoes the models did not forecast must still appear as
-    precipitation, typed from the HRRR sub-hourly temperature; dropping them
-    would hide observed rain from the minutely block and ``currently``.
+    precipitation, typed rain or snow by the 2 m wet bulb of the first model
+    with a temperature at the point, and that model must be reported as a
+    source. Dropping the echoes would hide observed precipitation from the
+    minutely block and ``currently``; typing them by a fixed rule or a
+    near-freezing sleet band shows rain or sleet in dry, sub-freezing air.
     """
-    dry_hrrr = _source_array(HRRR_SUBH, temp=10.0)
-    librewxr = _source_array(LIBREWXR, refc=35.0)
+    model_input = {
+        "hrrrsubh": "hrrr_subh_data",
+        "dwd_mosmix": "dwd_mosmix_data",
+        "gfs": "gfs_data",
+    }
+    inputs = {
+        model_input[source]: _source_array(model, temp=temp, dew=dew)
+        for source, (model, temp, dew) in models.items()
+    }
+    used_sources = set()
 
     minute_items = _build(
-        ["hrrrsubh", "librewxr"],
-        lat=40.7,
-        lon=-74.0,
-        hrrr_subh_data=dry_hrrr,
-        librewxr_data=librewxr,
+        [*models, "librewxr"],
+        lat=lat,
+        lon=lon,
+        librewxr_data=_source_array(LIBREWXR, refc=35.0),
+        used_sources=used_sources,
+        **inputs,
     )[2]
 
-    assert minute_items[0]["precipType"] == "rain"
+    assert minute_items[0]["precipType"] == expected
     assert minute_items[0]["precipIntensity"] > 0
+    assert {"librewxr", temperature_source} <= used_sources
 
 
 def test_librewxr_lightning_without_radar_leaves_the_model_minutely_unchanged():

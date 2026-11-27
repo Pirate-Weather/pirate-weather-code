@@ -22,11 +22,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from API.constants.api_const import (  # noqa: E402
-    PRECIP_TYPES,
-    TEMP_THRESHOLD_RAIN_C,
-    TEMP_THRESHOLD_SNOW_C,
-)
+from API.api_utils import wet_bulb_snow_mask  # noqa: E402
+from API.constants.api_const import PRECIP_TYPES  # noqa: E402
 from API.constants.shared_const import KELVIN_TO_CELSIUS  # noqa: E402
 from API.utils.precip import dbz_to_rate  # noqa: E402
 
@@ -98,12 +95,14 @@ def derive_precip_types(array, x_index: int, y_index: int, dbz_values: np.ndarra
         "CFRZR_surface",
         "CRAIN_surface",
     )
+    # As the API's _process_component_ptype: CICEP (ice pellets) is sleet and
+    # CFRZR (freezing rain) is ice
     type_labels = np.array(
         [
             PRECIP_TYPES["none"],
             PRECIP_TYPES["snow"],
-            PRECIP_TYPES["ice"],
             PRECIP_TYPES["sleet"],
+            PRECIP_TYPES["ice"],
             PRECIP_TYPES["rain"],
         ]
     )
@@ -123,14 +122,14 @@ def derive_precip_types(array, x_index: int, y_index: int, dbz_values: np.ndarra
         read_point_variable(array, "TMP_2maboveground", x_index, y_index)
         - KELVIN_TO_CELSIUS
     )
+    dewpoints_c = (
+        read_point_variable(array, "DPT_2maboveground", x_index, y_index)
+        - KELVIN_TO_CELSIUS
+    )
     precip_types[missing_type] = np.where(
-        temperatures_c[missing_type] >= TEMP_THRESHOLD_RAIN_C,
+        wet_bulb_snow_mask(temperatures_c[missing_type], dewpoints_c[missing_type]),
+        PRECIP_TYPES["snow"],
         PRECIP_TYPES["rain"],
-        np.where(
-            temperatures_c[missing_type] <= TEMP_THRESHOLD_SNOW_C,
-            PRECIP_TYPES["snow"],
-            PRECIP_TYPES["sleet"],
-        ),
     )
     return precip_types
 

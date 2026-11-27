@@ -381,6 +381,30 @@ def wet_bulb_temperature_stull_c(temperature_c, rh_percent):
     return np.minimum(wet_bulb, temperature_c)
 
 
+def wet_bulb_snow_mask(temperature_c, dewpoint_c):
+    """True where precipitation without a model type falls as snow, False for rain.
+
+    The fallback for precipitation a model or the radar gives no type: a single
+    2 m wet-bulb split at WET_BULB_RAIN_SNOW_THRESHOLD_C, as for CFS. Wet bulb
+    includes the evaporative cooling that lets snow reach the ground above 0 C
+    in dry air. There is no sleet or freezing-rain band, because those need a
+    warm layer aloft that surface temperature and dew point cannot show.
+
+    Where the dew point is missing the air is taken as saturated (wet bulb =
+    air temperature), which can only lean towards rain. A missing air
+    temperature gives rain.
+    """
+    temperature_c = np.asarray(temperature_c, dtype=np.float64)
+    dewpoint_c = np.asarray(dewpoint_c, dtype=np.float64)
+    rh_percent = relative_humidity_from_dewpoint_c(temperature_c, dewpoint_c) * 100.0
+    wet_bulb_c = np.where(
+        np.isfinite(dewpoint_c),
+        wet_bulb_temperature_stull_c(temperature_c, rh_percent),
+        temperature_c,
+    )
+    return np.isfinite(wet_bulb_c) & (wet_bulb_c < WET_BULB_RAIN_SNOW_THRESHOLD_C)
+
+
 def estimate_visibility_from_rh_pr(
     rh_percent: np.ndarray,
     pr_mm_hr: np.ndarray | None = None,

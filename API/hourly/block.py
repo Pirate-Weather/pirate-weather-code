@@ -12,6 +12,7 @@ from API.api_utils import (
     _safe_int,
     calculate_apparent_temperature,
     clipLog,
+    wet_bulb_snow_mask,
     zero_small_values,
 )
 from API.constants.api_const import (
@@ -22,7 +23,6 @@ from API.constants.api_const import (
     PRECIP_TYPE_DISPLAY,
     PRECIP_TYPES,
     ROUNDING_RULES,
-    TEMP_THRESHOLD_RAIN_C,
     TEMP_THRESHOLD_SNOW_C,
 )
 from API.constants.aqi_const import compute_aqi_with_lead_in
@@ -501,19 +501,19 @@ def _calculate_derived_metrics(
         InterPhour[:, DATA_HOURLY["wind"]],
     )
 
-    # Apply temperature-based fallback for precipitation type when type is "none" but intensity exists
-    # This handles cases where WMO codes are unmapped or missing
+    # Hours with intensity but no type (unmapped or missing WMO codes, or a
+    # model without a type) are rain or snow by 2 m wet bulb; sleet and freezing
+    # rain are left to the models that forecast them (wet_bulb_snow_mask).
     mask = (InterPhour[:, DATA_HOURLY["type"]] == PRECIP_IDX["none"]) & (
         InterPhour[:, DATA_HOURLY["intensity"]] > 0
     )
-    InterPhour[:, DATA_HOURLY["type"]][mask] = np.where(
-        InterPhour[:, DATA_HOURLY["temp"]][mask] >= TEMP_THRESHOLD_RAIN_C,
-        PRECIP_IDX["rain"],
-        np.where(
-            InterPhour[:, DATA_HOURLY["temp"]][mask] <= TEMP_THRESHOLD_SNOW_C,
-            PRECIP_IDX["snow"],
-            PRECIP_IDX["sleet"],
+    InterPhour[mask, DATA_HOURLY["type"]] = np.where(
+        wet_bulb_snow_mask(
+            InterPhour[mask, DATA_HOURLY["temp"]],
+            InterPhour[mask, DATA_HOURLY["dew"]],
         ),
+        PRECIP_IDX["snow"],
+        PRECIP_IDX["rain"],
     )
 
     # Convert rain to ice (freezing rain) when temperature is at or below -1°C

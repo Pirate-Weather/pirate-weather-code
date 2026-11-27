@@ -10,6 +10,7 @@ from API.api_utils import (
     map_canadian_precip_type_to_ptype,
     map_ensemble_precip_rates_to_ptype,
     map_wmo4677_to_ptype,
+    wet_bulb_snow_mask,
     zero_small_values,
 )
 from API.constants.api_const import (
@@ -17,8 +18,6 @@ from API.constants.api_const import (
     PRECIP_NOISE_THRESHOLD_MMH,
     PRECIP_TYPE_DISPLAY,
     PRECIP_TYPES,
-    TEMP_THRESHOLD_RAIN_C,
-    TEMP_THRESHOLD_SNOW_C,
 )
 from API.constants.forecast_const import DATA_MINUTELY
 from API.constants.model_const import (
@@ -230,6 +229,8 @@ def _interp_nbm(minute_array_grib, nbm_data):
         NBM["freezing_rain"],
         NBM["snow"],
         NBM["ice"],
+        NBM["temp"],
+        NBM["dew"],
     ]:
         nbmMinuteInterpolation[:, i] = np.interp(
             minute_array_grib,
@@ -465,14 +466,15 @@ def _interp_dwd_mosmix(minute_array_grib, dwd_mosmix_data):
         right=MISSING_DATA,
     )
 
-    # Interpolate precipitation accumulation
-    dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]] = np.interp(
-        minute_array_grib,
-        dwd_mosmix_data[:, 0].squeeze(),
-        dwd_mosmix_data[:, DWD_MOSMIX["temp"]],
-        left=MISSING_DATA,
-        right=MISSING_DATA,
-    )
+    # Temperature and dew point, for the wet-bulb type of untyped precipitation
+    for i in [DWD_MOSMIX["temp"], DWD_MOSMIX["dew"]]:
+        dwd_mosmix_MinuteInterpolation[:, i] = np.interp(
+            minute_array_grib,
+            dwd_mosmix_data[:, 0].squeeze(),
+            dwd_mosmix_data[:, i],
+            left=MISSING_DATA,
+            right=MISSING_DATA,
+        )
 
     # Use nearest neighbor for precipitation type (categorical data)
     dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["ptype"]] = fast_nearest_interp(
@@ -709,25 +711,20 @@ def _process_aigefs_ptype_with_temperature(
 ):
     """Fallback precipitation type for AIGEFS using GFS/AIGFS temperatures."""
     # AIGEFS does not expose explicit precip-type channels. When AI ensemble
-    # precipitation is present, classify as snow/rain/sleet using temperature.
+    # precipitation is present, classify as rain or snow by GFS 2 m wet bulb.
     if gfsMinuteInterpolation is None:
         return
-    temp = gfsMinuteInterpolation[:, GFS["temp"]]
+    snow = wet_bulb_snow_mask(
+        gfsMinuteInterpolation[:, GFS["temp"]], gfsMinuteInterpolation[:, GFS["dew"]]
+    )
     precip_mask = (
         np.nan_to_num(aigefsMinuteInterpolation[:, GEFS["accum"]], nan=0.0) > 0
     )
     precip_mask |= (
         np.nan_to_num(aigefsMinuteInterpolation[:, GEFS["prob"]], nan=0.0) > 0
     )
-    InterTminute[:, PRECIP_IDX["snow"]] = (
-        precip_mask & (temp <= TEMP_THRESHOLD_SNOW_C)
-    ).astype(int)
-    InterTminute[:, PRECIP_IDX["rain"]] = (
-        precip_mask & (temp >= TEMP_THRESHOLD_RAIN_C)
-    ).astype(int)
-    InterTminute[:, PRECIP_IDX["sleet"]] = (
-        precip_mask & (temp > TEMP_THRESHOLD_SNOW_C) & (temp < TEMP_THRESHOLD_RAIN_C)
-    ).astype(int)
+    InterTminute[:, PRECIP_IDX["snow"]] = (precip_mask & snow).astype(int)
+    InterTminute[:, PRECIP_IDX["rain"]] = (precip_mask & ~snow).astype(int)
 
 
 def _era5_minutely_intensity(era5_MinuteInterpolation):
@@ -993,17 +990,11 @@ def _calculate_intensity(
     if rrfsSubHInterpolation is not None and not np.all(
         np.isnan(rrfsSubHInterpolation[:, RRFS_SUBH["refc"]])
     ):
-        temp_arr = rrfsSubHInterpolation[:, RRFS_SUBH["temp"]]
         refc_arr = rrfsSubHInterpolation[:, RRFS_SUBH["refc"]]
         mask = (precipTypes == PRECIP_TYPES["none"]) & (refc_arr > 0)
-        precipTypes[mask] = np.where(
-            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
-            PRECIP_TYPES["rain"],
-            np.where(
-                temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C,
-                PRECIP_TYPES["snow"],
-                PRECIP_TYPES["sleet"],
-            ),
+        precipTypes[mask] = _rain_or_snow(
+            rrfsSubHInterpolation[mask, RRFS_SUBH["temp"]],
+            rrfsSubHInterpolation[mask, RRFS_SUBH["dew"]],
         )
         intensity = dbz_to_rate(refc_arr, precipTypes)
         refc_used = True
@@ -1030,17 +1021,11 @@ def _calculate_intensity(
 
     if "hrrrsubh" in source_list and hrrrSubHInterpolation is not None:
         used.add("hrrrsubh")
-        temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
         refc_arr = hrrrSubHInterpolation[:, HRRR_SUBH["refc"]]
         mask = (precipTypes == PRECIP_TYPES["none"]) & (refc_arr > 0)
-        precipTypes[mask] = np.where(
-            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
-            PRECIP_TYPES["rain"],
-            np.where(
-                temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C,
-                PRECIP_TYPES["snow"],
-                PRECIP_TYPES["sleet"],
-            ),
+        precipTypes[mask] = _rain_or_snow(
+            hrrrSubHInterpolation[mask, HRRR_SUBH["temp"]],
+            hrrrSubHInterpolation[mask, HRRR_SUBH["dew"]],
         )
         intensity = dbz_to_rate(refc_arr, precipTypes)
         refc_used = True
@@ -1053,16 +1038,10 @@ def _calculate_intensity(
         intensity = np.nan_to_num(
             dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["accum"]]
         )
-        temp_arr = dwd_mosmix_MinuteInterpolation[:, DWD_MOSMIX["temp"]]
         mask = (precipTypes == PRECIP_TYPES["none"]) & (intensity > 0)
-        precipTypes[mask] = np.where(
-            temp_arr[mask] >= TEMP_THRESHOLD_RAIN_C,
-            PRECIP_TYPES["rain"],
-            np.where(
-                temp_arr[mask] <= TEMP_THRESHOLD_SNOW_C,
-                PRECIP_TYPES["snow"],
-                PRECIP_TYPES["sleet"],
-            ),
+        precipTypes[mask] = _rain_or_snow(
+            dwd_mosmix_MinuteInterpolation[mask, DWD_MOSMIX["temp"]],
+            dwd_mosmix_MinuteInterpolation[mask, DWD_MOSMIX["dew"]],
         )
     elif "ecmwf_ifs" in source_list and ecmwfMinuteInterpolation is not None:
         used.add("ecmwf_ifs")
@@ -1103,8 +1082,64 @@ def _calculate_intensity(
     return intensity, precipTypes, refc_used
 
 
+def _rain_or_snow(temperature_c, dewpoint_c):
+    """PRECIP_TYPES rain or snow for untyped precipitation, by 2 m wet bulb."""
+    return np.where(
+        wet_bulb_snow_mask(temperature_c, dewpoint_c),
+        PRECIP_TYPES["snow"],
+        PRECIP_TYPES["rain"],
+    )
+
+
+def _minutely_temp_and_dew(
+    rrfsSubHInterpolation,
+    hrrrSubHInterpolation,
+    nbmMinuteInterpolation,
+    dwd_mosmix_MinuteInterpolation,
+    ecmwfMinuteInterpolation,
+    gfsMinuteInterpolation,
+    gdpsMinuteInterpolation,
+):
+    """2 m temperature and dew point (C) per minute from the first model with a
+    temperature there, to type radar echoes no model forecast, and the
+    flags.sources key of that model per minute ("" where none has one).
+
+    The order follows the current-conditions temperature (_get_temp): the
+    sub-hourly CAMs, then NBM and DWD MOSMIX, then the global models, so the
+    radar is typed by the same kind of temperature ``currently`` shows. URMA and
+    RTMA-RU are analyses of the current hour only and are not passed to the
+    minutely block. Everything here is already interpolated, so this adds no
+    reads.
+    """
+    temperature_c = np.full(61, np.nan)
+    dewpoint_c = np.full(61, np.nan)
+    temperature_source = np.full(61, "", dtype=object)
+    for interpolation, model, source in (
+        (rrfsSubHInterpolation, RRFS_SUBH, "rrfssubh"),
+        (hrrrSubHInterpolation, HRRR_SUBH, "hrrrsubh"),
+        (nbmMinuteInterpolation, NBM, "nbm"),
+        (dwd_mosmix_MinuteInterpolation, DWD_MOSMIX, "dwd_mosmix"),
+        (ecmwfMinuteInterpolation, ECMWF, "ecmwf_ifs"),
+        (gfsMinuteInterpolation, GFS, "gfs"),
+        (gdpsMinuteInterpolation, GDPS, "gdps"),
+    ):
+        if interpolation is None:
+            continue
+        fill = np.isnan(temperature_c) & np.isfinite(interpolation[:, model["temp"]])
+        temperature_c[fill] = interpolation[fill, model["temp"]]
+        dewpoint_c[fill] = interpolation[fill, model["dew"]]
+        temperature_source[fill] = source
+    return temperature_c, dewpoint_c, temperature_source
+
+
 def _apply_librewxr_intensity(
-    intensity, precipTypes, hrrrSubHInterpolation, librewxrMinuteInterpolation
+    intensity,
+    precipTypes,
+    temperature_c,
+    dewpoint_c,
+    temperature_source,
+    librewxrMinuteInterpolation,
+    used=None,
 ):
     """
     Replace the model intensity with the LibreWXR radar composite where it has coverage.
@@ -1112,9 +1147,10 @@ def _apply_librewxr_intensity(
     Observed and extrapolated radar beats any model over the next hour, so every
     minute with a finite reflectivity takes the radar rate; minutes outside radar
     coverage or past the nowcast keep the model value. Where the radar sees an
-    echo the models did not type, the type comes from the HRRR sub-hourly
-    temperature when available (the same thresholds as the HRRR path) and is
-    rain otherwise.
+    echo the models did not type, it is rain or snow by the 2 m wet bulb of
+    ``temperature_c`` and ``dewpoint_c`` (_minutely_temp_and_dew), and rain
+    where no model has a temperature. The models whose temperature typed an
+    echo are added to ``used`` (flags.sources), as GFS is for AIGEFS.
 
     Returns:
         Tuple of the updated intensity and precipitation types.
@@ -1125,20 +1161,9 @@ def _apply_librewxr_intensity(
         return intensity, precipTypes
 
     untyped = covered & (precipTypes == PRECIP_TYPES["none"]) & (refc > 0)
-    if hrrrSubHInterpolation is not None:
-        temp_arr = hrrrSubHInterpolation[:, HRRR_SUBH["temp"]]
-        untyped &= np.isfinite(temp_arr)
-        precipTypes[untyped] = np.where(
-            temp_arr[untyped] >= TEMP_THRESHOLD_RAIN_C,
-            PRECIP_TYPES["rain"],
-            np.where(
-                temp_arr[untyped] <= TEMP_THRESHOLD_SNOW_C,
-                PRECIP_TYPES["snow"],
-                PRECIP_TYPES["sleet"],
-            ),
-        )
-    else:
-        precipTypes[untyped] = PRECIP_TYPES["rain"]
+    precipTypes[untyped] = _rain_or_snow(temperature_c[untyped], dewpoint_c[untyped])
+    if used is not None:
+        used.update(source for source in temperature_source[untyped] if source)
 
     radar_rate = dbz_to_rate(np.where(covered, refc, 0.0), precipTypes)
     intensity = np.where(covered, radar_rate, intensity)
@@ -1577,13 +1602,23 @@ def build_minutely_block(
     ):
         if used_sources is not None:
             used_sources.add("librewxr")
+        temperature_c, dewpoint_c, temperature_source = _minutely_temp_and_dew(
+            rrfsSubHInterpolation,
+            hrrrSubHInterpolation,
+            nbmMinuteInterpolation,
+            dwd_mosmix_MinuteInterpolation,
+            ecmwfMinuteInterpolation,
+            gfsMinuteInterpolation,
+            gdpsMinuteInterpolation,
+        )
         intensity, precipTypes = _apply_librewxr_intensity(
             intensity,
             precipTypes,
-            rrfsSubHInterpolation
-            if rrfsSubHInterpolation is not None
-            else hrrrSubHInterpolation,
+            temperature_c,
+            dewpoint_c,
+            temperature_source,
             librewxrMinuteInterpolation,
+            used=used_sources,
         )
         refc_used = True
     InterPminute[:, DATA_MINUTELY["intensity"]] = intensity
